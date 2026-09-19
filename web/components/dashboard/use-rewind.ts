@@ -29,6 +29,8 @@ export type Rewind = {
   online: boolean;
   now: number;
   error: string;
+  arrivals: Recording[];
+  dismissArrival: (id: string) => void;
   ask: (question: string) => Promise<Answer>;
   addRule: (instruction: string) => Promise<void>;
   removeRule: (id: string) => Promise<void>;
@@ -50,7 +52,9 @@ export function useRewind(): Rewind {
   const [alerts, setAlerts] = useState<Alert[]>(demoAlerts);
   const [error, setError] = useState('');
   const [now, setNow] = useState(0);
+  const [arrivals, setArrivals] = useState<Recording[]>([]);
   const live = useRef(false);
+  const seen = useRef<Set<string> | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -65,6 +69,14 @@ export function useRewind(): Rewind {
       setNow(Date.now() / 1000);
       setStatus(s);
       setRecords(r);
+      // Anything the phone sent since the last poll drops into the page.
+      if (seen.current) {
+        const known = seen.current;
+        const fresh = r.filter((x) => !known.has(x.id) && x.kind === 'frame');
+        if (fresh.length)
+          setArrivals((prev) => [...prev, ...fresh.slice(0, 3)].slice(-4));
+      }
+      seen.current = new Set(r.map((x) => x.id));
       setAnswers(a);
       setRules(ru);
       setAlerts(al);
@@ -80,7 +92,7 @@ export function useRewind(): Rewind {
   useEffect(() => {
     // oxlint-disable-next-line react/react-compiler -- synchronize with the external recording server
     void reload();
-    const t = setInterval(reload, 5000);
+    const t = setInterval(reload, 2500);
     return () => clearInterval(t);
   }, [reload]);
 
@@ -175,8 +187,15 @@ export function useRewind(): Rewind {
     setStatus((s) => ({ ...s, failed: 0, pending: s.pending + s.failed }));
   }, [run]);
 
+  const dismissArrival = useCallback(
+    (id: string) => setArrivals((prev) => prev.filter((a) => a.id !== id)),
+    [],
+  );
+
   const online = now > 0 && status.devices.some((d) => now - d.last_seen < 30);
   return {
+    arrivals,
+    dismissArrival,
     connection,
     status,
     records,

@@ -6,6 +6,7 @@ import type { Recording } from '@/lib/api';
 import '@/app/dashboard.css';
 import { useRewind } from './use-rewind';
 import { AskCard } from './ask-card';
+import { Arrivals } from './arrivals';
 import { hm } from './primitives';
 import {
   ActivityCard,
@@ -50,6 +51,7 @@ export function Dashboard() {
   const [mode, setMode] = useState<Mode>('rose');
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<Recording | null>(null);
+  const [arriving, setArriving] = useState<string | null>(null);
   const [clock, setClock] = useState('');
   const [mounted, setMounted] = useState(false);
   const gridKey = `${mode}-${filter}`;
@@ -155,6 +157,7 @@ export function Dashboard() {
           records={rw.records}
           zone={zone}
           onOpen={setOpen}
+          arriving={arriving}
         />,
       ],
       [
@@ -195,7 +198,7 @@ export function Dashboard() {
         <DataCard key="data" index={14} status={rw.status} />,
       ],
     ],
-    [rw, zone],
+    [rw, zone, arriving],
   );
 
   return (
@@ -330,6 +333,7 @@ export function Dashboard() {
               records={rw.records}
               zone={zone}
               onOpen={setOpen}
+              arriving={arriving}
             />
             <MedsCard index={9} />
             <WeatherCard index={10} />
@@ -344,6 +348,12 @@ export function Dashboard() {
           </div>
         )}
       </main>
+
+      <Arrivals
+        items={rw.arrivals}
+        onDone={rw.dismissArrival}
+        onArriving={setArriving}
+      />
 
       {open && (
         <dialog className="lightbox" open aria-label="Recording">

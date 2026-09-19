@@ -488,23 +488,27 @@ export function MomentsCard({
   zone,
   index,
   onOpen,
+  arriving,
 }: {
   records: Recording[];
   zone?: string;
   index: number;
   onOpen: (r: Recording) => void;
+  arriving?: string | null;
 }) {
   const frames = records
     .filter((r) => r.kind === 'frame' && r.media_url)
     .slice(0, 4);
   return (
     <Cell label="Moments" link index={index}>
-      <Card>
+      <Card data-card="moments">
         <div className="board">
           {frames.map((r) => (
             <button
               type="button"
               key={r.id}
+              data-frame={r.id}
+              className={r.id === arriving ? 'is-arriving' : ''}
               onClick={() => onOpen(r)}
               aria-label={r.summary || 'Open moment'}
             >

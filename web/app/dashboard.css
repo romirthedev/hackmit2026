@@ -420,3 +420,21 @@ html.rw-light body { background: #fbfbfb; }
   .rw *, .rw *::before, .rw *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   .rw .cell { opacity: 1; transform: none; }
 }
+
+/* Letter hand-off (phone <-> dashboard) ------------------------------- */
+.rw .letter-layer { position: fixed; inset: 0; z-index: 95; pointer-events: none; }
+.rw .letter-backdrop { position: absolute; inset: 0; background: rgba(251,251,251,0.45); -webkit-backdrop-filter: blur(7px) saturate(90%); backdrop-filter: blur(7px) saturate(90%); }
+.rw .letter-group { position: absolute; left: 0; top: 0; width: 128px; height: 86px; }
+.rw .letter-env { position: absolute; inset: 0; }
+.rw .cloud { position: absolute; filter: drop-shadow(0 10px 18px rgba(60,80,120,0.16)) drop-shadow(0 1px 1px rgba(0,0,0,0.04)); }
+.rw .env { position: absolute; left: 0; top: 0; perspective: 600px; }
+.rw .env-body, .rw .env-pocket, .rw .env-flap { position: absolute; inset: 0; }
+.rw .env-body { border-radius: 8px; background: linear-gradient(180deg, #fffaf3 0%, #f6ecdd 100%); box-shadow: 0 0 0 1px rgba(120,90,50,0.12), 0 18px 32px -16px rgba(90,60,20,0.4); }
+.rw .env-clip { position: absolute; left: 0; right: 0; overflow: hidden; border-radius: 0 0 8px 8px; z-index: 2; }
+.rw .env-inner { position: absolute; object-fit: cover; border-radius: 6px; background: #eee; box-shadow: 0 0 0 2px #fff, 0 6px 14px -6px rgba(0,0,0,0.35); }
+.rw .env-pocket { border-radius: 0 0 8px 8px; background: linear-gradient(180deg, #f7ebd9 0%, #eddcc2 100%); clip-path: polygon(0 24%, 50% 66%, 100% 24%, 100% 100%, 0 100%); z-index: 3; }
+.rw .env-pocket::before { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, rgba(255,255,255,0.4), transparent 55%), linear-gradient(180deg, rgba(120,90,50,0.08), transparent 30%); }
+.rw .env-flap { transform-origin: 50% 0; transform-style: preserve-3d; backface-visibility: visible; background: linear-gradient(180deg, #f1e2ca 0%, #e8d4b5 100%); clip-path: polygon(0 0, 100% 0, 50% 68%); box-shadow: inset 0 -1px 0 rgba(120,90,50,0.12); z-index: 4; }
+.rw .env-seal { position: absolute; left: 50%; top: 68%; width: 16px; height: 16px; margin: -13px 0 0 -8px; border-radius: 50%; background: conic-gradient(from 200deg, #6f8cff, #b48cff, #ff9ac2, #ffd08a, #6f8cff); box-shadow: 0 1px 2px rgba(0,0,0,0.18), inset 0 0 0 2px rgba(255,255,255,0.55); }
+.rw .letter-photo { position: absolute; left: 0; top: 0; object-fit: cover; background: #eee; box-shadow: 0 0 0 2px #fff, 0 12px 28px -10px rgba(0,0,0,0.4); z-index: 6; }
+.rw .is-arriving img { opacity: 0; }

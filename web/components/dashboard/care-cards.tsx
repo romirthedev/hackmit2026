@@ -509,21 +509,28 @@ export function LatestCard({
   zone,
   index,
   onOpen,
+  arriving,
 }: {
   records: Recording[];
   zone?: string;
   index: number;
   onOpen: (r: Recording) => void;
+  arriving?: string | null;
 }) {
   const frames = records.filter((r) => r.kind === 'frame' && r.media_url);
   const [sel, setSel] = useState(0);
   const cur = frames[sel];
   return (
     <Cell label="Latest capture" link index={index}>
-      <Card className="card-photo">
+      <Card className="card-photo" data-card="moments">
         {cur ? (
           <>
-            <button type="button" className="photo" onClick={() => onOpen(cur)}>
+            <button
+              type="button"
+              className={`photo ${cur.id === arriving ? 'is-arriving' : ''}`}
+              data-frame={cur.id}
+              onClick={() => onOpen(cur)}
+            >
               <img src={cur.media_url} alt={cur.summary || 'Latest frame'} />
             </button>
             <div className="photo-foot">

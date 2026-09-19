@@ -10,7 +10,9 @@ export type CaptureState = {
   startedAt: number;
   finalizing: boolean;
   originalBytes: number;
+  previewing: boolean;
 };
+export type Snapshot = { url: string; width: number; height: number };
 type Chunk = {
   id: string;
   boot: string;
@@ -140,8 +142,10 @@ export class PhoneCapture {
     startedAt: 0,
     finalizing: false,
     originalBytes: 0,
+    previewing: false,
   };
   private stream: MediaStream | null = null;
+  private previewStream: MediaStream | null = null;
   private wake: WakeLockSentinel | null = null;
   private audio: MediaRecorder | null = null;
   private original: MediaRecorder | null = null;
@@ -213,6 +217,7 @@ export class PhoneCapture {
   async start() {
     if (this.state.recording || this.state.requesting || this.state.finalizing)
       return;
+    this.stopPreview();
     this.update({ requesting: true, error: '' });
     try {
       await this.ready;
@@ -316,7 +321,7 @@ export class PhoneCapture {
   private releaseStream() {
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
-    this.video.srcObject = null;
+    if (!this.state.previewing) this.video.srcObject = null;
     this.releaseCaptureLease?.();
     this.releaseCaptureLease = null;
   }
@@ -455,6 +460,80 @@ export class PhoneCapture {
       });
       throw error;
     }
+  }
+  // Camera-only preview for Scan. Nothing is saved until snap() runs, and the
+  // full-recording path above is untouched.
+  async preview() {
+    if (this.state.recording || this.state.previewing || this.state.requesting)
+      return;
+    this.update({ requesting: true, error: '' });
+    try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
+        throw new Error('Open the secure HTTPS phone link to use the camera.');
+      this.previewStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+      if (this.disposed || this.state.recording) {
+        this.previewStream.getTracks().forEach((t) => t.stop());
+        this.previewStream = null;
+        return;
+      }
+      this.video.srcObject = this.previewStream;
+      await this.video.play();
+      this.update({ previewing: true });
+    } catch (error) {
+      this.stopPreview();
+      this.update({
+        error:
+          error instanceof Error ? error.message : 'Unable to open the camera.',
+      });
+    } finally {
+      this.update({ requesting: false });
+    }
+  }
+  stopPreview() {
+    this.previewStream?.getTracks().forEach((t) => t.stop());
+    this.previewStream = null;
+    if (!this.state.recording) this.video.srcObject = null;
+    if (this.state.previewing) this.update({ previewing: false });
+  }
+  // One frame from whichever stream is live, queued through the same
+  // persisted upload path as continuous recording.
+  async snap(): Promise<Snapshot | null> {
+    if (!this.state.recording && !this.state.previewing) return null;
+    if (this.video.readyState < 2 || !this.video.videoWidth) return null;
+    const canvas = document.createElement('canvas');
+    const scale = Math.min(
+      1,
+      960 / Math.max(this.video.videoWidth, this.video.videoHeight),
+    );
+    canvas.width = Math.max(1, Math.round(this.video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(this.video.videoHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    context.drawImage(this.video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.86),
+    );
+    if (!blob) return null;
+    this.send(blob);
+    return {
+      url: URL.createObjectURL(blob),
+      width: canvas.width,
+      height: canvas.height,
+    };
+  }
+  // Queue an already-encoded JPEG as a scanned frame.
+  send(blob: Blob) {
+    if (!this.boot) this.boot = crypto.randomUUID();
+    this.enqueue('frame', blob, Date.now() / 1000, 'memory', {
+      boot: this.boot,
+      seq: this.seq.frame++,
+    });
   }
   toggleQuestion() {
     if (!this.state.recording) return;
@@ -711,6 +790,7 @@ export class PhoneCapture {
     this.speechGeneration++;
     this.speechQueue = [];
     this.stop('page_closed');
+    this.stopPreview();
     clearInterval(this.uploadTimer);
     document.removeEventListener('visibilitychange', this.visibility);
     window.removeEventListener('pagehide', this.pagehide);
