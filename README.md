@@ -33,6 +33,7 @@ additional capture input.
 | AI processing | One durable job per frame/audio clip; local Ollama vision and reasoning; faster-whisper transcription; optional OpenAI provider |
 | Recall | Full-text, optional text and OpenCLIP pixel retrieval, time filters, temporal anchors, original evidence, validated citations, evidence-only fallback |
 | Dashboard | Timeline replay, searchable recordings, original audio/image viewer, typed and spoken questions, answer playback, monitoring rules, alerts, device and storage health, deletion and metadata export |
+| Home dashboard (`/`) | Light card grid with a wearer view (Rose) and a caretaker view. Polls `/api/status`, `/recordings`, `/answers`, `/rules`, `/alerts`; asks, rules, alert acknowledgement and capture pause call the same API. Falls back to labelled demo data when the server is unreachable or the browser is signed out. The original workspace lives at `/workspace`. |
 | 3D | Separate, pinned LingBot-Map integration for a bounded static scan; point-cloud viewer and approximate observation markers |
 | Deployment | Native startup, Dockerfile/Compose, systemd template, optional Caddy HTTPS, provisioning, doctor, benchmark, video importer, continuous desktop microphone recorder |
 | Optional Elastic | Durable retrying event-index mirror. Core search and storage remain local SQLite; Elastic is not required and is not the current retrieval path. |
