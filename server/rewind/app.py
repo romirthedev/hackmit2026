@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import os
 import re
@@ -24,12 +25,20 @@ from .config import Settings
 from .db import Database, event_public
 from .memory import Memory
 from .models import AskRequest, RuleRequest
+from .pairing import BrowserPairing
 from .providers import Provider
 from .worker import Worker
 
 
 class Login(BaseModel):
     token: str
+    remember: bool = False
+
+
+class PairBrowser(BaseModel):
+    code: str = Field(default="", max_length=20)
+    ticket: str = Field(default="", max_length=100)
+    remember: bool = True
 
 
 class Pause(BaseModel):
@@ -56,11 +65,47 @@ def create_app(settings=None, provider=None):
     memory = Memory(db, p, s)
     worker = Worker(db, p, memory, s)
     ingestion_lock = asyncio.Lock()
+    pairing = BrowserPairing(db, s.admin_token)
 
     # Signed stateless session, with expiration; admin API key is never put in a cookie.
-    def session_token():
-        value = f"{int(time.time() + 86400)}.{secrets.token_hex(16)}"
+    def session_token(seconds):
+        value = f"{int(time.time() + seconds)}.{secrets.token_hex(16)}"
         return value + "." + hmac.new(s.admin_token.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+    def set_session(response, remember):
+        seconds = (30 if remember else 1) * 86400
+        response.set_cookie(
+            "rewind_session",
+            session_token(seconds),
+            httponly=True,
+            secure=s.cookie_secure,
+            samesite="strict",
+            max_age=seconds,
+            path="/",
+        )
+
+    def same_origin(req):
+        origin = req.headers.get("origin")
+        if origin and (
+            urlsplit(origin).netloc != req.headers.get("host") or urlsplit(origin).scheme != req.url.scheme
+        ):
+            raise HTTPException(403, "Cross-origin writes rejected")
+        if req.headers.get("sec-fetch-site") == "cross-site":
+            raise HTTPException(403, "Cross-origin writes rejected")
+
+    def local_test_connection(req):
+        if any(
+            name in req.headers
+            for name in ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto")
+        ):
+            return False
+        try:
+            local_peer = bool(req.client and ipaddress.ip_address(req.client.host).is_loopback)
+            hostname = req.url.hostname
+            local_host = hostname == "localhost" or ipaddress.ip_address(hostname or "").is_loopback
+            return local_peer and local_host
+        except ValueError:
+            return False
 
     def valid_session(token):
         try:
@@ -79,9 +124,7 @@ def create_app(settings=None, provider=None):
         if not valid_session(req.cookies.get("rewind_session")):
             raise HTTPException(401, "Workspace access key required")
         if req.method not in ("GET", "HEAD"):
-            origin = req.headers.get("origin")
-            if origin and urlsplit(origin).netloc != req.headers.get("host"):
-                raise HTTPException(403, "Cross-origin writes rejected")
+            same_origin(req)
 
     async def device(req: Request):
         bearer = req.headers.get("authorization", "").removeprefix("Bearer ")
@@ -136,19 +179,29 @@ def create_app(settings=None, provider=None):
         return {"status": "ok", "version": "0.1.0"}
 
     @app.post("/api/login")
-    async def login(body: Login, response: Response):
+    async def login(body: Login, response: Response, req: Request):
+        same_origin(req)
         if not hmac.compare_digest(body.token, s.admin_token):
             await asyncio.sleep(0.5)
             raise HTTPException(401, "Invalid workspace access key")
-        response.set_cookie(
-            "rewind_session",
-            session_token(),
-            httponly=True,
-            secure=s.cookie_secure,
-            samesite="strict",
-            max_age=86400,
-            path="/",
+        set_session(response, body.remember)
+        return {"ok": True}
+
+    @app.post("/api/pairing", dependencies=[Depends(admin)])
+    async def create_pairing():
+        return pairing.create()
+
+    @app.post("/api/pair")
+    async def pair_browser(body: PairBrowser, req: Request, response: Response):
+        same_origin(req)
+        code = re.sub(r"[\s-]", "", body.code)
+        pairing.redeem(
+            code=code,
+            ticket=body.ticket,
+            peer=req.client.host if req.client else "unknown",
+            test_code=s.test_login_code if local_test_connection(req) else "",
         )
+        set_session(response, body.remember)
         return {"ok": True}
 
     @app.post("/api/logout", dependencies=[Depends(admin)])

@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import Login from '@/components/login';
 import { Brand } from '@/components/brand';
+import { BrowserPairing } from '@/components/browser-pairing';
 import { MemoryCommand } from '@/components/memory-command';
 import { MemoryComposer } from '@/components/memory-composer';
 import { MemoryLibrary } from '@/components/memory-library';
@@ -167,6 +168,11 @@ export default function Home() {
   }, []);
   useEffect(() => {
     if (auth === false) return;
+    if (window.location.hash.startsWith('#connect=')) {
+      // oxlint-disable-next-line react/react-compiler -- Route an explicit invitation through sign-in.
+      setAuth(false);
+      return;
+    }
     // oxlint-disable-next-line react/react-compiler -- Synchronize state with the external recording server.
     void load();
     const t = setInterval(load, 5000);
@@ -1109,6 +1115,7 @@ export default function Home() {
             </TabsContent>
             <TabsContent value="system">
               <div className="system-grid">
+                <BrowserPairing />
                 <section className="card">
                   <h2>Necklace connection</h2>
                   {status?.devices.length ? (

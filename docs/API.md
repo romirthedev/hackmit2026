@@ -7,7 +7,16 @@ Authorization: Bearer <REWIND_DEVICE_TOKEN>
 X-Device-ID: necklace-01
 ```
 
-Workspace endpoints require the distinct `REWIND_ADMIN_TOKEN` as a Bearer token, or a session from `POST /api/login` with JSON `{ "token": "..." }`. Browser requests use the same origin; do not put credentials in query strings. There is no public recording endpoint.
+Workspace endpoints require the distinct `REWIND_ADMIN_TOKEN` as a Bearer token, or an authenticated browser session. Normal browser sign-in uses a single-use invitation; `POST /api/login` with JSON `{ "token": "...", "remember": true }` remains an advanced fallback. Browser requests use the same origin; do not put credentials in query strings. There is no public recording endpoint.
+
+### Browser pairing
+
+- `POST /api/pairing` requires existing workspace authentication and returns `{code, ticket, expires_at}`. A new invitation invalidates the previous invitation. The code has eight digits and is displayed with a hyphen. Both code and ticket expire after 10 minutes.
+- `POST /api/pair` accepts `{code, remember}` or `{ticket, remember}`. It atomically consumes the invitation and sets the same signed HttpOnly, SameSite=Strict cookie used by normal login. `remember` defaults to true for pairing: 30 days instead of 24 hours. `REWIND_COOKIE_SECURE` still governs HTTPS-only cookies.
+- Links use `/#connect=TICKET`. The frontend removes the fragment from browser history before exchanging the ticket in a JSON POST. Codes and tickets are stored only as keyed hashes, expire, and cannot be reused. Rate limits allow at most 10 attempts per peer and 50 total per minute, persisted across server restarts.
+- `python scripts/open_workspace.py` uses the server checkout's configuration to create an invitation and open the link automatically. `--no-browser` prints only the code and server address. This never prints the long-lived admin key.
+- Logout clears this browser's cookie. As with the original signed-session design, it does not revoke a stolen cookie elsewhere; rotating the admin token and restarting invalidates all sessions and outstanding invitations.
+- Optional `REWIND_TEST_LOGIN_CODE` accepts a reusable eight-digit code through the same `/api/pair` route, still subject to rate limiting. It defaults to empty. It is accepted only for loopback peers with localhost/loopback Host and no forwarding headers. The frontend development server binds only to loopback so it cannot expose that local path as a LAN proxy. Normal one-time pairing still supports LAN clients.
 
 ## Upload original bytes
 

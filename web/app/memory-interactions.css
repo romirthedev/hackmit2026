@@ -1,4 +1,110 @@
 /* Original REWIND adaptations. Reference notes are in docs/UI-REFERENCES.md. */
+.login-eyebrow {
+  display: block;
+  color: #625a9b;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  margin: 1.25rem 0 0.5rem;
+}
+.pairing-login .pairing-code-input {
+  text-align: center;
+  font-size: 1.75rem;
+  letter-spacing: 0.24em;
+  font-variant-numeric: tabular-nums;
+  padding: 1rem 0.5rem;
+  background: #fafaff;
+  border-color: #dcd8f4;
+}
+.pairing-login .pairing-code-input::placeholder {
+  color: #a5a2ba;
+}
+.remember-browser {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1rem 0 0;
+  font-size: 0.875rem;
+  color: #687085;
+  font-weight: 400;
+  cursor: pointer;
+}
+.remember-browser input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #5148df;
+  flex-shrink: 0;
+  margin: 0;
+}
+.pairing-help {
+  padding: 1rem;
+  margin-top: 1.25rem;
+  border-radius: 0.75rem;
+  background: #f7f7fc;
+  border: 1px solid #eae8f5;
+  color: #687085;
+  font-size: 0.875rem;
+}
+.pairing-help strong {
+  font-weight: 550;
+  color: #41465a;
+}
+.pairing-help p {
+  margin: 0.375rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+.pairing-login .key-help {
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.pairing-login .setup-command {
+  display: block;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background: #f3f4f8;
+  line-height: 1.6;
+}
+.advanced-login form {
+  margin-top: 1rem;
+}
+.browser-pairing-card .section-icon {
+  margin-bottom: 0.75rem;
+}
+.browser-pairing-card > .meta {
+  margin-top: 1rem;
+  line-height: 1.7;
+}
+.pairing-invitation {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: 1.25rem 0;
+  padding: 1.5rem 1rem;
+  border: 1px solid #dfdbf7;
+  background: #faf9ff;
+  border-radius: 0.875rem;
+  text-align: center;
+}
+.pairing-invitation > strong {
+  font-size: clamp(1.75rem, 3vw, 2.375rem);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+  color: #5148df;
+}
+.pairing-invitation > button {
+  margin-top: 0.5rem;
+}
+.pairing-invitation.expired {
+  background: #f7f8fb;
+  border-color: var(--border);
+}
+.pairing-invitation.expired > strong {
+  color: #9499ab;
+}
 .sidebar > .brand {
   margin-bottom: 1.75rem;
 }

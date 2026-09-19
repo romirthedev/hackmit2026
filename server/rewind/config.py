@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     elastic_url: str = ""
     elastic_api_key: str = ""
     cookie_secure: bool = False
+    # Optional reusable code for local development; never enabled in the shared defaults.
+    test_login_code: str = Field(default="", pattern=r"^(?:[0-9]{8})?$")
     max_upload_bytes: int = 20 * 1024 * 1024
 
     def validate_secrets(self):

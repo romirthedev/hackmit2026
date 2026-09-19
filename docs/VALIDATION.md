@@ -4,7 +4,7 @@ Date: 2026-09-19. Development host: macOS ARM64, Python 3.12. Server tests injec
 
 | Check | Result |
 |---|---|
-| Backend suite | 22 tests passed |
+| Backend suite | 29 tests passed, including browser invitations and optional local test-code boundaries |
 | Python lint | `ruff check server scripts` passed |
 | Python source compilation | Passed |
 | Dashboard type checking | TypeScript `--noEmit` passed |
@@ -23,5 +23,9 @@ The tests exercise auth separation, original storage, idempotent retries/conflic
 Not yet verified: physical FORIOT pinout, camera focus, battery lifetime, Wi-Fi/SD endurance, actual INMP441 wiring/audio quality, real model accuracy or latency, ASUS GPU/PyTorch/Ollama setup, LingBot GPU inference, Docker execution, or browser visual/interaction QA. Browser QA was not requested; the dashboard was type-checked, built, and its server responses checked.
 
 Interface review covered stale-search cancellation, empty/error states, keyboard handlers, original-recording selection across polling, bounded thumbnail rendering, microphone permission/unmount cleanup, and reduced-motion paths. External component sites were inspected with computer use. This does not constitute browser interaction or visual QA of REWIND itself.
+
+Browser authentication tests cover protected invitation creation, code/link single-use behavior, concurrent redemption, expiration and replacement, hashed storage, remembered-cookie duration, CSRF rejection, per-peer and global rate limits, persisted counters, and the reusable test code's opt-in/loopback restrictions. Device-token scope remains separate.
+
+Live HTTP checks also verified reusable test-code sign-in/logout on both port 8000 and the development proxy, 30-day cookie duration, and the rebuilt production assets. The launcher created a real invitation and its ticket successfully authenticated; OS browser opening was stubbed during that check. Browser UI interaction testing remains unperformed.
 
 Known prototype limits are documented in README and architecture/hardware guides. In particular, no promise of perfect recall, perpetual capture, complete speaker identification, or real-time 30 fps reasoning is made.

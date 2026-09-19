@@ -5,7 +5,7 @@ export default defineConfig({
   css: { postcss: { plugins: [tailwindcss()] } },
   plugins: [vinext()],
   server: {
-    host: '0.0.0.0',
+    host: '127.0.0.1',
     proxy: {
       '/api': {
         target: process.env.REWIND_API_URL || 'http://127.0.0.1:8000',

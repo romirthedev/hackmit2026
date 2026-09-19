@@ -220,7 +220,19 @@ source .venv/bin/activate
 curl -fsS http://127.0.0.1:8000/api/health
 ```
 
-Expected response: `{"status":"ok","version":"0.1.0"}`. This is API liveness, not AI readiness. Open [http://localhost:8000](http://localhost:8000) **on the ASUS** and sign in using its `.env` → `REWIND_ADMIN_TOKEN` value. Do not use the device token.
+Expected response: `{"status":"ok","version":"0.1.0"}`. This is API liveness, not AI readiness. With the server running, open your workspace without copying a key:
+
+```bash
+python scripts/open_workspace.py
+```
+
+This opens a **single-use sign-in link** in the ASUS browser and prints an **eight-digit pairing code** for another browser. On a Mac running REWIND, double-click **Open REWIND.command** for the same flow. The launcher reads the existing private server configuration automatically. The server must already be running; this command does not install models or start the API.
+
+Invitations expire after 10 minutes. Generating a new invitation replaces the previous one, and using either its link or code consumes both. Sign-in links remember the browser for 30 days; code sign-in offers a checkbox for 30 days (unchecked: 24 hours). **Sign out** clears the current browser's cookie. The access key remains available under **Advanced: use an access key** for recovery and scripts.
+
+To print a code without opening the ASUS browser, use `python scripts/open_workspace.py --no-browser`. An already connected browser can also create an invitation under **Device & storage → Connect another browser**. A copied link uses that browser's current server address: `localhost` links work on that same computer; on another computer, open the ASUS LAN URL or your SSH tunnel and enter the code instead.
+
+**Optional local test code:** set `REWIND_TEST_LOGIN_CODE=00000000` in the private `.env` and restart the API to accept **0000 0000** repeatedly in the pairing-code field. This is an admin sign-in for local testing, not a single-use invitation. It requires a loopback client and a localhost/loopback Host, rejects forwarding headers, and still uses the attempt limit. The development frontend also binds only to loopback. The shared `.env.example` leaves this setting empty; leave it empty on deployed servers. Remove the value and restart to disable the test code. Existing browser sessions remain valid until logout/expiry or admin-key rotation.
 
 Use **Import recording** to upload one real JPEG. Wait for its analysis, open the original evidence, and check that the description matches the image. While it is processing, run `ollama ps` to inspect whether the model is using the GPU. This is the first end-to-end inference check; an empty but working dashboard is not sufficient.
 
@@ -236,7 +248,7 @@ If SSH is available, run this **on the Mac** and leave it running:
 ssh -N -L 8001:127.0.0.1:8000 YOUR_ASUS_USER@ASUS_LAN_IP
 ```
 
-Then open [http://localhost:8001](http://localhost:8001) on the Mac. This forwards the ASUS dashboard while allowing browser microphone access through localhost. Log in using the **ASUS** admin key; allow browser/OS microphone permission. The necklace still uses `http://ASUS_LAN_IP:8000`, not the tunnel address.
+Then open [http://localhost:8001](http://localhost:8001) on the Mac. This forwards the ASUS dashboard while allowing browser microphone access through localhost. Enter a pairing code generated **on the ASUS** or from an already connected ASUS workspace browser. No ASUS admin key needs to be copied to the Mac just for browser sign-in. Allow browser/OS microphone permission. The necklace still uses `http://ASUS_LAN_IP:8000`, not the tunnel address.
 
 From a different LAN computer, `curl -fsS http://ASUS_LAN_IP:8000/api/health` must succeed before trying camera uploads. If it fails, check client isolation, the selected IP, server binding and the ASUS firewall. If UFW is already active, allow **TCP 8000 from the actual trusted LAN subnet**, for example:
 
@@ -458,7 +470,7 @@ For a clean shutdown: pause connected wearable capture; stop the continuous/brow
 | Doctor passes but no useful recall | Doctor is reachability only. Upload real evidence, wait for successful analysis, check transcript/description and date filters, then inspect the cited original. |
 | Dashboard unavailable / blank at root | Build `web/dist/client` before starting/restarting API. Run from the project root and check the terminal for startup errors. |
 | Port 8000 already in use | Stop the older REWIND process intentionally or use a different port consistently in server URL, firewall, browser and firmware. Don't start parallel instances against the same data directory. |
-| Login fails / immediately returns to login | Use the ASUS admin token, not Mac/device key; keep one browser origin; `COOKIE_SECURE=true` requires HTTPS. Sessions expire after 24 hours. |
+| Login fails / immediately returns to login | Use the newest unused pairing code from the correct server; codes expire after 10 minutes. After too many attempts, wait one minute. Keep one browser origin; `COOKIE_SECURE=true` requires HTTPS. Sessions last 30 days when remembered, otherwise 24 hours. Advanced recovery uses the ASUS admin token, not the device key. |
 | Browser microphone/import fails over LAN HTTP | Use ASUS `localhost:8000`, the client SSH tunnel `localhost:8001`, or trusted HTTPS. Grant microphone permission in both browser and OS. |
 | Continuous microphone is silent / busy | List devices; choose the correct ALSA/AVFoundation input; check OS permission and other programs holding exclusive access; play original audio before debugging transcription. |
 | INMP441 breaks boot or produces silence | Check 3.3 V, common GND, L/R low, correct `esp32cam_mic` image, GPIO12 not pulled high, and programmer TX disconnected from GPIO3. Fall back to computer audio for the demo. |

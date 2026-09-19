@@ -6,6 +6,7 @@ import wave
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 from rewind.app import create_app
@@ -163,6 +164,142 @@ def test_login_csrf_and_logout(context):
     )
     assert c.post("/api/logout").status_code == 200
     assert c.get("/api/status").status_code == 401
+
+
+@pytest.mark.parametrize("credential", ["code", "ticket"])
+def test_browser_pairing_single_use_and_private_session(context, credential):
+    c, app, _ = context
+    assert c.post("/api/pairing").status_code == 401
+    assert c.post("/api/pairing", headers=headers()).status_code == 401
+    invitation = c.post("/api/pairing", headers=admin()).json()
+    stored = repr(app.state.db.all("SELECT * FROM browser_pairings"))
+    assert invitation["ticket"] not in stored
+    assert invitation["code"].replace("-", "") not in stored
+    assert c.get("/api/status").status_code == 401
+    r = c.post("/api/pair", json={credential: invitation[credential], "remember": True})
+    assert r.status_code == 200
+    cookie = r.headers["set-cookie"]
+    assert "HttpOnly" in cookie and "SameSite=strict" in cookie
+    assert "Max-Age=2592000" in cookie and ADMIN not in cookie
+    assert c.get("/api/status").status_code == 200
+    assert c.post("/api/device/heartbeat", json={"boot": "x"}).status_code == 401
+    # Redeeming either credential consumes both forms of the invitation.
+    assert c.post("/api/pair", json={"code": invitation["code"]}).status_code == 401
+    assert c.post("/api/pair", json={"ticket": invitation["ticket"]}).status_code == 401
+    c.post("/api/logout")
+    assert c.get("/api/status").status_code == 401
+
+
+def test_pairing_expiry_replacement_and_csrf(context):
+    c, app, _ = context
+    old = c.post("/api/pairing", headers=admin()).json()
+    fresh = c.post("/api/pairing", headers=admin()).json()
+    assert c.post("/api/pair", json={"code": old["code"]}).status_code == 401
+    assert c.post("/api/pair", json={"ticket": old["ticket"]}).status_code == 401
+    assert (
+        c.post("/api/pair", json={"code": fresh["code"]}, headers={"Origin": "https://evil.test"}).status_code
+        == 403
+    )
+    assert (
+        c.post(
+            "/api/pair", json={"code": fresh["code"]}, headers={"Sec-Fetch-Site": "cross-site"}
+        ).status_code
+        == 403
+    )
+    assert c.get("/api/status").status_code == 401
+    app.state.db.execute("UPDATE browser_pairings SET expires_at=?", (time.time() - 1,))
+    assert c.post("/api/pair", json={"ticket": fresh["ticket"]}).status_code == 401
+    newest = c.post("/api/pairing", headers=admin()).json()
+    r = c.post("/api/pair", json={"code": newest["code"].replace("-", " "), "remember": False})
+    assert r.status_code == 200 and "Max-Age=86400" in r.headers["set-cookie"]
+    assert c.post("/api/pairing", headers={"Origin": "https://evil.test"}).status_code == 403
+    assert (
+        c.post(
+            "/api/capture/pause", json={"paused": True}, headers={"Origin": "https://evil.test"}
+        ).status_code
+        == 403
+    )
+
+
+def test_pairing_attempt_limits_persist_and_recover(context):
+    c, app, _ = context
+    invitation = c.post("/api/pairing", headers=admin()).json()
+    for _ in range(10):
+        assert c.post("/api/pair", json={"code": "wrong"}).status_code == 401
+    # Forwarded headers do not let a browser reset the application-level peer bucket.
+    assert (
+        c.post(
+            "/api/pair", json={"code": invitation["code"]}, headers={"X-Forwarded-For": "192.0.2.5"}
+        ).status_code
+        == 429
+    )
+    from rewind.pairing import BrowserPairing
+
+    restarted = BrowserPairing(app.state.db, ADMIN)
+    with pytest.raises(HTTPException) as exc:
+        restarted.redeem(code=invitation["code"].replace("-", ""), ticket="", peer="testclient")
+    assert exc.value.status_code == 429
+    app.state.db.execute("UPDATE pairing_attempts SET started_at=?", (time.time() - 61,))
+    assert c.post("/api/pair", json={"code": invitation["code"]}).status_code == 200
+
+
+def test_pairing_atomic_redemption(context):
+    from concurrent.futures import ThreadPoolExecutor
+
+    c, _, _ = context
+    invitation = c.post("/api/pairing", headers=admin()).json()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                lambda _: c.post("/api/pair", json={"ticket": invitation["ticket"]}).status_code, range(2)
+            )
+        )
+    assert sorted(results) == [200, 401]
+
+
+def test_reusable_test_code_is_opt_in_and_loopback_only(context):
+    _, app, _ = context
+    with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 12345)) as local:
+        assert local.post("/api/pair", json={"code": "0000 0000"}).status_code == 401
+        app.state.settings.test_login_code = "00000000"
+        for _ in range(2):
+            assert local.post("/api/pair", json={"code": "0000 0000"}).status_code == 200
+            assert local.get("/api/status").status_code == 200
+            local.post("/api/logout")
+            assert local.get("/api/status").status_code == 401
+        assert (
+            local.post("/api/pair", json={"code": "00000000"}, headers={"Host": "rewind.example"}).status_code
+            == 401
+        )
+        assert (
+            local.post(
+                "/api/pair", json={"code": "00000000"}, headers={"X-Forwarded-For": "192.0.2.8"}
+            ).status_code
+            == 401
+        )
+        assert (
+            local.post(
+                "/api/pair", json={"code": "00000000"}, headers={"Origin": "https://localhost"}
+            ).status_code
+            == 403
+        )
+    with TestClient(app, base_url="http://localhost", client=("192.0.2.8", 12345)) as remote:
+        assert remote.post("/api/pair", json={"code": "00000000"}).status_code == 401
+
+
+def test_pairing_global_attempt_limit(context):
+    from rewind.pairing import BrowserPairing
+
+    _, app, _ = context
+    pairing = BrowserPairing(app.state.db, ADMIN)
+    invitation = pairing.create()
+    for i in range(50):
+        with pytest.raises(HTTPException) as exc:
+            pairing.redeem(code="wrong", ticket="", peer=f"peer-{i}")
+        assert exc.value.status_code == 401
+    with pytest.raises(HTTPException) as exc:
+        pairing.redeem(code=invitation["code"].replace("-", ""), ticket="", peer="new-peer")
+    assert exc.value.status_code == 429
 
 
 def test_idempotence_and_conflict(context):
