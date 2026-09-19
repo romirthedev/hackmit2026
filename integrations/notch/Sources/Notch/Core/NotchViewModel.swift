@@ -175,7 +175,10 @@ final class NotchViewModel: ObservableObject {
     /// pending, this is a SOFT takeover: only stage-side tasks are stopped —
     /// no invoker.cancel(), no queue clearing — so everything in flight
     /// keeps going underneath. Otherwise it's the full interrupt.
+    private var remoteRequestID: String?
+
     private func prepareStageForCapture() {
+        remoteRequestID = nil
         if hasBackgroundWork || presentationActive {
             generation += 1
             presentationActive = false
@@ -282,6 +285,29 @@ final class NotchViewModel: ObservableObject {
         }
     }
 
+    /// REWIND phone requests never silently interrupt unrelated work, and retries
+    /// of the same accepted request do not repeat a computer action.
+    func rewindCommand(_ text: String, id: String) -> Bool {
+        if remoteRequestID == id { return transcript == text }
+        guard !hasBackgroundWork, !captureActive, !presentationActive,
+              state == .idle || state == .error else { return false }
+        remoteCommand(text)
+        remoteRequestID = id
+        return true
+    }
+
+    func rewindCancel(id: String) -> Bool {
+        guard remoteRequestID == id else { return false }
+        cancel()
+        return true
+    }
+
+    func resolveRemotePermission(id: String, allow: Bool) -> Bool {
+        guard let ask = pendingPermission, ask.id.uuidString.lowercased() == id.lowercased() else { return false }
+        finishPermission(id: ask.id, allow: allow)
+        return true
+    }
+
     /// Everything the phone UI renders.
     func remoteStateSnapshot() -> RemoteControlServer.StateSnapshot {
         let stateName: String
@@ -303,7 +329,11 @@ final class NotchViewModel: ObservableObject {
             contextApp: contextAppName,
             actionSucceeded: actionSucceeded,
             learnedSkill: learnedSkillName,
-            outputFile: outputFile
+            outputFile: outputFile,
+            requestID: remoteRequestID,
+            pendingPermission: pendingPermission.map { ["id": $0.id.uuidString, "tool": $0.tool, "detail": $0.detail] },
+            accessibilityGranted: ScreenContextProvider.isTrusted(promptIfNeeded: false),
+            screenRecordingGranted: CGPreflightScreenCaptureAccess()
         )
     }
 
@@ -965,6 +995,7 @@ final class NotchViewModel: ObservableObject {
 
     func proactiveAnnounce(display: String, spoken: String, isSuccess: Bool) {
         guard state == .idle else { return }
+        remoteRequestID = nil
         interruptEverything()
         transcript = ""
         steps = []

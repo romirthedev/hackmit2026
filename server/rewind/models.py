@@ -18,9 +18,18 @@ class Observation(BaseModel):
     confidence: float = Field(default=0.5, ge=0, le=1)
 
 
+class CompactObservation(BaseModel):
+    summary: str = Field(max_length=650)
+    tags: list[str] = Field(max_length=6)
+
+
 class RecallAnswer(BaseModel):
-    answer: str = Field(max_length=8000, description="Plain-language answer to the user's question, not a source ID")
-    evidence_ids: list[str] = Field(max_length=20, description="Source labels such as E1 or E2 supporting the answer")
+    answer: str = Field(
+        max_length=8000, description="Plain-language answer to the user's question, not a source ID"
+    )
+    evidence_ids: list[str] = Field(
+        max_length=20, description="Source labels such as E1 or E2 supporting the answer"
+    )
     insufficient_evidence: bool = Field(description="True when the recordings do not establish the answer")
 
 
@@ -43,6 +52,7 @@ class AskRequest(BaseModel):
 
 class VideoProvenance(BaseModel):
     """Importer metadata, never inferred from the content by a language model."""
+
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_offset: float = Field(ge=-3600, le=1e9, allow_inf_nan=False)
     source_pts: int

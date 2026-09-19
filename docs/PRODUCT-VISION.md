@@ -42,6 +42,17 @@ is an optional additional input.
   does not establish that an event never happened.
 - Use the 128 GB ASUS over Tailscale for stronger vision models. Measure real
   parallel labeling throughput and question latency before choosing concurrency.
+- Target Qwen3.5 35B-A3B for live ASUS vision and recall; retain originals and
+  measure capture-to-answer delay, queue growth, and source accuracy under load.
+- Run original-evidence review through this Mac's signed-in Codex: GPT-6 Astra
+  checks the proposed answer; GPT-5.6 Sol adjudicates disagreements against the
+  same sources. Drafts remain visibly unverified and are not automatically spoken.
+  Agreement is evidence review, not a guarantee of truth. Missing evidence means
+  abstention. Never claim a job ran in the active desktop chat when it ran in a
+  separate ephemeral Codex session.
+- Give the paired phone a computer-command mode using the actual Notch agent,
+  with progress, cancellation, and its existing permission decisions. Captured
+  audio, frame text, emails and memories must not silently become commands.
 
 ## Acceptance scenarios
 

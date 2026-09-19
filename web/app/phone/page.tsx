@@ -14,6 +14,7 @@ import {
 import Login from '@/components/login';
 import { api, type Answer, type Status } from '@/lib/api';
 import { PhoneCapture, type CaptureState } from '@/lib/phone-capture';
+import { ComputerPanel } from '@/components/computer-panel';
 import { ContextPanel } from '@/components/context-panel';
 import './phone.css';
 import Link from 'next/link';
@@ -47,7 +48,7 @@ export default function Phone() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
-  const [view, setView] = useState<'record' | 'context'>('record');
+  const [view, setView] = useState<'record' | 'context' | 'computer'>('record');
   const [sound, setSound] = useState(false);
   const soundRef = useRef(false);
   useEffect(() => {
@@ -84,12 +85,15 @@ export default function Phone() {
         if (
           !first &&
           recent[0] &&
+          recent[0].mode !== 'checking' &&
           !announced.current.has(recent[0].id) &&
           soundRef.current &&
           !capture.current?.state.question
         )
           capture.current?.speak(recent[0].answer);
-        recent.forEach((answer) => announced.current.add(answer.id));
+        recent
+          .filter((answer) => answer.mode !== 'checking')
+          .forEach((answer) => announced.current.add(answer.id));
         first = false;
       } catch (problem) {
         if (alive && /access key|401/.test(String(problem))) setAuth(false);
@@ -128,8 +132,10 @@ export default function Phone() {
         ...previous.filter((old) => old.id !== answer.id),
       ]);
       setQuestion('');
-      if (sound) capture.current?.speak(answer.answer);
-      announced.current.add(answer.id);
+      if (answer.mode !== 'checking') {
+        if (sound) capture.current?.speak(answer.answer);
+        announced.current.add(answer.id);
+      }
     } catch (problem) {
       setError(String(problem));
     } finally {
@@ -173,6 +179,12 @@ export default function Phone() {
           onClick={() => setView('context')}
         >
           Your connections
+        </button>
+        <button
+          className={view === 'computer' ? 'selected' : ''}
+          onClick={() => setView('computer')}
+        >
+          Your computer
         </button>
       </nav>
       <section className="phone-record-view" hidden={view !== 'record'}>
@@ -272,9 +284,11 @@ export default function Phone() {
         </div>
         <p className="phone-fine">
           Captures one frame each second and short audio clips.{' '}
-          {status?.pending
-            ? `${status.pending} recordings are being analyzed.`
-            : 'Ask about what has been recorded and your connected sources.'}
+          {status?.analysis_ready === false
+            ? 'Analysis is waiting for the ASUS model. Your recordings remain saved.'
+            : status?.pending
+              ? `${status.pending} recordings are being analyzed.`
+              : 'Ask about what has been recorded and your connected sources.'}
         </p>
         {(state.error || error) && (
           <p className="phone-error" role="alert">
@@ -317,20 +331,39 @@ export default function Phone() {
           {answers.slice(0, 3).map((answer) => (
             <article className="phone-answer" key={answer.id}>
               <h3>{answer.question}</h3>
+              {answer.mode === 'checking' && (
+                <strong>Draft · checking the original evidence…</strong>
+              )}
               <p>{answer.answer.replace(/\[[0-9a-f-]{36}\]/g, '')}</p>
               <div>
                 <small>
-                  {answer.grounded
-                    ? `${answer.evidence.length} sources cited`
-                    : 'Evidence incomplete'}
+                  {answer.mode === 'checking'
+                    ? 'Waiting for Codex review'
+                    : answer.mode === 'verified'
+                      ? 'Checked against sources by ' +
+                        (answer.verification?.receipt.reviews
+                          ?.map((r) => r.model)
+                          .join(' → ') || 'Codex')
+                      : answer.grounded
+                        ? `${answer.evidence.length} sources cited`
+                        : 'Evidence incomplete'}
                 </small>
                 <button
                   aria-label="Read answer aloud"
+                  disabled={answer.mode === 'checking'}
                   onClick={() => capture.current?.speak(answer.answer)}
                 >
                   <Volume2 size={18} />
                 </button>
               </div>
+              {answer.verification?.receipt.reviews?.map((review) => (
+                <details key={review.model}>
+                  <summary>
+                    {review.model} · {review.seconds.toFixed(1)}s
+                  </summary>
+                  <p>{review.result.reason}</p>
+                </details>
+              ))}
               {answer.evidence.map((source) => (
                 <details key={source.id}>
                   <summary>
@@ -356,6 +389,9 @@ export default function Phone() {
       </section>
       <section hidden={view !== 'context'}>
         <ContextPanel />
+      </section>
+      <section hidden={view !== 'computer'}>
+        <ComputerPanel visible={view === 'computer'} />
       </section>
       <footer className="phone-footer">
         Your moments. Your people. All connected.

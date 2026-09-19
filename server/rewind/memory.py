@@ -25,10 +25,11 @@ def terms(query):
 
 
 class Memory:
-    def __init__(self, db, provider, settings, visual=None, context=None):
+    def __init__(self, db, provider, settings, visual=None, context=None, verifier=None):
         self.db, self.provider, self.s = db, provider, settings
         self.visual = visual
         self.context = context
+        self.verifier = verifier
 
     async def search(self, query, after=None, before=None, limit=20):
         after = after if after is not None else 0
@@ -141,6 +142,23 @@ Do not invent dates or anchor actions. Return JSON.""",
         except Exception:
             log.info("Query planner unavailable; using literal search")
         evidence = await self.search(query, after, before, 18)
+        # Questions can inspect freshly received originals before background labels
+        # finish. This is especially important when capture is ahead of indexing.
+        fresh = [
+            event_public(row)
+            for row in self.db.all(
+                EVIDENCE_SELECT
+                + " WHERE m.kind='frame' AND m.captured_at BETWEEN ? AND ? ORDER BY m.captured_at DESC LIMIT 3",
+                (max(after or 0, time.time() - 30), before if before is not None else time.time() + 5),
+            )
+        ]
+        if fresh:
+            live_question = re.search(
+                r"\b(now|currently|this|doing|looking at|in front of)\b", question, re.I
+            )
+            evidence = (
+                fresh + evidence if live_question or not evidence else evidence[:3] + fresh + evidence[3:]
+            )
         neighbors = []
         for hit in evidence[:3]:
             # Scope context to one recording stream, not unrelated simultaneous uploads.
@@ -170,6 +188,7 @@ Do not invent dates or anchor actions. Return JSON.""",
         digital_sources = [r for r in evidence if r.get("source") == "notch"]
         unique = {r["id"]: r for r in evidence}
         mode, grounded = "model", False
+        review_packet = None
         if not evidence:
             answer = "I could not find recorded evidence for that question. Try another description or a wider time range. This does not mean the event did not happen."
             mode = "no_evidence"
@@ -281,6 +300,21 @@ If evidence cannot establish the answer, explicitly say so and set insufficient_
                             f"[{aliases[label]}]" for label in dict.fromkeys(response.evidence_ids)
                         )
                     grounded = not response.insufficient_evidence and not plan_error
+                    if self.verifier and grounded:
+                        review_packet = {
+                            "question": question,
+                            "candidate": response.model_dump(),
+                            "evidence": context,
+                            "aliases": aliases,
+                            "attached_images_in_order": attached_ids,
+                            "images": [str(path.resolve()) for path in image_paths],
+                            "public_evidence": evidence,
+                            "digital_sources": [
+                                self.db.one("SELECT * FROM context_documents WHERE id=?", (r["id"],))
+                                for r in digital_sources
+                            ],
+                        }
+                        grounded, mode = False, "checking"
                     evidence = [r for r in evidence if r["id"] in {aliases[label] for label in cited}]
             except Exception:
                 mode = "evidence_only"
@@ -299,6 +333,7 @@ If evidence cannot establish the answer, explicitly say so and set insufficient_
             answer = "Your connected sources changed while I was answering. Please ask again using the updated context."
             evidence = [r for r in evidence if r["id"] not in changed_context]
             grounded, mode = False, "context_changed"
+            review_packet = None
         record = {
             "id": str(uuid.uuid4()),
             "question": question,
@@ -308,17 +343,22 @@ If evidence cannot establish the answer, explicitly say so and set insufficient_
             "grounded": grounded,
             "mode": mode,
         }
-        self.db.execute(
-            "INSERT INTO answers(id,question,answer,evidence,created_at,source_media,grounded,mode) VALUES(?,?,?,?,?,?,?,?)",
-            (
-                record["id"],
-                question,
-                answer,
-                json.dumps(evidence),
-                record["created_at"],
-                source_media,
-                int(grounded),
-                mode,
-            ),
-        )
+        with self.db.connect() as connection:
+            connection.execute(
+                "INSERT INTO answers(id,question,answer,evidence,created_at,source_media,grounded,mode) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    record["id"],
+                    question,
+                    answer,
+                    json.dumps(evidence),
+                    record["created_at"],
+                    source_media,
+                    int(grounded),
+                    mode,
+                ),
+            )
+            if review_packet:
+                self.verifier.enqueue(record["id"], review_packet, connection=connection)
+        if self.verifier:
+            record["verification"] = self.verifier.public(record["id"])
         return record

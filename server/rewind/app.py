@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
+from .computer import Computer, ComputerCancel, ComputerCommand, ComputerPermission
 from .config import Settings
 from .context import ContextScopes, NotchContext
 from .db import Database, event_public
@@ -28,6 +29,7 @@ from .memory import Memory
 from .models import AskRequest, RuleRequest, VideoProvenance
 from .pairing import BrowserPairing
 from .providers import Provider
+from .verification import Verifier
 from .visual import VisualIndex
 from .worker import Worker
 
@@ -66,8 +68,12 @@ def create_app(settings=None, provider=None):
     p = provider or Provider(s)
     visual = VisualIndex(db, s)
     context = NotchContext(db, s)
-    memory = Memory(db, p, s, visual=visual if s.visual_embeddings else None, context=context)
+    verifier = Verifier(db, s) if s.codex_verify else None
+    memory = Memory(
+        db, p, s, visual=visual if s.visual_embeddings else None, context=context, verifier=verifier
+    )
     worker = Worker(db, p, memory, s)
+    computer = Computer(db, s)
     ingestion_lock = asyncio.Lock()
     pairing = BrowserPairing(db, s.admin_token)
 
@@ -148,10 +154,13 @@ def create_app(settings=None, provider=None):
     @asynccontextmanager
     async def lifespan(app):
         tasks = [asyncio.create_task(worker.run()) for _ in range(s.workers)]
+        if verifier:
+            tasks.extend(asyncio.create_task(verifier.run()) for _ in range(s.codex_verify_workers))
         if s.visual_embeddings and s.workers:
             tasks.append(asyncio.create_task(visual.run()))
         tasks.append(asyncio.create_task(worker.elastic_sync()))
         tasks.append(asyncio.create_task(context.run()))
+        tasks.append(asyncio.create_task(computer.monitor()))
         try:
             yield
         finally:
@@ -159,6 +168,7 @@ def create_app(settings=None, provider=None):
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await p.close()
+            await computer.http.aclose()
 
     app = FastAPI(
         title="REWIND Memory",
@@ -172,6 +182,24 @@ def create_app(settings=None, provider=None):
     app.state.settings = s
     app.state.visual = visual
     app.state.context = context
+    app.state.verifier = verifier
+    app.state.computer = computer
+
+    @app.get("/api/computer/state", dependencies=[Depends(admin)])
+    async def computer_state():
+        return await computer.state()
+
+    @app.post("/api/computer/command", dependencies=[Depends(admin)])
+    async def computer_command(body: ComputerCommand):
+        return await computer.command(body)
+
+    @app.post("/api/computer/cancel", dependencies=[Depends(admin)])
+    async def computer_cancel(body: ComputerCancel):
+        return await computer.call("rewind-cancel", {"id": str(body.id)})
+
+    @app.post("/api/computer/permission", dependencies=[Depends(admin)])
+    async def computer_permission(body: ComputerPermission):
+        return await computer.call("permission-decision", {"id": str(body.id), "allow": body.allow})
 
     @app.middleware("http")
     async def headers(request, call_next):
@@ -227,6 +255,9 @@ def create_app(settings=None, provider=None):
             MAX(captured_at) AS last_capture FROM media""")
         totals["devices"] = [{**d, "state": json.loads(d["state"])} for d in db.all("SELECT * FROM devices")]
         totals["provider"] = s.provider
+        totals["processing_host"] = "ASUS via Tailscale" if s.processing_url else "server"
+        totals["analysis_ready"] = await p.ready() if s.processing_url else True
+        totals["verification_enabled"] = s.codex_verify
         totals["model"] = s.openai_model if s.provider == "openai" else s.vision_model
         totals["recall_model"] = (
             s.openai_model if s.provider == "openai" else s.ollama_recall_model or s.vision_model
@@ -289,6 +320,28 @@ def create_app(settings=None, provider=None):
 
     @app.get("/api/provider", dependencies=[Depends(admin)])
     async def provider_status():
+        if s.processing_url:
+            try:
+                r = await p.http.get(
+                    s.processing_url.rstrip("/") + "/health",
+                    headers={"Authorization": "Bearer " + s.processing_token},
+                    timeout=5,
+                )
+                r.raise_for_status()
+                return {
+                    "reachable": bool(r.json().get("ready")),
+                    "host": "ASUS via Tailscale",
+                    "models": [r.json()["model"]],
+                    "required": [s.vision_model],
+                    "verification": s.codex_verify,
+                }
+            except Exception:
+                return {
+                    "reachable": False,
+                    "host": "ASUS via Tailscale",
+                    "models": [],
+                    "required": [s.vision_model],
+                }
         if s.provider == "ollama":
             try:
                 r = await p.http.get(s.ollama_url + "/api/tags", timeout=5)
@@ -538,7 +591,11 @@ def create_app(settings=None, provider=None):
     @app.get("/api/answers", dependencies=[Depends(admin)])
     async def answers():
         return [
-            {**r, "evidence": json.loads(r["evidence"])}
+            {
+                **r,
+                "evidence": json.loads(r["evidence"]),
+                "verification": verifier.public(r["id"]) if verifier else None,
+            }
             for r in db.all("SELECT * FROM answers ORDER BY created_at DESC LIMIT 30")
         ]
 

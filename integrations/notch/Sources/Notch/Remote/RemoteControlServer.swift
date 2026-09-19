@@ -27,6 +27,10 @@ final class RemoteControlServer {
         var actionSucceeded: Bool
         var learnedSkill: String?
         var outputFile: String?
+        var requestID: String? = nil
+        var pendingPermission: [String: String]? = nil
+        var accessibilityGranted: Bool = false
+        var screenRecordingGranted: Bool = false
     }
 
     /// Decides a permission ask from the MCP shim: (toolName, detail) →
@@ -34,6 +38,9 @@ final class RemoteControlServer {
     /// PermissionStore rules + the panel's Allow/Deny card.
     var permissionDecider: (@Sendable (String, String) async -> (allow: Bool, message: String?))?
 
+    var onRewindCommand: (@MainActor (String, String) -> Bool)?
+    var onRewindCancel: (@MainActor (String) -> Bool)?
+    var onPermissionDecision: (@MainActor (String, Bool) -> Bool)?
     var onCommand: (@MainActor (String) -> Void)?
     var onCancel: (@MainActor () -> Void)?
     var stateProvider: (@MainActor () -> StateSnapshot)?
@@ -41,13 +48,15 @@ final class RemoteControlServer {
     let token: String
     let port: UInt16
     private let contextOnly: Bool
+    private let loopbackOnly: Bool
 
     private var listener: NWListener?
     private var browser: NWBrowser?
 
-    init(port: UInt16 = 8737, contextOnly: Bool = false) {
+    init(port: UInt16 = 8737, contextOnly: Bool = false, loopbackOnly: Bool = false) {
         self.port = port
         self.contextOnly = contextOnly
+        self.loopbackOnly = contextOnly || loopbackOnly
         // Persistent token: the phone's bookmark/QR survives relaunches.
         let tokenFile = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".notch/remote-token")
@@ -84,10 +93,10 @@ final class RemoteControlServer {
     func start() {
         let params = NWParameters.tcp
         params.allowLocalEndpointReuse = true
-        if contextOnly {
+        if loopbackOnly {
             params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)
         }
-        let boundListener = contextOnly
+        let boundListener = loopbackOnly
             ? try? NWListener(using: params)
             : try? NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
         guard let listener = boundListener else {
@@ -98,15 +107,15 @@ final class RemoteControlServer {
         // triggers macOS's Local Network permission prompt (without the
         // grant, LAN peers' traffic to this listener is silently dropped
         // while loopback keeps working).
-        if !contextOnly { listener.service = NWListener.Service(name: "Notch", type: "_http._tcp") }
+        if !loopbackOnly { listener.service = NWListener.Service(name: "Notch", type: "_http._tcp") }
         listener.newConnectionHandler = { [weak self] connection in
             connection.start(queue: .main)
             self?.receive(on: connection, buffer: Data())
         }
         listener.start(queue: .main)
         self.listener = listener
-        if contextOnly {
-            NSLog("[Notch] REWIND read-only context bridge on loopback port %d", port)
+        if loopbackOnly {
+            NSLog("[Notch] REWIND bridge on loopback port %d", port)
             return
         }
 
@@ -241,6 +250,26 @@ final class RemoteControlServer {
                 let json = await RewindContext.snapshot(connect: scopes)
                 self?.send(connection, status: "200 OK", contentType: "application/json", body: json)
             }
+        case ("POST", "rewind-command"), ("POST", "rewind-cancel"), ("POST", "permission-decision"):
+            guard let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let id = obj["id"] as? String, UUID(uuidString: id) != nil else {
+                send(connection, status: "400 Bad Request", contentType: "application/json", body: Data("{}".utf8))
+                return
+            }
+            Task { @MainActor [weak self] in
+                guard let self else { connection.cancel(); return }
+                let ok: Bool
+                if path == "rewind-command", let text = obj["text"] as? String,
+                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.count <= 2000 {
+                    ok = self.onRewindCommand?(text, id) ?? false
+                } else if path == "rewind-cancel" {
+                    ok = self.onRewindCancel?(id) ?? false
+                } else if path == "permission-decision", let allow = obj["allow"] as? Bool {
+                    ok = self.onPermissionDecision?(id, allow) ?? false
+                } else { ok = false }
+                self.send(connection, status: ok ? "200 OK" : "409 Conflict", contentType: "application/json",
+                          body: Data((ok ? "{\"ok\":true}" : "{\"ok\":false}").utf8))
+            }
         case ("POST", "command"):
             if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                let text = (obj["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -338,6 +367,11 @@ final class RemoteControlServer {
         guard let snap = stateProvider?() else { return Data("{}".utf8) }
         let steps = snap.steps.map { ["text": $0.text, "verify": $0.isVerification] as [String: Any] }
         let obj: [String: Any] = [
+            "request_id": snap.requestID ?? "",
+            "accessibility_granted": snap.accessibilityGranted,
+            "screen_recording_granted": snap.screenRecordingGranted,
+            "agent_backend": NotchConfig.shared["NOTCH_AGENT_BACKEND"] ?? "claude",
+            "permission": snap.pendingPermission as Any? ?? NSNull(),
             "state": snap.state,
             "transcript": snap.transcript,
             "response": snap.response,

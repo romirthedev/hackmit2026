@@ -42,6 +42,16 @@ export type Answer = {
   created_at: number;
   grounded: boolean;
   mode: string;
+  verification?: {
+    status: string;
+    receipt: {
+      reviews?: {
+        model: string;
+        seconds: number;
+        result: { reason: string };
+      }[];
+    };
+  } | null;
 };
 export type Device = {
   id: string;
@@ -68,6 +78,9 @@ export type Status = {
   devices: Device[];
   provider: string;
   model: string;
+  processing_host?: string;
+  analysis_ready?: boolean;
+  verification_enabled?: boolean;
   paused: boolean;
   observed_sequence_gaps: number;
   embedding_failures: number;

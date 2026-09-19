@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     public_url: str = ""
     notch_url: str = ""
     notch_token: str = ""
+    notch_control_url: str = ""
+    processing_url: str = ""
+    processing_token: str = ""
+    compact_observations: bool = False
+    observation_max_tokens: int = Field(256, ge=128, le=2048)
+    codex_verify: bool = False
+    codex_binary: str = "/Applications/ChatGPT.app/Contents/Resources/codex"
+    codex_verify_timeout: float = Field(120, ge=10, le=600)
+    codex_verify_workers: int = Field(2, ge=1, le=4)
     data_dir: Path = Path("data")
     provider: Literal["ollama", "openai", "disabled"] = "ollama"
     ollama_url: str = "http://127.0.0.1:11434"

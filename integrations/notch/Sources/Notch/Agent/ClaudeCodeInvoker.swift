@@ -91,6 +91,7 @@ final class ClaudeCodeInvoker {
     /// without extra hand-holding. Edit this list as new models emerge.
     private static let topTierPatterns: [String] = [
         "claude",       // all Claude models
+        "gpt-6",
         "gpt-5",        // GPT-5 family
         "gpt-4",        // GPT-4 family
         "o1",           // OpenAI o1
@@ -435,7 +436,8 @@ final class ClaudeCodeInvoker {
     func run(request: String, contextBlock: String? = nil, allowGUI: Bool = true,
              activeTasksBlock: String? = nil,
              onEvent: @escaping (StreamEvent) -> Void) throws {
-        guard let claude = Self.findClaudeBinary() else {
+        let useCodex = NotchConfig.shared["NOTCH_AGENT_BACKEND"] == "codex"
+        guard let claude = useCodex ? "/usr/bin/python3" : Self.findClaudeBinary() else {
             throw InvokerError.claudeNotFound
         }
 
@@ -468,7 +470,7 @@ final class ClaudeCodeInvoker {
         // load-bearing — sustained multi-step sessions where the model
         // inspects its own screenshots and self-corrects are exactly what
         // the deeper model buys; a faster model verifies sloppily.
-        let model = NotchConfig.shared["NOTCH_MODEL"] ?? "claude-fable-5"
+        let model = useCodex ? "gpt-6-astra" : (NotchConfig.shared["NOTCH_MODEL"] ?? "claude-fable-5")
         // run() is always entered from the view model on the main thread.
         let permission = MainActor.assumeIsolated { Self.permissionArguments() }
 
@@ -503,7 +505,17 @@ final class ClaudeCodeInvoker {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: claude)
-        proc.arguments = args
+        var codexInput: Pipe?
+        if useCodex {
+            guard let bridge = Bundle.main.path(forResource: "codex-agent", ofType: "py") else {
+                throw InvokerError.launchFailed("The bundled Codex bridge is missing. Rebuild Notch.")
+            }
+            proc.arguments = [bridge]
+            codexInput = Pipe()
+            proc.standardInput = codexInput
+        } else {
+            proc.arguments = args
+        }
         proc.currentDirectoryURL = scratch
         var env = ProcessInfo.processInfo.environment
         let extraPaths = [
@@ -578,12 +590,20 @@ final class ClaudeCodeInvoker {
                               isError: true, sessionID: nil, costUSD: nil)
             } else {
                 // Normal exit but no result event seen — extremely unlikely.
-                deliverResult("Done.", isError: false, sessionID: nil, costUSD: nil)
+                deliverResult("The agent exited without a completion result. Check the action before retrying.", isError: true, sessionID: nil, costUSD: nil)
             }
         }
 
         do {
             try proc.run()
+            if let input = codexInput {
+                let payload = ["prompt": prompt, "instructions": Self.systemPrompt(
+                    skillsSection: SkillLibrary.promptSection(), model: model, permFlags: ""
+                ) + (allowGUI ? "" : Self.guiRestriction)]
+                let data = try JSONSerialization.data(withJSONObject: payload)
+                input.fileHandleForWriting.write(data)
+                try? input.fileHandleForWriting.close()
+            }
         } catch {
             throw InvokerError.launchFailed(error.localizedDescription)
         }

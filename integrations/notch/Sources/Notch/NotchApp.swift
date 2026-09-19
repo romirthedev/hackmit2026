@@ -75,7 +75,12 @@ final class NotchApp: NSObject, NSApplicationDelegate {
         }
         viewModel.taskManager.start()
 
-        remoteServer = RemoteControlServer()
+        remoteServer = RemoteControlServer(loopbackOnly: CommandLine.arguments.contains("--rewind-control"))
+        remoteServer.onRewindCommand = { [weak self] text, id in self?.viewModel.rewindCommand(text, id: id) ?? false }
+        remoteServer.onRewindCancel = { [weak self] id in self?.viewModel.rewindCancel(id: id) ?? false }
+        remoteServer.onPermissionDecision = { [weak self] id, allow in
+            self?.viewModel.resolveRemotePermission(id: id, allow: allow) ?? false
+        }
         remoteServer.onCommand = { [weak self] text in self?.viewModel.remoteCommand(text) }
         remoteServer.onCancel = { [weak self] in self?.viewModel.cancel() }
         remoteServer.stateProvider = { [weak self] in

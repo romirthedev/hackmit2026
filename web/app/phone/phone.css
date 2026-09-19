@@ -350,3 +350,30 @@
     font-size: 29px;
   }
 }
+
+.phone-computer {
+  padding-top: 24px;
+}
+.phone-permission {
+  border: 1px solid #c89a55;
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 16px;
+}
+.phone-permission pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  max-height: 240px;
+  overflow: auto;
+}
+.phone-permission button {
+  padding: 12px 18px;
+  margin-right: 8px;
+}
+.phone-answer > strong {
+  display: block;
+  color: #957038;
+  font-size: 13px;
+  margin: 12px 0;
+}
