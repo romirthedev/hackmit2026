@@ -66,7 +66,7 @@ def create_app(settings=None, provider=None):
     media_dir = (s.data_dir / "media").resolve()
     media_dir.mkdir(exist_ok=True)
     p = provider or Provider(s)
-    visual = VisualIndex(db, s)
+    visual = VisualIndex(db, s, remote=p)
     context = NotchContext(db, s)
     verifier = Verifier(db, s) if s.codex_verify else None
     memory = Memory(

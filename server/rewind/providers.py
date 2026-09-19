@@ -26,25 +26,30 @@ class Provider:
         self._whisper = None
         self.audio_lock = asyncio.Lock()
         self._ready_at, self._ready = 0, False
+        self._available = False
         self._ready_lock = asyncio.Lock()
 
-    async def ready(self):
+    async def ready(self, model=True):
+        if self.s.provider == "disabled":
+            return False
         if not self.s.processing_url:
             return True
         async with self._ready_lock:
             if time.monotonic() - self._ready_at < 3:
-                return self._ready
+                return self._ready if model else self._available
             try:
                 response = await self.http.get(
                     self.s.processing_url.rstrip("/") + "/health",
                     headers={"Authorization": "Bearer " + self.s.processing_token},
                     timeout=5,
                 )
-                self._ready = response.status_code == 200 and response.json().get("ready") is True
+                self._available = response.status_code == 200
+                self._ready = self._available and response.json().get("ready") is True
             except Exception:
                 self._ready = False
+                self._available = False
             self._ready_at = time.monotonic()
-            return self._ready
+            return self._ready if model else self._available
 
     async def close(self):
         await self.http.aclose()
@@ -61,6 +66,8 @@ class Provider:
         max_tokens=768,
     ):
         attachments = ([image] if image else []) + (images or [])
+        if self.s.provider == "disabled":
+            raise RuntimeError("AI provider disabled; recordings remain queued until a model is configured.")
         if self.s.processing_url:
             data = await self.remote(
                 "structured",
@@ -75,8 +82,6 @@ class Provider:
                 },
             )
             return schema.model_validate(data)
-        if self.s.provider == "disabled":
-            raise RuntimeError("AI provider disabled; recordings remain queued until a model is configured.")
         if self.s.provider == "openai":
             if not self.s.openai_api_key:
                 raise RuntimeError("REWIND_OPENAI_API_KEY is missing")
@@ -220,6 +225,8 @@ class Provider:
         return {"text": " ".join(s["text"] for s in out), "segments": out, "language": info.language}
 
     async def transcribe(self, path):
+        if self.s.provider == "disabled":
+            raise RuntimeError("AI provider disabled; original audio retained.")
         if self.s.processing_url:
             return await self.remote(
                 "transcribe",

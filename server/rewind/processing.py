@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from .config import Settings
 from .models import CompactObservation, Observation, RecallAnswer, RuleDecision, SearchPlan
 from .providers import Provider
+from .visual import OpenClipEncoder
 
 SCHEMAS = {c.__name__: c for c in (CompactObservation, Observation, RecallAnswer, RuleDecision, SearchPlan)}
 
@@ -35,6 +36,11 @@ class AudioInput(BaseModel):
 
 class EmbedInput(BaseModel):
     text: str = Field(max_length=12000)
+
+
+class VisualInput(BaseModel):
+    image: str | None = Field(default=None, max_length=2_800_000)
+    text: str | None = Field(default=None, max_length=2000)
 
 
 class PriorityGate:
@@ -86,6 +92,7 @@ def create_processing_app(settings=None, provider=None):
         raise ValueError("ASUS service must not proxy to itself")
     p = provider or Provider(s)
     gate = PriorityGate(max(1, s.workers))
+    visual = OpenClipEncoder(s.visual_device)
 
     async def auth(req: Request):
         if not hmac.compare_digest(req.headers.get("authorization", ""), "Bearer " + s.processing_token):
@@ -113,6 +120,11 @@ def create_processing_app(settings=None, provider=None):
             else:
                 result = await p.http.get(s.ollama_url + "/health", timeout=5)
                 ready = result.status_code == 200
+                if ready:
+                    models = await p.http.get(s.ollama_url + "/v1/models", timeout=5)
+                    ready = models.status_code == 200 and s.vision_model in {
+                        model["id"] for model in models.json().get("data", [])
+                    }
         except Exception:
             pass
         return {
@@ -156,5 +168,17 @@ def create_processing_app(settings=None, provider=None):
     @app.post("/embed")
     async def embed(body: EmbedInput):
         return {"embedding": await p.embed(body.text)}
+
+    @app.post("/visual")
+    async def visual_embedding(body: VisualInput):
+        if bool(body.image) == bool(body.text):
+            raise HTTPException(422, "Provide exactly one image or text query")
+        with tempfile.TemporaryDirectory(prefix="rewind-visual-") as directory:
+            path = None
+            if body.image:
+                path = Path(directory) / "original.jpg"
+                decode(body.image, path, 2 * 1024 * 1024)
+            vector = await asyncio.to_thread(visual.encode, path=path, text=body.text)
+            return {"model": visual.model_key, "embedding": vector.tolist()}
 
     return app

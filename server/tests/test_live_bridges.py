@@ -278,3 +278,39 @@ async def test_command_history_preserves_completed_result_after_panel_closes(tmp
     assert history["status"] == "completed"
     assert history["snapshot"]["response"] == "File verified."
     await c.http.aclose()
+
+
+async def test_visual_index_uses_asus_and_rejects_mixed_model_vectors(tmp_path):
+    from rewind.visual import MODEL_KEY, VisualIndex
+
+    class NoLocalInference:
+        model_key = MODEL_KEY
+
+        def encode(self, **kwargs):
+            raise AssertionError("Must not load a vision encoder on the Mac")
+
+    class Remote:
+        key = MODEL_KEY
+
+        async def remote(self, action, payload):
+            assert action == "visual"
+            return {"model": self.key, "embedding": [3, 4]}
+
+    remote = Remote()
+    s = Settings(_env_file=None, processing_url="http://asus")
+    index = VisualIndex(Database(tmp_path), s, NoLocalInference(), remote=remote)
+    vector = await index.encode(text="glasses")
+    assert vector.tolist() == pytest.approx([0.6, 0.8])
+    remote.key = "different-model"
+    with pytest.raises(ValueError, match="differs"):
+        await index.encode(text="glasses")
+
+
+async def test_disabled_provider_never_contacts_remote(tmp_path):
+    p = Provider(Settings(_env_file=None, provider="disabled", processing_url="http://asus"))
+    assert not await p.ready()
+    with pytest.raises(RuntimeError, match="disabled"):
+        await p.structured("system", "question", CompactObservation)
+    with pytest.raises(RuntimeError, match="disabled"):
+        await p.transcribe(tmp_path / "nonexistent.wav")
+    await p.close()

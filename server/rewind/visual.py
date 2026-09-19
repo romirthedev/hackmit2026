@@ -5,6 +5,7 @@ and research/licenses. Weights are revision-pinned and loaded from safetensors.
 """
 
 import asyncio
+import base64
 import logging
 import threading
 import time
@@ -75,10 +76,25 @@ class OpenClipEncoder:
 
 
 class VisualIndex:
-    def __init__(self, db, settings, encoder=None):
+    def __init__(self, db, settings, encoder=None, remote=None):
         self.db, self.s = db, settings
         self.encoder = encoder or OpenClipEncoder(settings.visual_device)
         self.model_key = self.encoder.model_key
+        self.remote = remote if settings.processing_url else None
+
+    async def encode(self, *, path=None, text=None):
+        if self.remote:
+            data = await self.remote.remote(
+                "visual",
+                {
+                    "image": base64.b64encode(path.read_bytes()).decode() if path else None,
+                    "text": text,
+                },
+            )
+            if data["model"] != self.model_key:
+                raise ValueError("ASUS visual model differs from the stored index")
+            return normalized(data["embedding"])
+        return normalized(await asyncio.to_thread(self.encoder.encode, path=path, text=text))
 
     def claim(self):
         now = time.time()
@@ -104,7 +120,7 @@ class VisualIndex:
     async def process(self, item):
         started = time.monotonic()
         try:
-            vector = normalized(await asyncio.to_thread(self.encoder.encode, path=Path(item["path"])))
+            vector = await self.encode(path=Path(item["path"]))
             self.db.execute(
                 """UPDATE visual_index SET embedding=?,status='done',error=NULL,lease_until=0,analysis_ms=?
                 WHERE id=? AND model=?""",
@@ -130,7 +146,7 @@ class VisualIndex:
             "SELECT id FROM visual_index WHERE model=? AND status='done' LIMIT 1", (self.model_key,)
         ):
             return []
-        vector = normalized(await asyncio.to_thread(self.encoder.encode, text=query))
+        vector = await self.encode(text=query)
         best = []
         with self.db.connect() as c:
             cursor = c.execute(
@@ -163,6 +179,9 @@ class VisualIndex:
 
     async def run(self):
         while True:
+            if self.remote and not await self.remote.ready(model=False):
+                await asyncio.sleep(3)
+                continue
             item = self.claim()
             if item:
                 await self.process(item)

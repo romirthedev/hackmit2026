@@ -2,7 +2,10 @@
 
 The phone's existing HTTPS origin and workspace stay on the Mac. Original uploads
 are durable there. A private authenticated inference service on the ASUS performs
-vision, speech transcription, text reasoning, and embeddings. An SSH loopback
+vision, speech transcription, text reasoning, and embeddings. Original-pixel
+OpenCLIP retrieval also runs on the ASUS, independently of queued descriptions.
+Its revision must match the stored index; a different encoder cannot silently
+mix incompatible vectors. An SSH loopback
 forward over Tailscale connects the two; neither the model server nor the native
 Notch token is published through Funnel. No Mac vision-model fallback is used
 when `REWIND_PROCESSING_URL` is configured.
@@ -23,6 +26,11 @@ sustained frames per second, question latency under load, and factual correctnes
 must all pass before describing a configuration as near-live. RAM capacity alone
 is not a speed benchmark. The earlier native 27B concurrency experiment failed
 that requirement and is not the live target.
+
+The speech transport was measured with a clearly identified synthetic utterance:
+3.786 seconds of speech took 5.130 seconds cold and 3.072 seconds warm, including
+the Mac-to-ASUS round trip. Both transcripts preserved the question. This tests
+speech latency and transport, not noisy real-world accuracy.
 
 ## Evidence review
 

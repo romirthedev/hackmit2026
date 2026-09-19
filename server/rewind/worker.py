@@ -108,7 +108,8 @@ class Worker:
                             if self.s.provider == "openai"
                             else self.s.vision_model
                             if item["kind"] == "frame"
-                            else self.s.whisper_model + "+" + self.s.reasoning_model,
+                            else self.s.whisper_model
+                            + ("" if self.s.compact_observations else "+" + self.s.reasoning_model),
                             time.time(),
                         ),
                     )
