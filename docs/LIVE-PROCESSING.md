@@ -76,7 +76,12 @@ Notch permission mode. The original Claude backend remains available.
 
 The real phone API → Notch → Astra path was tested by creating
 `/tmp/rewind-notch-phone-smoke.txt`, reading it back, and verifying the exact
-contents. macOS Accessibility and Screen Recording permissions are separately
+contents. A second test created a document in TextEdit, saved it as
+`/tmp/rewind-notch-phone-gui-smoke.txt`, and verified its contents and open document.
+The first GUI attempt revealed that app launching inside Codex's read-only sandbox
+can misleadingly report a missing executable. GUI commands now request individual
+sandbox escalation through Notch's existing permission policy; the repeated test
+succeeded. macOS Accessibility and Screen Recording permissions are separately
 required for GUI interaction. The Mac must stay awake and Notch must be running.
 
 ## Launch configuration
@@ -92,7 +97,8 @@ files. For the ASUS service, leave `REWIND_PROCESSING_URL` empty, set a strong
 ```
 
 Forward Mac loopback 11440 to ASUS loopback 11440 using the existing private SSH
-configuration. On the Mac, set the same processing token, URL
+configuration. `scripts/maintain_tunnel.py --ssh-config <private-config>` reconnects
+these forwards with backoff after a network interruption. On the Mac, set the same processing token, URL
 `http://127.0.0.1:11440`, compact observations, the 35B model names, and Codex
 verification. Build and launch the full native app with:
 

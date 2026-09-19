@@ -135,7 +135,7 @@ export function ComputerPanel({ visible }: { visible: boolean }) {
         <article className="phone-answer" aria-live="polite">
           <div>
             <strong>{state.state}</strong>
-            {state.request_id && (
+          {state.request_id && !['idle', 'responding', 'error'].includes(state.state) && (
               <button
                 aria-label="Cancel Notch command"
                 onClick={() => void action('cancel', { id: state.request_id })}
