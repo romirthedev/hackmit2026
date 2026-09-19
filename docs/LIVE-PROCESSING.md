@@ -124,3 +124,11 @@ bridge can stay on 8738. The browser receives neither token.
 
 Codex integration follows the [noninteractive CLI documentation](https://developers.openai.com/codex/noninteractive/)
 and [app-server protocol](https://developers.openai.com/codex/app-server/).
+
+For the native parallel runtime, this Ollama 35B package has an embedded vision
+encoder instead of a separate projector layer. With Ollama 0.34.2's compatible
+`llama-server`, pass `--embedded-projector` to `scripts/serve_vision.py`; both
+loaders use the same verified model blob. This relies on the runtime's documented
+[monolithic-GGUF compatibility layer](https://github.com/ollama/ollama/blob/v0.34.2/llama/compat/README.md),
+not generic support in every upstream llama.cpp build. An optional
+`--chat-template` pins the model author's template; the launch receipt hashes it.

@@ -6,6 +6,7 @@ modify an Ollama service or download weights. Context is specified PER SLOT.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -20,6 +21,12 @@ def main():
     parser.add_argument("--slots", type=int, choices=range(1, 9), default=8)
     parser.add_argument("--context", type=int, default=8192, help="Tokens per slot")
     parser.add_argument("--port", type=int, default=11436)
+    parser.add_argument(
+        "--embedded-projector",
+        action="store_true",
+        help="Use one monolithic GGUF for both loaders (requires Ollama's compatible runtime)",
+    )
+    parser.add_argument("--chat-template", type=Path, help="Explicit model-author chat template")
     parser.add_argument("--min-free-gib", type=float, default=0)
     parser.add_argument("--report", type=Path, required=True, help="New launch metadata file")
     args = parser.parse_args()
@@ -36,8 +43,10 @@ def main():
         layer["mediaType"].rsplit(".", 1)[-1]: args.models_dir / "blobs" / layer["digest"].replace(":", "-")
         for layer in manifest["layers"]
     }
+    if args.embedded_projector and "projector" not in layers:
+        layers["projector"] = layers.get("model")
     for key in ("model", "projector"):
-        if key not in layers or not layers[key].is_file():
+        if key not in layers or layers[key] is None or not layers[key].is_file():
             parser.error(f"Missing {key} weights")
     available = (
         int(
@@ -97,6 +106,10 @@ def main():
         "--log-verbosity",
         "4",
     ]
+    if args.chat_template:
+        if not args.chat_template.is_file():
+            parser.error("Chat template does not exist")
+        command.extend(["--chat-template-file", str(args.chat_template.resolve())])
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(
         json.dumps(
@@ -108,6 +121,12 @@ def main():
                 "available_bytes_before_load": available,
                 "slots": args.slots,
                 "context_per_slot": args.context,
+                "embedded_projector": args.embedded_projector,
+                "chat_template_sha256": (
+                    hashlib.sha256(args.chat_template.read_bytes()).hexdigest()
+                    if args.chat_template
+                    else None
+                ),
                 "version": subprocess.check_output(
                     [str(binary), "--version"], env=env, text=True, stderr=subprocess.STDOUT
                 ),
