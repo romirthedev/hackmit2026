@@ -1135,9 +1135,14 @@
   color: #ffb5b8;
 }
 .evidence-dialog[data-slot='dialog-content'] {
+  display: flex;
+  flex-direction: column;
   max-width: min(790px, 94vw);
   max-height: 92svh;
   overflow-y: auto;
+}
+.evidence-dialog > * {
+  flex-shrink: 0;
 }
 .evidence-dialog .evidence-image img {
   object-fit: contain;

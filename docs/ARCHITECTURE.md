@@ -30,7 +30,7 @@ A completed upload returns only after storage/metadata commit. A model call happ
 
 ## Every frame versus real-time
 
-“Every frame” means each JPEG actually captured and received by this system gets its own vision-language analysis. Default capture interval: 1000 ms. An OV2640 may internally expose more frames than the configured capture loop reads. This is **not** exhaustive analysis of a 30 fps video stream. The video importer is an explicit offline path for every decoded frame of a supplied video.
+“Every frame” means each JPEG actually captured and received by this system gets its own vision-language analysis. Default capture interval: 1000 ms. An OV2640 may internally expose more frames than the configured capture loop reads. This is **not** exhaustive analysis of a 30 fps video stream. The PyAV video importer defaults to 1 fps, preserving original presentation timestamps; use `--fps 0` explicitly for every decoded frame. Imports retain frame/clip numbering, source offsets and declared clock quality.
 
 No perceptual-hash deduplication skips semantic analysis. Originals are retained even if observations look identical. This favors evidence completeness over throughput. RAM use stays bounded by a small worker count, per-request size limit and bounded retrieval; raw originals live on SSD/SD, not in 128 GB memory. One shared model can handle vision and questions without loading two copies. Keep an eye on prompt/KV-cache size as well as weight size.
 
@@ -52,7 +52,9 @@ Each observation links to its original frame/audio. Audio words and segment time
 
 FTS5 provides lexical search. Optional local embeddings are persisted as float32 arrays; retrieval scans time-filtered vectors in bounded batches and fuses semantic and lexical ranks. This is adequate for a hackathon-scale personal index, not a billion-vector service. If embeddings are unavailable, lexical search still works and missing embeddings are counted. Existing failed embeddings are not automatically backfilled; reprocessing/backfill is a follow-up optimization.
 
-A query planner can retrieve a reference event for “before/after” questions; ambiguous repeated anchors remain a limitation. An answer receives a bounded evidence set, re-examines up to three matching original frames, and must cite IDs that actually exist in that set. IDs are validated, but semantic truth still depends on the model and recordings. If generation fails or fabricates IDs, the application returns evidence-only results. If retrieval finds nothing, it explicitly reports missing evidence.
+Optional OpenCLIP pixel vectors live in a separate durable index, searchable even when captions fail. An independent worker backfills original frames, records failures, and retries expired leases. Model/revision identity isolates vector spaces; deletion cascades to vectors. See [the integration audit](../research/VIDEO-MEMORY.md).
+
+A query planner, used only for explicit temporal language, can retrieve a reference event for “before/after” questions; ambiguous repeated anchors remain a limitation. An answer receives a bounded evidence set, re-examines up to three matching original frames, and must cite short source labels that map to IDs in that set. Synthetic import clocks are omitted from model evidence; automatic audio summaries are not substituted for transcripts. IDs are validated, but semantic truth still depends on the model and recordings. If generation fails or fabricates IDs, the application returns evidence-only results. If retrieval finds nothing, it explicitly reports missing evidence.
 
 Object descriptions refer to last observed relative position. There is no persistent object identity across look-alikes, calibrated 3D tracking, or unseen-room extrapolation. Confidence fields are model estimates, not calibrated probabilities.
 

@@ -66,3 +66,27 @@ Content-Type: image/jpeg
 | POST | `/logout` | Clear workspace cookie |
 
 Use one server process. The upload lock and device configuration are intentionally scoped to one personal prototype; this is not a public multi-tenant ingestion service.
+
+## Video provenance and visual retrieval
+
+The PyAV importer uses the existing authenticated ingestion routes, adding an
+optional `X-Video-Provenance` JSON header (maximum 2048 characters):
+
+```json
+{"source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_offset":2.4,"source_pts":2400,"time_base":"1/1000","frame_index":17,"clip_index":0,"sample_fps":1,"clock":"synthetic"}
+```
+
+`X-Captured-At` remains required for this header. `clock` is `recording_start` for a
+known recording start, or `synthetic` for an assigned import timeline. Frames have
+zero-based decoded `frame_index`; audio sets it to null. `clip_index` is a zero-based
+fixed time window, not a detected scene. `source_offset` is relative to the shared
+video/audio origin; PTS and rational time base retain decoder timing. These fields
+are stored as `provenance` and returned on recordings, events, search and evidence.
+Retries with conflicting provenance fail with 409. Wearable uploads need no change.
+
+With `REWIND_VISUAL_EMBEDDINGS=true`, `/events?q=...` fuses OpenCLIP pixel similarity
+with lexical/text embedding ranks and may return saved frames without captions.
+An optional `visual_similarity` field is a ranking score, not calibrated confidence.
+`/status.visual_index` reports `enabled`, `model`, `total`, `indexed`, `pending`,
+`failed`, and `average_ms`. `/retry` also returns `visual_retried`. Deleting an
+original removes its vectors through the database foreign key.

@@ -24,9 +24,10 @@ from pydantic import BaseModel, Field
 from .config import Settings
 from .db import Database, event_public
 from .memory import Memory
-from .models import AskRequest, RuleRequest
+from .models import AskRequest, RuleRequest, VideoProvenance
 from .pairing import BrowserPairing
 from .providers import Provider
+from .visual import VisualIndex
 from .worker import Worker
 
 
@@ -62,7 +63,8 @@ def create_app(settings=None, provider=None):
     media_dir = (s.data_dir / "media").resolve()
     media_dir.mkdir(exist_ok=True)
     p = provider or Provider(s)
-    memory = Memory(db, p, s)
+    visual = VisualIndex(db, s)
+    memory = Memory(db, p, s, visual=visual if s.visual_embeddings else None)
     worker = Worker(db, p, memory, s)
     ingestion_lock = asyncio.Lock()
     pairing = BrowserPairing(db, s.admin_token)
@@ -144,6 +146,8 @@ def create_app(settings=None, provider=None):
     @asynccontextmanager
     async def lifespan(app):
         tasks = [asyncio.create_task(worker.run()) for _ in range(s.workers)]
+        if s.visual_embeddings and s.workers:
+            tasks.append(asyncio.create_task(visual.run()))
         tasks.append(asyncio.create_task(worker.elastic_sync()))
         try:
             yield
@@ -163,6 +167,7 @@ def create_app(settings=None, provider=None):
     )
     app.state.db, app.state.worker, app.state.memory = db, worker, memory
     app.state.settings = s
+    app.state.visual = visual
 
     @app.middleware("http")
     async def headers(request, call_next):
@@ -220,6 +225,7 @@ def create_app(settings=None, provider=None):
         totals["provider"] = s.provider
         totals["model"] = s.openai_model if s.provider == "openai" else s.vision_model
         totals["timezone"] = s.timezone
+        totals["visual_index"] = visual.status()
         totals["free_bytes"] = shutil.disk_usage(media_dir).free
         totals["storage_limit_bytes"] = int(s.max_storage_gb * 1e9)
         totals["embedding_failures"] = db.one(
@@ -291,6 +297,19 @@ def create_app(settings=None, provider=None):
             raise HTTPException(400, "Invalid sequence or capture timestamp (Unix seconds)")
         captured = timestamp or time.time()
         clock_quality = "device" if timestamp else "received_only"
+        provenance = "{}"
+        if "x-video-provenance" in req.headers:
+            try:
+                value = req.headers["x-video-provenance"]
+                if len(value) > 2048 or not timestamp:
+                    raise ValueError()
+                metadata = VideoProvenance.model_validate_json(value)
+                if (kind == "frame") != (metadata.frame_index is not None):
+                    raise ValueError()
+                provenance = metadata.model_dump_json()
+                clock_quality = "synthetic" if metadata.clock == "synthetic" else "imported"
+            except ValueError:
+                raise HTTPException(400, "Invalid video provenance or missing capture timestamp")
         intent = req.headers.get("x-intent", "memory")
         if intent not in ("memory", "question") or (intent == "question" and kind != "audio"):
             raise HTTPException(400, "Invalid capture intent")
@@ -336,12 +355,14 @@ def create_app(settings=None, provider=None):
         digest = hashlib.sha256(data).hexdigest()
         async with ingestion_lock:
             old = db.one(
-                "SELECT id,sha256,status FROM media WHERE device=? AND boot=? AND kind=? AND seq=?",
+                "SELECT id,sha256,status,provenance,captured_at FROM media WHERE device=? AND boot=? AND kind=? AND seq=?",
                 (owner, boot, kind, seq),
             )
             if old:
                 if not hmac.compare_digest(old["sha256"], digest):
                     raise HTTPException(409, "Sequence already contains different recording bytes")
+                if old["provenance"] != provenance or (provenance != "{}" and old["captured_at"] != captured):
+                    raise HTTPException(409, "Sequence already contains different video provenance")
                 return {"id": old["id"], "duplicate": True, "status": old["status"]}
             total = db.one("SELECT COALESCE(SUM(bytes),0) n FROM media")["n"]
             if (
@@ -366,8 +387,8 @@ def create_app(settings=None, provider=None):
                 finally:
                     os.close(directory_fd)
                 db.execute(
-                    """INSERT INTO media(id,device,boot,seq,kind,captured_at,received_at,clock_quality,sha256,path,bytes,mime,duration,intent)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    """INSERT INTO media(id,device,boot,seq,kind,captured_at,received_at,clock_quality,sha256,path,bytes,mime,duration,intent,provenance)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         event_id,
                         owner,
@@ -383,6 +404,7 @@ def create_app(settings=None, provider=None):
                         mime,
                         duration,
                         intent,
+                        provenance,
                     ),
                 )
             except BaseException:
@@ -454,7 +476,10 @@ def create_app(settings=None, provider=None):
         n = db.execute(
             "UPDATE media SET status='queued',attempts=0,retry_at=0,error=NULL WHERE status='failed'"
         )
-        return {"retried": n}
+        visual_retried = db.execute(
+            "UPDATE visual_index SET status='queued',attempts=0,retry_at=0,error=NULL WHERE status='failed'"
+        )
+        return {"retried": n, "visual_retried": visual_retried}
 
     @app.post("/api/ask", dependencies=[Depends(admin)])
     async def ask(body: AskRequest):

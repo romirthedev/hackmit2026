@@ -23,13 +23,21 @@ def main():
     parser.add_argument("--server", default="http://127.0.0.1:8000")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--after", type=float, help="Restrict to one evaluation recording interval")
+    parser.add_argument("--before", type=float, help="Restrict to one evaluation recording interval")
     args = parser.parse_args()
     env = dotenv_values(Path(__file__).resolve().parents[1] / ".env")
     token = os.environ.get("REWIND_ADMIN_TOKEN") or env.get("REWIND_ADMIN_TOKEN")
     if not token:
         raise SystemExit("REWIND_ADMIN_TOKEN is missing")
     plan = json.loads(args.plan.read_text())
-    report = {"plan": plan, "started_at": time.time(), "results": []}
+    report = {
+        "plan": plan,
+        "started_at": time.time(),
+        "after": args.after,
+        "before": args.before,
+        "results": [],
+    }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with httpx.Client(
         base_url=args.server.rstrip("/"),
@@ -45,7 +53,9 @@ def main():
             question = item["question"] if isinstance(item, dict) else item
             result = {"question": question}
             try:
-                response = client.post("/api/ask", json={"question": question})
+                response = client.post(
+                    "/api/ask", json={"question": question, "after": args.after, "before": args.before}
+                )
                 response.raise_for_status()
                 result["response"] = response.json()
                 answer = result["response"]

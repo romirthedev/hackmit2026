@@ -20,7 +20,7 @@ class Observation(BaseModel):
 
 class RecallAnswer(BaseModel):
     answer: str = Field(max_length=8000, description="Plain-language answer to the user's question, not a source ID")
-    evidence_ids: list[str] = Field(max_length=20, description="IDs of recorded events supporting the answer")
+    evidence_ids: list[str] = Field(max_length=20, description="Source labels such as E1 or E2 supporting the answer")
     insufficient_evidence: bool = Field(description="True when the recordings do not establish the answer")
 
 
@@ -39,6 +39,18 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     after: float | None = None
     before: float | None = None
+
+
+class VideoProvenance(BaseModel):
+    """Importer metadata, never inferred from the content by a language model."""
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_offset: float = Field(ge=-3600, le=1e9, allow_inf_nan=False)
+    source_pts: int
+    time_base: str = Field(pattern=r"^[0-9]+/[1-9][0-9]*$", max_length=40)
+    frame_index: int | None = Field(default=None, ge=0)
+    clip_index: int = Field(ge=0)
+    sample_fps: float = Field(ge=0, le=120, allow_inf_nan=False)
+    clock: Literal["recording_start", "synthetic"]
 
 
 class RuleRequest(BaseModel):

@@ -9,11 +9,14 @@ requires-python = ">=3.11"
 dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "pydantic-settings>=2.8,<3", "python-multipart>=0.0.20,<1", "pillow>=11,<13", "numpy>=2.2,<3"]
 [project.optional-dependencies]
 audio = ["faster-whisper>=1.1,<2"]
+video = ["av==18.1.0"]
+vision = ["open_clip_torch==3.3.0", "huggingface-hub>=0.34,<2", "safetensors>=0.5,<1"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
 [tool.setuptools.packages.find]
 where = ["server"]
 [tool.pytest.ini_options]
 pythonpath = ["server"]
+testpaths = ["server/tests"]
 asyncio_mode = "auto"
 [tool.ruff]
 line-length = 110

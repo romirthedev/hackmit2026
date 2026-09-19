@@ -21,6 +21,14 @@ export type Recording = {
   media_url: string;
   error?: string;
   device?: string;
+  provenance?: {
+    source_sha256: string;
+    source_offset: number;
+    frame_index: number | null;
+    clip_index: number;
+    sample_fps: number;
+    clock: 'synthetic' | 'recording_start';
+  };
 };
 export type Answer = {
   id: string;
@@ -60,6 +68,7 @@ export type Status = {
   observed_sequence_gaps: number;
   embedding_failures: number;
   timezone: string;
+  visual_index?: { enabled: boolean; indexed: number; pending: number; failed: number };
 };
 export type Rule = { id: string; instruction: string; enabled: number };
 export type Alert = {
@@ -82,14 +91,13 @@ export type Scene = {
   }[];
 };
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!(init.body instanceof Blob) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const r = await fetch('/api' + path, {
     ...init,
-    headers: {
-      ...(init.body instanceof Blob
-        ? {}
-        : { 'Content-Type': 'application/json' }),
-      ...init.headers,
-    },
+    headers,
   });
   if (!r.ok) {
     let message = `Request failed (${r.status})`;
@@ -107,6 +115,12 @@ export function clock(time: number, zone?: string) {
     second: '2-digit',
     timeZone: zone,
   });
+}
+export function recordingClock(recording: Recording) {
+  if (recording.clock_quality === 'synthetic') return 'import timeline · real capture time unknown';
+  if (recording.clock_quality === 'imported') return 'imported capture time';
+  if (recording.clock_quality === 'received_only') return 'capture time unknown · receive time';
+  return 'device timestamp';
 }
 export function bytes(n: number) {
   return n < 1e6

@@ -16,6 +16,11 @@ print("Data:", s.data_dir.resolve(), "| free disk:", round(shutil.disk_usage(Pat
 print("Keys configured:", len(s.admin_token) >= 24 and len(s.device_token) >= 24)
 print("Dashboard built:", Path("web/dist/client/index.html").exists())
 print("Local transcription installed:", importlib.util.find_spec("faster_whisper") is not None)
+print("Video importer installed:", importlib.util.find_spec("av") is not None)
+print("Pixel retrieval enabled:", s.visual_embeddings)
+if s.visual_embeddings:
+    print("OpenCLIP installed:", importlib.util.find_spec("open_clip") is not None)
+    print("Verify cached weights with: python scripts/setup_visual.py --offline --device " + s.visual_device)
 if shutil.which("nvidia-smi"):
     subprocess.run(
         ["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv"], check=False

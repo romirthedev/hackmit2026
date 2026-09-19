@@ -12,8 +12,9 @@ A battery-powered ESP32 camera records over Wi-Fi to an ASUS-hosted memory serve
 - [FORIOT / ESP32-CAM hardware and wireless setup](docs/HARDWARE.md)
 - [Architecture, storage, and model deployment](docs/ARCHITECTURE.md)
 - [Capture protocol and API](docs/API.md)
-- [Research provenance and limitations](research/README.md)
+- [Research provenance and limitations](research/README.md) · [OMI/video-memory source audit and integration](research/VIDEO-MEMORY.md)
 - [Real YouTube video test: local 3B results and ASUS comparison procedure](docs/evaluations/YOUTUBE-VIDEO-2026-09-19.md)
+- [OpenCLIP/PyAV evaluation: zoo, first-person workday and held-out footage](docs/evaluations/OPEN-VIDEO-2026-09-19.md)
 
 ## What is implemented
 
@@ -23,7 +24,7 @@ A battery-powered ESP32 camera records over Wi-Fi to an ASUS-hosted memory serve
 | Optional wearable microphone | INMP441 on I2S1; camera remains on I2S0; 8-second PCM16 chunks; spoken “Hey Rewind, …” question routing |
 | Capture server | Authenticated bounded uploads, validation, atomic original storage, SQLite WAL transactions, duplicate/conflicting retry handling, disk budget enforcement |
 | AI processing | One durable job per frame/audio clip; local Ollama vision and reasoning; faster-whisper transcription; optional OpenAI provider |
-| Recall | Full-text and optional semantic retrieval, time filters, temporal anchor search, original evidence, validated citation IDs, evidence-only fallback |
+| Recall | Full-text, optional text and OpenCLIP pixel retrieval, time filters, temporal anchors, original evidence, validated citations, evidence-only fallback |
 | Dashboard | Timeline replay, searchable recordings, original audio/image viewer, typed and spoken questions, answer playback, monitoring rules, alerts, device and storage health, deletion and metadata export |
 | 3D | Separate, pinned LingBot-Map integration for a bounded static scan; point-cloud viewer and approximate observation markers |
 | Deployment | Native startup, Dockerfile/Compose, systemd template, optional Caddy HTTPS, provisioning, doctor, benchmark, video importer, continuous desktop microphone recorder |
@@ -152,7 +153,7 @@ On the ASUS, from the project root:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e '.[audio,dev]'
+python -m pip install -e '.[audio,video,dev]'
 python scripts/setup.py
 ```
 
@@ -197,6 +198,18 @@ The install command is from [Ollama's Linux documentation](https://docs.ollama.c
 Both downloaded names must appear in `ollama list`. Qwen3.5-35B-A3B Q4 serves vision and reasoning; the [Ollama package](https://ollama.com/library/qwen3.5:35b-a3b-q4_K_M) is about **24 GB on disk** and uses Apache-2.0 licensing. Runtime memory also includes the vision encoder, context and runtime overhead. Published model scores do not establish performance of this quantization on your ASUS. Keep the default model for bring-up and measure it before considering a larger model.
 
 Whisper weights download on the first transcription. Step 8 runs a real audio test while Internet access is still available; only claim offline readiness after that test also succeeds with Internet disconnected. Keep Ollama on localhost for the native setup: the camera contacts REWIND on port 8000, **never Ollama directly**.
+
+#### Optional direct image retrieval (recommended for visual recall)
+
+OpenCLIP searches original pixels as well as the existing caption/transcript index. It can retrieve an image whose caption missed the object. It does not make descriptions or answers infallible.
+
+```bash
+python -m pip install -e '.[vision]'
+python scripts/setup_visual.py --device cpu
+python scripts/setup_visual.py --device cpu --offline
+```
+
+Set `REWIND_VISUAL_EMBEDDINGS=true` and `REWIND_VISUAL_DEVICE=cpu` in `.env` before starting/restarting the server. The pinned MIT LAION ViT-B/32 checkpoint is approximately 605 MB, plus PyTorch dependencies. Setup downloads it once; normal use requires the cached checkpoint. Existing frames are backfilled automatically, independently of their caption status. Device & storage shows indexed/pending/failed counts; **Retry failed jobs** includes this index. CPU was tested on the Mac; CUDA/MPS and the ASUS remain unverified. See [source inspection, attribution, and exact setup](research/VIDEO-MEMORY.md).
 
 ### 5. Build the dashboard and start the complete server
 
@@ -497,7 +510,7 @@ For a clean shutdown: pause connected wearable capture; stop the continuous/brow
 
 ## Optional: import an existing video
 
-Install FFmpeg/ffprobe on the importing computer and configure its `.env` with the destination server's admin key. For a known recording start, convert the actual timestamp (including timezone offset) to Unix seconds, then pass it to the importer:
+Install `python -m pip install -e '.[video]'` on the importing computer and configure its `.env` (or `REWIND_ADMIN_TOKEN` environment variable) with the destination server's admin key. For a known recording start, convert the actual timestamp (including timezone offset) to Unix seconds, then pass it to the importer:
 
 ```bash
 REWIND_VIDEO_START="$(python -c "from datetime import datetime; print(datetime.fromisoformat('2026-09-19T14:00:00-04:00').timestamp())")"
@@ -505,7 +518,7 @@ python scripts/import_video.py /path/to/video.mp4 \
   --start "$REWIND_VIDEO_START" --server http://localhost:8000
 ```
 
-Replace the example date/time and video path. Change `--server` if importing remotely. The importer decodes **every frame**, respects video timestamps, and uploads audio chunks. A 30 fps video therefore produces 108,000 frame jobs per hour of footage; this is an offline workload, not a promise of real-time analysis. Allow substantial temporary disk space for decoded JPEGs. Rerunning the same file with the same start time uses deterministic IDs to avoid duplicate received records. Audio alignment assumes its first sample corresponds to the first video frame; edited files with offsets need preprocessing. The dashboard's file upload accepts JPEG/audio, not a full-video decoding workflow.
+Replace the example date/time and video path. Change `--server` if importing remotely. The PyAV importer defaults to **1 sampled frame/second plus all audio**, matching wearable cadence. It preserves source presentation timestamps, variable frame rates, audio offsets, source frame numbers and fixed 30-second clip numbers. Add `--fps 0` for every decoded frame (108,000 jobs/hour at 30 fps). Decoding streams through bounded memory without a temporary JPEG directory. If the real recording time is unknown, add `--synthetic-clock`; import times must not be treated as event times. Rerunning the same bytes, sampling settings and start time resumes idempotently. An audit manifest is written under `data/imports/` (or `--manifest PATH`). The server retains uploaded samples; keep the source video for access to unsampled frames. The dashboard's file upload accepts JPEG/audio; use this CLI for video. See [the detailed integration guide](research/VIDEO-MEMORY.md).
 
 ## Optional: bounded 3D scan
 
@@ -598,6 +611,8 @@ pio run -d firmware
 Backend tests cover real HTTP routes and database/file storage with injected deterministic inference: auth boundaries, cookies/CSRF, idempotency, conflicts, persistence, failed jobs, stale leases, per-frame processing, malformed uploads, disk limits, citations, temporal filters, audio questions, wake phrases, alert cooldowns, deletion, sequence gaps, and reconstruction export. Both firmware variants are compilation targets. Hardware radio/power/audio quality, ASUS model accuracy and GPU latency, Docker startup, and 20-hour endurance still require the actual setup.
 
 A [real local video evaluation](docs/evaluations/YOUTUBE-VIDEO-2026-09-19.md) used Qwen2.5-VL 3B on an Apple M5 with 16 GiB RAM. All 19 sampled frames and the full audio track processed in approximately 5 minutes 48 seconds, but recall was unreliable: source-format errors, incorrect speech recognition, and unsupported details remained. This setup cannot sustain 1 fps analysis. Valid citations establish a link to a recording, **not that the answer is factually correct**. The report includes the unchanged baseline, follow-up run, exact scope, timings, and reproduction commands. `scripts/evaluate_recall.py` saves actual responses and checks source links without pretending to grade factual accuracy.
+
+The [OpenCLIP/PyAV follow-up](docs/evaluations/OPEN-VIDEO-2026-09-19.md) adds actual pixel retrieval, timestamped decoding and an isolated end-to-end runner. It processed a 30-second first-person workday segment (31 frames and complete decoded audio) without failed jobs, but only **1/7** answers fully met the prewritten criteria; it still invented a shift start and reversed an action sequence. The unchanged zoo questions improved to **1/6**, also a failure. A simpler eight-second outdoor sample passed **5/5** questions. These tiny tests show strongly scene-dependent performance, not a general accuracy endorsement.
 
 ## Dashboard controls
 

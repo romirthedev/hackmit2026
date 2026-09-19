@@ -84,6 +84,7 @@ import {
   api,
   bytes,
   clock,
+  recordingClock,
   type Recording,
   type Status,
   type Answer,
@@ -594,7 +595,7 @@ export default function Home() {
                     <CheckCircle2 size={18} />
                   </span>
                   <span className="metric-copy">
-                    <span>Ready to recall</span>
+                    <span>Analyzed recordings</span>
                     <strong>
                       <AnimatedNumber value={status?.analyzed || 0} />
                     </strong>
@@ -686,9 +687,7 @@ export default function Home() {
                           ? 'Analyzed'
                           : current.status || 'Evidence'}{' '}
                         ·{' '}
-                        {current.clock_quality === 'received_only'
-                          ? 'receive time only'
-                          : 'device timestamp'}
+                        {recordingClock(current)}
                       </span>
                     )}
                   </div>
@@ -1227,11 +1226,17 @@ export default function Home() {
                     <dd>{status?.observed_sequence_gaps}</dd>
                     <dt>Missing semantic embeddings</dt>
                     <dd>{status?.embedding_failures}</dd>
+                    <dt>Image retrieval</dt>
+                    <dd>
+                      {status?.visual_index?.enabled
+                        ? `${status.visual_index.indexed} indexed · ${status.visual_index.pending} pending · ${status.visual_index.failed} failed`
+                        : 'Not enabled'}
+                    </dd>
                   </dl>
                   <div className="row">
                     <CatalogButton
                       className="quiet"
-                      disabled={busy || !status?.failed}
+                      disabled={busy || !(status?.failed || status?.visual_index?.failed)}
                       onClick={() =>
                         void action(() => api('/retry', { method: 'POST' }))
                       }
@@ -1282,13 +1287,22 @@ export default function Home() {
               ? new Date(selected.captured_at * 1000).toLocaleString()
               : ''}{' '}
             ·{' '}
-            {selected?.clock_quality === 'received_only'
-              ? 'capture time unknown; showing receive time'
-              : selected?.device || 'recording'}
+            {selected ? recordingClock(selected) : 'recording'}
           </DialogDescription>
           {selected && (
             <>
               <Media recording={selected} />
+              {selected.provenance?.source_sha256 && (
+                <p className="muted">
+                  Clip #{selected.provenance.clip_index} ·{' '}
+                  {selected.provenance.frame_index != null
+                    ? `Source frame #${selected.provenance.frame_index} · `
+                    : ''}
+                  {selected.provenance.source_offset.toFixed(3)} seconds into source
+                  <br />
+                  Source {selected.provenance.source_sha256.slice(0, 12)} · zero-based numbering
+                </p>
+              )}
               <p>{selected.summary || 'Analysis not yet available.'}</p>
               {selected.transcript && (
                 <div className="transcript">

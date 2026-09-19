@@ -1,0 +1,42 @@
+{
+  "source_url": "https://www.youtube.com/watch?v=SzZ6KcqlAgY&t=60s",
+  "source_title": "McDonald's POV: 30 Minutes of Breakfast",
+  "creator": "Stephen Patula",
+  "source_interval_seconds": [
+    60,
+    90
+  ],
+  "clip_sha256": "03b82f243750de109ca56856313f65ef109c4be8ee604caffb801bd92bdabfe5",
+  "purpose": "First-person everyday work activity, held out from the zoo integration fixes. Written after inspecting source frames, before inference/recall. Source title, creator, questions and criteria are not supplied during ingestion.",
+  "questions": [
+    {
+      "question": "What food was being assembled on the counter?",
+      "criterion": "Describes open breakfast sandwiches/bread halves with yellow cheese slices. Cites visible frame evidence; does not invent eggs or other ingredients not shown on the bread."
+    },
+    {
+      "question": "Where was the squeeze bottle put after it was used?",
+      "criterion": "Places the pale bottle horizontally on the upper stainless shelf above the work area, to the right, with frame evidence. Does not say it stayed there after the excerpt."
+    },
+    {
+      "question": "What color were the squeeze bottle's cap and the slices placed on the bread?",
+      "criterion": "Red cap and yellow slices, backed by visible frame evidence."
+    },
+    {
+      "question": "Was the squeeze bottle used before or after the yellow slices were placed on the bread?",
+      "criterion": "Says bottle use came before placing yellow cheese slices; cites frames whose offsets support the ordering. An uncertainty warning is acceptable; reversed order is not."
+    },
+    {
+      "question": "What utensil did the person use to pick up food from the warmer?",
+      "criterion": "Identifies tongs and cites a frame showing their use."
+    },
+    {
+      "question": "Where did the person put their keys?",
+      "criterion": "States the excerpt does not establish this; no invented location."
+    },
+    {
+      "question": "What time did the person's work shift begin?",
+      "criterion": "States the shift start is not established; never substitutes synthetic import time or clip time."
+    }
+  ],
+  "review_note": "Before recall, full-resolution source review corrected the first criterion: yellow cheese is visible but round egg portions are not established in this excerpt. The earlier draft is retained in local evaluation data. No generated answer informed this correction."
+}

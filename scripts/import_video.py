@@ -1,159 +1,124 @@
 #!/usr/bin/env python3
-"""Import every decoded video frame and 30-second audio chunks. Requires ffmpeg + ffprobe.
-Resume uses the file digest as the boot ID, so server ingestion is idempotent.
+"""Import timestamped video samples and complete audio via PyAV and the real API.
+
+Default: 1 fps (first decoded frame on/after each interval). --fps 0 keeps every
+frame. Supply the recording start, or explicitly mark a synthetic timeline.
+Reruns with identical bytes/settings/start resume idempotently.
 """
 
 import argparse
 import hashlib
+import itertools
 import json
-import subprocess
-import tempfile
+import math
+import os
 import time
 from pathlib import Path
 
 import httpx
 from dotenv import dotenv_values
+from rewind.video import audio_samples, video_samples
 
 
 def send(client, url, headers, data):
     for attempt in range(8):
         try:
-            r = client.post(url, headers=headers, content=data)
-            if r.status_code in (200, 201):
-                return
-            if r.status_code < 500 and r.status_code != 429:
-                r.raise_for_status()
+            response = client.post(url, headers=headers, content=data)
+            if response.status_code in (200, 201):
+                return response.json()
+            if response.status_code < 500 and response.status_code != 429:
+                response.raise_for_status()
         except httpx.TransportError:
             pass
         time.sleep(min(30, 2**attempt))
-    raise RuntimeError("Upload failed; rerun to resume without duplicating received frames.")
+    raise RuntimeError("Upload failed; rerun with the same start/settings to resume.")
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("video", type=Path)
-    p.add_argument("--server", default="http://localhost:8000")
-    p.add_argument("--start", type=float, required=True, help="Actual recording start in Unix seconds")
-    args = p.parse_args()
-    env = dotenv_values(Path(__file__).resolve().parents[1] / ".env")
-    token = env["REWIND_ADMIN_TOKEN"]
-    digest = hashlib.sha256()
-    with args.video.open("rb") as f:
-        while chunk := f.read(1024 * 1024):
-            digest.update(chunk)
-    boot = "video-" + digest.hexdigest()[:40]
-    probe = json.loads(
-        subprocess.check_output(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_frames",
-                "-select_streams",
-                "v:0",
-                "-show_entries",
-                "frame=best_effort_timestamp_time",
-                "-of",
-                "json",
-                str(args.video),
-            ]
-        )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("video", type=Path)
+    parser.add_argument("--server", default="http://localhost:8000")
+    parser.add_argument("--start", type=float, required=True, help="Recording start in Unix seconds")
+    parser.add_argument(
+        "--synthetic-clock", action="store_true", help="Start is an import timeline, not known capture time"
     )
-    timestamps = [float(x["best_effort_timestamp_time"]) for x in probe["frames"]]
-    if not timestamps:
-        raise SystemExit("No video frames found.")
-    with tempfile.TemporaryDirectory(prefix="rewind-video-") as td, httpx.Client(timeout=60) as client:
-        directory = Path(td)
-        # Bounded 20-hour prototype importer uses temporary disk, not unbounded RAM tensors.
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-i",
-                str(args.video),
-                "-map",
-                "0:v:0",
-                "-fps_mode",
-                "passthrough",
-                "-q:v",
-                "2",
-                str(directory / "%09d.jpg"),
-            ],
-            check=True,
-        )
-        for i, path in enumerate(sorted(directory.glob("*.jpg"))):
-            at = args.start + timestamps[i] - timestamps[0]
-            send(
+    parser.add_argument("--fps", type=float, default=1, help="Sampling rate; 0 uploads every decoded frame")
+    parser.add_argument("--clip-seconds", type=int, default=30, choices=range(1, 61), metavar="1..60")
+    parser.add_argument(
+        "--manifest", type=Path, help="JSONL audit manifest (overwritten on each resumable run)"
+    )
+    args = parser.parse_args()
+    if not math.isfinite(args.fps) or not 0 <= args.fps <= 120:
+        parser.error("fps must be between 0 and 120")
+    if not math.isfinite(args.start) or not 0 < args.start <= time.time():
+        parser.error("start must be a positive Unix timestamp in the past")
+    env = dotenv_values(Path(__file__).resolve().parents[1] / ".env")
+    token = os.environ.get("REWIND_ADMIN_TOKEN") or env.get("REWIND_ADMIN_TOKEN")
+    if not token:
+        parser.error("REWIND_ADMIN_TOKEN is missing")
+    with args.video.open("rb") as source:
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+    config = {
+        "version": 2,
+        "sha256": digest,
+        "fps": args.fps,
+        "clip_seconds": args.clip_seconds,
+        "start": args.start,
+        "clock": "synthetic" if args.synthetic_clock else "recording_start",
+    }
+    boot = "video2-" + hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()[:40]
+    manifest = args.manifest or Path("data/imports") / (boot + ".jsonl")
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    counts = {"frame": 0, "audio": 0}
+    with manifest.open("w") as audit, httpx.Client(timeout=60) as client:
+        audit.write(json.dumps({"import": config, "boot": boot}) + "\n")
+        for sample in itertools.chain(
+            video_samples(args.video, args.fps, args.clip_seconds),
+            audio_samples(args.video, args.clip_seconds),
+        ):
+            metadata = {
+                "source_sha256": digest,
+                "source_offset": sample.offset,
+                "source_pts": sample.pts,
+                "time_base": sample.time_base,
+                "frame_index": sample.frame_index,
+                "clip_index": sample.clip_index,
+                "sample_fps": args.fps,
+                "clock": config["clock"],
+            }
+            receipt = send(
                 client,
-                args.server + "/api/ingest/frame",
+                args.server.rstrip("/") + "/api/ingest/" + sample.kind,
                 {
                     "Authorization": "Bearer " + token,
-                    "Content-Type": "image/jpeg",
+                    "Content-Type": "image/jpeg" if sample.kind == "frame" else "audio/wav",
                     "X-Boot-ID": boot,
-                    "X-Sequence": str(i),
-                    "X-Captured-At": str(at),
+                    "X-Sequence": str(sample.sequence),
+                    "X-Captured-At": str(args.start + sample.offset),
+                    "X-Video-Provenance": json.dumps(metadata),
                 },
-                path.read_bytes(),
+                sample.data,
             )
-            path.unlink()
-            if i % 100 == 0:
-                print(f"Imported {i + 1}/{len(timestamps)} frames")
-        streams = json.loads(
-            subprocess.check_output(
-                [
-                    "ffprobe",
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "a",
-                    "-show_entries",
-                    "stream=index",
-                    "-of",
-                    "json",
-                    str(args.video),
-                ]
-            )
-        )
-        if streams["streams"]:
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-v",
-                    "error",
-                    "-i",
-                    str(args.video),
-                    "-map",
-                    "0:a:0",
-                    "-ac",
-                    "1",
-                    "-ar",
-                    "16000",
-                    "-c:a",
-                    "pcm_s16le",
-                    "-f",
-                    "segment",
-                    "-segment_time",
-                    "30",
-                    str(directory / "audio-%06d.wav"),
-                ],
-                check=True,
-            )
-            for i, path in enumerate(sorted(directory.glob("audio-*.wav"))):
-                send(
-                    client,
-                    args.server + "/api/ingest/audio",
+            audit.write(
+                json.dumps(
                     {
-                        "Authorization": "Bearer " + token,
-                        "Content-Type": "audio/wav",
-                        "X-Boot-ID": boot,
-                        "X-Sequence": str(i),
-                        "X-Captured-At": str(args.start + i * 30),
-                    },
-                    path.read_bytes(),
+                        "kind": sample.kind,
+                        "sequence": sample.sequence,
+                        **metadata,
+                        "payload_sha256": hashlib.sha256(sample.data).hexdigest(),
+                        **receipt,
+                    }
                 )
-                path.unlink()
-    print("All decoded frames and audio uploaded. Analysis continues in the durable queue.")
+                + "\n"
+            )
+            audit.flush()
+            counts[sample.kind] += 1
+            if sum(counts.values()) % 100 == 0:
+                print(json.dumps(counts), flush=True)
+    print(json.dumps({**counts, "manifest": str(manifest), "boot": boot}))
+    print(
+        "Uploads saved. Caption, transcription, and optional visual-index jobs continue in the durable queue."
+    )
 
 
 if __name__ == "__main__":

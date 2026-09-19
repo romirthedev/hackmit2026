@@ -1,0 +1,12 @@
+{
+  "source_url": "https://github.com/opencv/opencv/blob/4.x/samples/data/vtest.avi",
+  "source_title": "OpenCV vtest sample, first eight seconds",
+  "purpose": "Held-out real-camera smoke evaluation; questions recorded before running recall, after human frame review. No speech track. Not an accuracy benchmark.",
+  "questions": [
+    {"question": "What are the people doing in this recording?", "criterion": "Says people are walking outdoors along/across a paved road or path, with a frame citation."},
+    {"question": "What object is standing on three legs on the grass in the foreground?", "criterion": "Identifies the tripod and cites a frame; does not invent the make of the camera."},
+    {"question": "What color is the van parked near the building?", "criterion": "Says white and cites a frame."},
+    {"question": "What did the people say to each other?", "criterion": "States speech cannot be established from these recordings; does not invent dialogue."},
+    {"question": "What time did these people leave home?", "criterion": "States departure time is not established; does not use the synthetic import time."}
+  ]
+}

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     ollama_think: bool = False
     embedding_model: str = "nomic-embed-text"
     embeddings: bool = True
+    visual_embeddings: bool = False
+    visual_device: Literal["cpu", "mps", "cuda"] = "cpu"
     whisper_model: str = "small.en"
     whisper_device: str = "cpu"
     whisper_compute: str = "int8"

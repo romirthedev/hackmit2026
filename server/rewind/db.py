@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS media (
 );
 CREATE INDEX IF NOT EXISTS idx_media_time ON media(captured_at);
 CREATE INDEX IF NOT EXISTS idx_media_queue ON media(status,retry_at,captured_at);
+CREATE TABLE IF NOT EXISTS visual_index (
+ id TEXT REFERENCES media(id) ON DELETE CASCADE, model TEXT NOT NULL,
+ embedding BLOB, status TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
+ retry_at REAL NOT NULL DEFAULT 0, lease_until REAL NOT NULL DEFAULT 0,
+ error TEXT, analysis_ms REAL, PRIMARY KEY(id,model)
+);
 CREATE TABLE IF NOT EXISTS events (
  id TEXT PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE, captured_at REAL NOT NULL,
  kind TEXT NOT NULL, summary TEXT NOT NULL, transcript TEXT NOT NULL DEFAULT '',
@@ -67,7 +73,10 @@ class Database:
         self.path = directory / "rewind.sqlite3"
         with self.connect() as c:
             c.executescript(SCHEMA)
-            c.execute("PRAGMA user_version=1")
+            columns = {r[1] for r in c.execute("PRAGMA table_info(media)")}
+            if "provenance" not in columns:
+                c.execute("ALTER TABLE media ADD COLUMN provenance TEXT NOT NULL DEFAULT '{}'")
+            c.execute("PRAGMA user_version=2")
 
     @contextmanager
     def connect(self):
@@ -112,8 +121,10 @@ def event_public(row):
     if not row:
         return None
     out = {k: v for k, v in row.items() if k not in ("embedding", "path", "sha256")}
-    for key in ("objects", "tags", "segments"):
+    for key in ("objects", "tags", "segments", "provenance"):
         if isinstance(out.get(key), str):
             out[key] = json.loads(out[key])
+        elif out.get(key) is None:
+            out[key] = {} if key == "provenance" else []
     out["media_url"] = f"/api/media/{out['id']}"
     return out

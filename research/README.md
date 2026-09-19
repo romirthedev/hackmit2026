@@ -1,6 +1,10 @@
 # Research provenance
 
-This repository implements its own capture, evidence ledger, retrieval, dashboard and device firmware. It does not bundle model weights or present paper benchmark results as measurements of REWIND.
+This repository integrates upstream capture/model libraries with its own evidence ledger, durable jobs, retrieval adapters, dashboard and device firmware. It does not bundle model weights or present paper benchmark results as measurements of REWIND.
+
+## Wearable and video-memory reuse
+
+[Source audit, licenses, integration, setup, and limitations](VIDEO-MEMORY.md) covers OMI/OmiGlass, VideoRAG, Screenpipe, OpenCLIP, PyAV and faster-whisper. OpenCLIP pixel retrieval and PyAV timestamped streaming import are implemented and tested locally; full upstream product stacks are not claimed as integrated.
 
 ## LingBot-Map
 

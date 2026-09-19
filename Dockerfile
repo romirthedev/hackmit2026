@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 ffmpeg
 WORKDIR /app
 COPY pyproject.toml ./
 COPY server ./server
-RUN pip install --no-cache-dir '.[audio]'
+ARG REWIND_PYTHON_EXTRAS=audio,video
+RUN pip install --no-cache-dir ".[${REWIND_PYTHON_EXTRAS}]"
 COPY scripts ./scripts
 COPY --from=dashboard /src/web/dist/client ./web/dist/client
 RUN useradd --uid 10001 --create-home rewind && mkdir -p /app/data /home/rewind/.cache && chown rewind:rewind /app/data /home/rewind/.cache
