@@ -70,10 +70,12 @@ class NotchContext:
             """)
 
     def status(self):
+        last_sync = self.db.setting("notch_last_sync")
         return {
             "configured": bool(self.s.notch_url and self.s.notch_token),
             "enabled": self.db.setting("notch_enabled", False),
-            "last_sync": self.db.setting("notch_last_sync"),
+            "last_sync": last_sync,
+            "stale": not last_sync or not 0 <= time.time() - last_sync <= 300,
             "sources": self.db.setting("notch_sources", {}),
             "error": self.db.setting("notch_error", ""),
             "counts": {
@@ -111,11 +113,18 @@ class NotchContext:
                 ) from None
 
     def ingest(self, snapshot):
-        if abs(time.time() - snapshot.exported_at) > 600:
+        if not -30 <= time.time() - snapshot.exported_at <= 600:
             raise ValueError("Stale Notch snapshot")
-        documents = {d.key: d for d in snapshot.documents}
-        if len(documents) != len(snapshot.documents):
+        if len({d.key for d in snapshot.documents}) != len(snapshot.documents):
             raise ValueError("Duplicate Notch document keys")
+        # An exporter may have collected a partial source before a permission or
+        # account failure. Do not keep that partial cache as if its source worked.
+        scope = {"note": "notes", "calendar": "calendar", "contact": "contacts", "email": "mail"}
+        documents = {
+            d.key: d
+            for d in snapshot.documents
+            if snapshot.sources.get(scope[d.kind], "connected") == "connected"
+        }
         by_title = {d.title.casefold(): d.key for d in documents.values() if d.kind == "note"}
         contact_emails = {}
         for d in documents.values():
@@ -167,12 +176,14 @@ class NotchContext:
                             "INSERT OR IGNORE INTO context_edges VALUES(?,?,?)",
                             (identifier(key), identifier(target), "linked_source"),
                         )
-        self.db.set_setting("notch_last_sync", now)
+        # Receipt time must not make an old exported calendar fresh again.
+        self.db.set_setting("notch_last_sync", min(now, snapshot.exported_at))
         self.db.set_setting("notch_sources", snapshot.sources)
         self.refresh_reminders()
 
     def public(self, row):
         payload = json.loads(row["payload"])
+        exported_at = self.db.setting("notch_last_sync") or row["synced_at"]
         return {
             "id": row["id"],
             "kind": "context",
@@ -181,8 +192,11 @@ class NotchContext:
             "title": row["title"],
             "summary": row["title"],
             "text": row["text"],
-            "captured_at": row["synced_at"],
-            "synced_at": row["synced_at"],
+            "captured_at": exported_at,
+            "synced_at": exported_at,
+            "received_at": row["synced_at"],
+            "source_exported_at": exported_at,
+            "source_stale": self.status()["stale"],
             "clock_quality": "digital_source",
             "starts_at": payload.get("starts_at"),
             "media_url": "",
@@ -269,7 +283,8 @@ class NotchContext:
 
     def refresh_reminders(self):
         now = time.time()
-        if now - (self.db.setting("notch_last_sync", 0) or 0) > 300:
+        age = now - (self.db.setting("notch_last_sync", 0) or 0)
+        if not 0 <= age <= 300 or self.db.setting("notch_error", ""):
             return  # Stale calendars must not trigger new reminders.
         for row in self.db.all("SELECT * FROM context_documents WHERE kind='calendar'"):
             d = json.loads(row["payload"])
@@ -286,6 +301,19 @@ class NotchContext:
                 ON CONFLICT(id) DO UPDATE SET message=excluded.message""",
                 (key, row["id"], message, start, now),
             )
+
+    def reminders(self):
+        """Only expose current, connected appointments; seen IDs stay deduplicated."""
+        if (
+            not self.db.setting("notch_enabled", False)
+            or self.status()["stale"]
+            or self.db.setting("notch_error", "")
+        ):
+            return []
+        self.refresh_reminders()
+        return self.db.all(
+            "SELECT * FROM context_reminders WHERE starts_at>? ORDER BY starts_at LIMIT 30", (time.time(),)
+        )
 
     def disconnect(self):
         self.db.set_setting("notch_enabled", False)

@@ -10,6 +10,8 @@ import hashlib
 import json
 import os
 import subprocess
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -28,8 +30,13 @@ def main():
     )
     parser.add_argument("--chat-template", type=Path, help="Explicit model-author chat template")
     parser.add_argument("--min-free-gib", type=float, default=0)
-    parser.add_argument("--report", type=Path, required=True, help="New launch metadata file")
+    reports = parser.add_mutually_exclusive_group(required=True)
+    reports.add_argument("--report", type=Path, help="New launch metadata file")
+    reports.add_argument("--report-dir", type=Path, help="Create a unique launch report on every startup")
     args = parser.parse_args()
+    if args.report_dir:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        args.report = args.report_dir / f"vision-{stamp}-{uuid.uuid4().hex[:8]}.json"
     if not 2048 <= args.context <= 131072 or not 1024 <= args.port <= 65535:
         parser.error("Invalid context or port")
     if args.report.exists():
@@ -111,7 +118,7 @@ def main():
             parser.error("Chat template does not exist")
         command.extend(["--chat-template-file", str(args.chat_template.resolve())])
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(
+    report_text = (
         json.dumps(
             {
                 "model": args.model,
@@ -135,6 +142,8 @@ def main():
         )
         + "\n"
     )
+    with args.report.open("x") as report:
+        report.write(report_text)
     print(devices, flush=True)
     os.execve(binary, command, env)
 

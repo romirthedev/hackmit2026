@@ -162,3 +162,54 @@ async def test_disconnect_during_model_request_cannot_restore_removed_source(con
     assert answer["mode"] == "context_changed"
     assert not answer["grounded"] and not answer["evidence"]
     assert "Private garden note" not in json.dumps(context.db.all("SELECT * FROM answers"))
+
+
+def test_reminders_keep_seen_identity_and_handle_current_source_changes(context):
+    context.db.set_setting("notch_enabled", True)
+    original = {"key": "visit", "kind": "calendar", "title": "Garden visit", "starts_at": time.time() + 600}
+    context.ingest(snapshot([original]))
+    reminder = context.reminders()[0]
+    context.db.execute("UPDATE context_reminders SET seen=1 WHERE id=?", (reminder["id"],))
+    context.ingest(snapshot([{**original, "title": "Updated visit", "location": "Library"}]))
+    refreshed = context.reminders()[0]
+    assert refreshed["id"] == reminder["id"] and refreshed["seen"] == 1
+    assert "Updated visit" in refreshed["message"] and "Library" in refreshed["message"]
+    context.ingest(snapshot([{**original, "starts_at": time.time() + 1200}]))
+    assert context.reminders()[0]["id"] != reminder["id"]
+    assert context.reminders()[0]["seen"] == 0
+    context.ingest(snapshot([{**original, "all_day": True}]))
+    assert context.reminders() == []
+
+
+def test_reminders_hide_on_sync_error_staleness_and_disconnect(context):
+    context.db.set_setting("notch_enabled", True)
+    original = {"key": "visit", "kind": "calendar", "title": "Garden visit", "starts_at": time.time() + 600}
+    context.ingest(snapshot([original]))
+    assert len(context.reminders()) == 1
+    context.db.set_setting("notch_error", "Sync unavailable")
+    assert context.reminders() == []
+    context.db.set_setting("notch_error", "")
+    context.db.set_setting("notch_last_sync", time.time() - 301)
+    assert context.reminders() == []
+    context.ingest(snapshot([original]))
+    assert len(context.reminders()) == 1
+    context.disconnect()
+    assert context.reminders() == []
+    assert not context.db.all("SELECT * FROM context_reminders")
+
+
+def test_old_export_cannot_gain_freshness_when_received_and_partial_failed_source_is_removed(context):
+    context.db.set_setting("notch_enabled", True)
+    doc = {"key": "visit", "kind": "calendar", "title": "Garden visit", "starts_at": time.time() + 600}
+    old = snapshot([doc], time.time() - 400)
+    context.ingest(old)
+    assert context.status()["stale"] and context.reminders() == []
+    context.ingest(snapshot([doc]))
+    assert len(context.reminders()) == 1
+    failed = snapshot([doc])
+    failed.sources["calendar"] = "permission_required"
+    context.ingest(failed)
+    assert context.reminders() == []
+    assert not context.db.all("SELECT * FROM context_documents")
+    with pytest.raises(ValueError, match="Stale"):
+        context.ingest(snapshot([doc], time.time() + 60))

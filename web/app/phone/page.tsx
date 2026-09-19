@@ -16,6 +16,7 @@ import { api, type Answer, type Status } from '@/lib/api';
 import { PhoneCapture, type CaptureState } from '@/lib/phone-capture';
 import { ComputerPanel } from '@/components/computer-panel';
 import { ContextPanel } from '@/components/context-panel';
+import { PeoplePanel } from '@/components/people-panel';
 import './phone.css';
 import Link from 'next/link';
 import { FrameImage } from '@/components/catalog';
@@ -26,6 +27,13 @@ type Reminder = {
   seen: number;
   starts_at: number;
 };
+type OriginalRecording = {
+  id: string;
+  started_at: number;
+  end_reason: string | null;
+  original_url: string | null;
+  bytes: number;
+};
 const INITIAL: CaptureState = {
   recording: false,
   requesting: false,
@@ -35,6 +43,8 @@ const INITIAL: CaptureState = {
   error: '',
   awake: false,
   startedAt: 0,
+  finalizing: false,
+  originalBytes: 0,
 };
 export default function Phone() {
   const video = useRef<HTMLVideoElement>(null);
@@ -45,6 +55,7 @@ export default function Phone() {
   const [status, setStatus] = useState<Status | null>(null);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [originals, setOriginals] = useState<OriginalRecording[]>([]);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
@@ -64,16 +75,18 @@ export default function Phone() {
     let first = true;
     const poll = async () => {
       try {
-        const [next, recent, due] = await Promise.all([
+        const [next, recent, due, recorded] = await Promise.all([
           api<Status>('/status'),
           api<Answer[]>('/answers'),
           api<Reminder[]>('/context/reminders'),
+          api<OriginalRecording[]>('/continuous-recordings?limit=3'),
         ]);
         if (!alive) return;
         setAuth(true);
         setStatus(next);
         setAnswers(recent);
         setReminders(due);
+        setOriginals(recorded);
         setError('');
         for (const reminder of due)
           if (!reminder.seen && !announced.current.has(reminder.id)) {
@@ -251,7 +264,7 @@ export default function Phone() {
         </div>
         <button
           className={'phone-record-button ' + (state.recording ? 'active' : '')}
-          disabled={state.requesting}
+          disabled={state.requesting || state.finalizing}
           onClick={() => {
             if (state.recording) capture.current?.stop();
             else void capture.current?.start();
@@ -264,9 +277,11 @@ export default function Phone() {
           )}
           {state.requesting
             ? 'Opening camera…'
-            : state.recording
-              ? 'Stop recording'
-              : 'Record'}
+            : state.finalizing
+              ? 'Saving last seconds…'
+              : state.recording
+                ? 'Stop recording'
+                : 'Record'}
         </button>
         <div className="phone-capture-details">
           <span>
@@ -283,13 +298,40 @@ export default function Phone() {
           </span>
         </div>
         <p className="phone-fine">
-          Captures one frame each second and short audio clips.{' '}
+          Saves full video and audio while this page stays open. One frame each
+          second and short audio clips are used for live analysis.{' '}
           {status?.analysis_ready === false
             ? 'Analysis is waiting for the ASUS model. Your recordings remain saved.'
             : status?.pending
               ? `${status.pending} recordings are being analyzed.`
               : 'Ask about what has been recorded and your connected sources.'}
         </p>
+        {originals.some((recording) => recording.original_url) && (
+          <details className="phone-fine">
+            <summary>Saved full recordings</summary>
+            {originals
+              .filter((recording) => recording.original_url)
+              .map((recording) => (
+                <p key={recording.id}>
+                  <a
+                    href={recording.original_url!}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open original from{' '}
+                    {new Date(recording.started_at * 1000).toLocaleTimeString(
+                      [],
+                      { hour: 'numeric', minute: '2-digit' },
+                    )}
+                  </a>{' '}
+                  ({(recording.bytes / 1024 / 1024).toFixed(1)} MB)
+                  {recording.end_reason !== 'stopped'
+                    ? ' · interrupted recording'
+                    : ''}
+                </p>
+              ))}
+          </details>
+        )}
         {(state.error || error) && (
           <p className="phone-error" role="alert">
             {state.error || error}
@@ -344,7 +386,10 @@ export default function Phone() {
                         (answer.verification?.receipt.reviews
                           ?.map((r) => r.model)
                           .join(' → ') || 'Codex')
-                      : answer.grounded
+                      : answer.mode === 'insufficient' &&
+                          answer.verification?.receipt.claims_reviewed
+                        ? 'Sources checked · evidence is incomplete'
+                        : answer.grounded
                         ? `${answer.evidence.length} sources cited`
                         : 'Evidence incomplete'}
                 </small>
@@ -381,6 +426,25 @@ export default function Phone() {
                       <track kind="captions" />
                     </audio>
                   )}
+                  {source.original_recording?.original_url && (
+                    <p className="phone-fine">
+                      <a
+                        href={source.original_recording.original_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Play original recording
+                      </a>
+                      {!source.original_recording
+                        .continuous_video_inspected && (
+                        <>
+                          {' '}
+                          · This answer used sampled evidence; the full video
+                          has not been checked.
+                        </>
+                      )}
+                    </p>
+                  )}
                 </details>
               ))}
             </article>
@@ -389,6 +453,7 @@ export default function Phone() {
       </section>
       <section hidden={view !== 'context'}>
         <ContextPanel />
+        <PeoplePanel />
       </section>
       <section hidden={view !== 'computer'}>
         <ComputerPanel visible={view === 'computer'} />

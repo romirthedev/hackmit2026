@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     processing_url: str = ""
     processing_token: str = ""
     compact_observations: bool = False
-    observation_max_tokens: int = Field(256, ge=128, le=2048)
+    observation_max_tokens: int = Field(128, ge=128, le=2048)
     codex_verify: bool = False
     codex_binary: str = "/Applications/ChatGPT.app/Contents/Resources/codex"
     codex_verify_timeout: float = Field(120, ge=10, le=600)

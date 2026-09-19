@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .config import Settings
+from .faces import FaceEncoder
 from .models import CompactObservation, Observation, RecallAnswer, RuleDecision, SearchPlan
 from .providers import Provider
 from .visual import OpenClipEncoder
@@ -41,6 +42,10 @@ class EmbedInput(BaseModel):
 class VisualInput(BaseModel):
     image: str | None = Field(default=None, max_length=2_800_000)
     text: str | None = Field(default=None, max_length=2000)
+
+
+class FaceInput(BaseModel):
+    image: str = Field(min_length=1, max_length=2_800_000)
 
 
 class PriorityGate:
@@ -93,6 +98,7 @@ def create_processing_app(settings=None, provider=None):
     p = provider or Provider(s)
     gate = PriorityGate(max(1, s.workers))
     visual = OpenClipEncoder(s.visual_device)
+    faces = FaceEncoder(Path("data/face-models"))
 
     async def auth(req: Request):
         if not hmac.compare_digest(req.headers.get("authorization", ""), "Bearer " + s.processing_token):
@@ -180,5 +186,15 @@ def create_processing_app(settings=None, provider=None):
                 decode(body.image, path, 2 * 1024 * 1024)
             vector = await asyncio.to_thread(visual.encode, path=path, text=body.text)
             return {"model": visual.model_key, "embedding": vector.tolist()}
+
+    @app.post("/faces")
+    async def face_features(body: FaceInput):
+        with tempfile.TemporaryDirectory(prefix="rewind-faces-") as directory:
+            path = Path(directory) / "original.jpg"
+            decode(body.image, path, 2 * 1024 * 1024)
+            try:
+                return await asyncio.to_thread(faces.encode, path.read_bytes())
+            except ValueError as error:
+                raise HTTPException(422, str(error)) from error
 
     return app

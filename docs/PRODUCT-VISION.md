@@ -34,6 +34,17 @@ is an optional additional input.
 - Make recording, stopping, asking, and hearing a reminder clear and accessible.
 - Keep the screen awake during foreground capture. Show interruptions explicitly.
 - Keep originals, retry interrupted uploads, and distinguish saved from analyzed.
+- Record continuous video and audio alongside the lightweight live samples.
+  Preserve the original container fragments and interruption state; do not call
+  a sequence of sampled images a complete recording.
+- Use bounded working memory and temporal retrieval for long days, while keeping
+  original evidence recoverable. Research recent streaming-video compression,
+  but never promise that lossy token compression preserves every possible detail.
+- Cover different periods for whole-day questions, show missing coverage, and
+  distinguish inspected samples from full recordings that were merely saved.
+- Remember face-to-name links only through explicit confirmation. Keep uncertain
+  reappearances tentative, allow corrections/revocation, and never infer identity
+  from the contact book alone.
 - Connect actual authorized account data. Do not populate invented friends,
   emails, appointments, or memories to make the interface look complete.
 - Support both reactive questions and proactive context-driven reminders.

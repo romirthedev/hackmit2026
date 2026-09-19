@@ -15,7 +15,10 @@ import time
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from .sampled_evidence import sample_scope_qualification
+from .temporal import coverage_qualification
 
 
 class Review(BaseModel):
@@ -24,6 +27,9 @@ class Review(BaseModel):
     reason: str
     answer: str
     evidence_ids: list[str]
+    insufficient_evidence: bool = Field(
+        description="True when the assessed or corrected answer cannot fully answer the question from supplied evidence, even if its limited factual claims are supported"
+    )
 
 
 class TieBreak(BaseModel):
@@ -56,6 +62,17 @@ do not prove something never happened. A source label existing is not proof its 
 Every material factual claim must be supported by the supplied original image or digital text,
 or explicitly qualified as reported by a transcript. Preserve uncertainty. Use only supplied
 E labels for citations. If evidence is insufficient, abstain. Return only the required JSON.
+If recording_coverage is supplied, it describes available samples, not a complete account of the day.
+Preserve its gaps, pending-analysis limitations and clock uncertainty. Missing samples cannot establish
+that an event did not happen. Reject a candidate claiming complete-day knowledge from incomplete samples.
+The evidence_scope describes inspection limits. Linked continuous originals were not watched or decoded
+for this answer. Do not infer their content from file availability. Selected stills can miss brief actions;
+absence in them cannot establish that an event never happened in the full recording.
+A candidate marked insufficient_evidence may still contain factual claims. Review those claims and
+their qualifications; do not reject a properly qualified partial answer merely because it is incomplete.
+Set insufficient_evidence=true when the assessed or corrected answer only partially resolves the question
+or abstains. A supported verdict can coexist with incomplete evidence for the full question.
+Preserve any temporal_warning: an unverified reference event does not establish a relative timeline.
 """
 
 
@@ -144,6 +161,22 @@ def validate_answer(answer, labels):
     return answer
 
 
+class EvidenceIntegrityError(ValueError):
+    """An original no longer matches its durable ingest digest."""
+
+
+def verify_source_hashes(expected):
+    for path, digest in expected.items():
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise EvidenceIntegrityError("Original source lacks a valid ingest digest")
+        try:
+            actual = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        except OSError as exc:
+            raise EvidenceIntegrityError("Original source is unavailable") from exc
+        if actual != digest:
+            raise EvidenceIntegrityError("Original source differs from its ingest digest")
+
+
 class Verifier:
     def __init__(self, db, settings, runner=None):
         self.db, self.s = db, settings
@@ -155,9 +188,15 @@ class Verifier:
                 lease_until REAL NOT NULL DEFAULT 0, updated_at REAL NOT NULL)""")
 
     def enqueue(self, answer_id, packet, connection=None):
-        packet["image_hashes"] = {
-            str(path): hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in packet["images"]
-        }
+        expected = packet.get("expected_image_hashes")
+        sources = packet.get("expected_source_hashes")
+        if expected is None or sources is None or set(expected) != set(packet["images"]):
+            raise EvidenceIntegrityError("Review requires persisted ingest hashes for its originals")
+        if any(sources.get(path) != digest for path, digest in expected.items()):
+            raise EvidenceIntegrityError("Image digests differ from the ingest evidence packet")
+        verify_source_hashes(sources)
+        # Never establish a new integrity baseline from the bytes present now.
+        packet["image_hashes"] = dict(expected)
         (connection or self.db).execute(
             "INSERT INTO answer_reviews(answer_id,packet,status,updated_at) VALUES(?,?,?,?)",
             (answer_id, json.dumps(packet), "pending", time.time()),
@@ -202,20 +241,49 @@ class Verifier:
             "basis": "original images, digital text and explicitly qualified automatic transcripts",
             "candidate": packet.get("candidate"),
             "source_hashes": list(packet.get("image_hashes", {}).values()),
+            "source_integrity_basis": "persisted media ingest SHA256",
         }
+        coverage = packet.get("recording_coverage")
+        if coverage is not None:
+            receipt["recording_coverage"] = coverage
+        scope = packet.get("evidence_scope")
+        if scope is not None:
+            receipt["evidence_scope"] = scope
+        temporal_warning = packet.get("temporal_warning")
+        if temporal_warning:
+            receipt["temporal_warning"] = temporal_warning
         final, state, message = None, "unavailable", "Evidence checking is unavailable. Please try again."
         try:
-            for path, digest in packet["image_hashes"].items():
-                if hashlib.sha256(Path(path).read_bytes()).hexdigest() != digest:
-                    raise ValueError("An original source changed")
+            expected = packet.get("expected_image_hashes")
+            sources = packet.get("expected_source_hashes")
+            if (
+                expected is None
+                or sources is None
+                or expected != packet.get("image_hashes")
+                or set(expected) != set(packet["images"])
+                or any(sources.get(path) != digest for path, digest in expected.items())
+            ):
+                raise EvidenceIntegrityError("Review is missing its original ingest hashes")
+            verify_source_hashes(sources)
             evidence_data = {key: packet[key] for key in ("question", "evidence", "attached_images_in_order")}
+            if coverage is not None:
+                evidence_data["recording_coverage"] = coverage
+            if scope is not None:
+                evidence_data["evidence_scope"] = scope
+            if temporal_warning:
+                evidence_data["temporal_warning"] = temporal_warning
             prompt = INSTRUCTIONS + "\nAssess candidate Qwen: supported, unsupported, or uncertain. "
             prompt += "If unsupported, provide a corrected answer only when evidence establishes one. Otherwise explicitly abstain.\n"
             prompt += json.dumps({**evidence_data, "candidate": packet["candidate"]})
             astra, audit = await self.runner.run("gpt-6-astra", prompt, packet["images"], Review)
             receipt["reviews"].append(audit)
             if astra.verdict == "supported":
-                final = packet["candidate"]
+                final = {
+                    **packet["candidate"],
+                    "insufficient_evidence": bool(
+                        packet["candidate"].get("insufficient_evidence") or astra.insufficient_evidence
+                    ),
+                }
             else:
                 sol_prompt = (
                     INSTRUCTIONS
@@ -236,18 +304,15 @@ class Verifier:
                         "The source checks did not establish a reliable answer. Review the original evidence below.",
                     )
             if final:
-                if final.get("insufficient_evidence"):
-                    state, message, final = (
-                        "insufficient",
-                        "The available sources do not establish an answer to that question.",
-                        None,
-                    )
-                else:
-                    final = validate_answer(final, set(packet["aliases"]))
-                    for path, digest in packet["image_hashes"].items():
-                        if hashlib.sha256(Path(path).read_bytes()).hexdigest() != digest:
-                            raise ValueError("Original evidence changed during review")
-                    state = "verified"
+                final = validate_answer(final, set(packet["aliases"]))
+                verify_source_hashes(sources)
+                incomplete = bool(
+                    final.get("insufficient_evidence")
+                    or packet["candidate"].get("insufficient_evidence")
+                    or temporal_warning
+                )
+                state = "insufficient" if incomplete else "verified"
+                receipt.update(claims_reviewed=True, answer_complete=not incomplete)
         except asyncio.CancelledError:
             self.db.execute(
                 "UPDATE answer_reviews SET status='pending',lease_until=0 WHERE answer_id=?",
@@ -283,6 +348,14 @@ class Verifier:
             if state == "context_changed":
                 evidence = [source for source in evidence if source.get("source") != "notch"]
                 receipt = {"reviews": [], "basis": "Connected sources changed; stale review content removed."}
+            if coverage is not None:
+                # A corrected answer or an unavailable reviewer must not remove
+                # the server's deterministic recording-coverage qualification.
+                message += "\n\n" + coverage_qualification(coverage)
+            elif qualification := sample_scope_qualification(packet["question"], message, scope):
+                message += "\n\n" + qualification
+            if final and temporal_warning:
+                message += "\n\nThe relative-time reference event remains unverified."
             c.execute(
                 "UPDATE answers SET answer=?,evidence=?,grounded=?,mode=? WHERE id=?",
                 (message, json.dumps(evidence), int(state == "verified"), state, row["answer_id"]),

@@ -28,7 +28,9 @@ from .db import Database, event_public
 from .memory import Memory
 from .models import AskRequest, RuleRequest, VideoProvenance
 from .pairing import BrowserPairing
+from .people import PeopleMemory, people_router
 from .providers import Provider
+from .recordings import recording_bytes, recording_router
 from .verification import Verifier
 from .visual import VisualIndex
 from .worker import Worker
@@ -74,6 +76,7 @@ def create_app(settings=None, provider=None):
     )
     worker = Worker(db, p, memory, s)
     computer = Computer(db, s)
+    people = PeopleMemory(db, s)
     ingestion_lock = asyncio.Lock()
     pairing = BrowserPairing(db, s.admin_token)
 
@@ -161,6 +164,7 @@ def create_app(settings=None, provider=None):
         tasks.append(asyncio.create_task(worker.elastic_sync()))
         tasks.append(asyncio.create_task(context.run()))
         tasks.append(asyncio.create_task(computer.monitor()))
+        tasks.append(asyncio.create_task(people.run()))
         try:
             yield
         finally:
@@ -184,6 +188,9 @@ def create_app(settings=None, provider=None):
     app.state.context = context
     app.state.verifier = verifier
     app.state.computer = computer
+    app.state.people = people
+    app.include_router(recording_router(db, s, admin, ingestion_lock))
+    app.include_router(people_router(people, admin))
 
     @app.get("/api/computer/state", dependencies=[Depends(admin)])
     async def computer_state():
@@ -254,6 +261,8 @@ def create_app(settings=None, provider=None):
             MIN(CASE WHEN status IN ('queued','processing') THEN captured_at END) AS oldest_pending_at,
             MAX(captured_at) AS last_capture FROM media""")
         totals["devices"] = [{**d, "state": json.loads(d["state"])} for d in db.all("SELECT * FROM devices")]
+        totals["continuous_recording_bytes"] = recording_bytes(db)
+        totals["stored_bytes"] += totals["continuous_recording_bytes"]
         totals["provider"] = s.provider
         totals["processing_host"] = "ASUS via Tailscale" if s.processing_url else "server"
         totals["analysis_ready"] = await p.ready() if s.processing_url else True
@@ -306,12 +315,7 @@ def create_app(settings=None, provider=None):
 
     @app.get("/api/context/reminders", dependencies=[Depends(admin)])
     async def context_reminders():
-        if time.time() - (db.setting("notch_last_sync", 0) or 0) > 300:
-            return []
-        context.refresh_reminders()
-        return db.all(
-            "SELECT * FROM context_reminders WHERE starts_at>? ORDER BY starts_at LIMIT 30", (time.time(),)
-        )
+        return context.reminders()
 
     @app.post("/api/context/reminders/{reminder_id}/seen", dependencies=[Depends(admin)])
     async def context_reminder_seen(reminder_id: str):
@@ -467,7 +471,7 @@ def create_app(settings=None, provider=None):
                 if old["provenance"] != provenance or (provenance != "{}" and old["captured_at"] != captured):
                     raise HTTPException(409, "Sequence already contains different video provenance")
                 return {"id": old["id"], "duplicate": True, "status": old["status"]}
-            total = db.one("SELECT COALESCE(SUM(bytes),0) n FROM media")["n"]
+            total = db.one("SELECT COALESCE(SUM(bytes),0) n FROM media")["n"] + recording_bytes(db)
             if (
                 total + len(data) > s.max_storage_gb * 1e9
                 or shutil.disk_usage(media_dir).free - len(data) < s.min_free_gb * 1e9

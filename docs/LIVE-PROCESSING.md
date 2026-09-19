@@ -27,6 +27,15 @@ must all pass before describing a configuration as near-live. RAM capacity alone
 is not a speed benchmark. The earlier native 27B concurrency experiment failed
 that requirement and is not the live target.
 
+The 35B weights are now installed and running on the GB10, with eight native
+parallel slots and seven background label workers. Compact descriptions use a
+24-word target and 128-token cap. A 32-frame replay at one frame per second
+completed with 7.554-second p95 capture-to-result delay and 0.469-second final
+queue wait. A separate real phone API question plus Astra review completed in
+16.300 seconds under background load. These short measurements are documented
+with their runtime differences and limitations in
+[QWEN35-LIVE.md](evaluations/QWEN35-LIVE.md).
+
 The speech transport was measured with a clearly identified synthetic utterance:
 3.786 seconds of speech took 5.130 seconds cold and 3.072 seconds warm, including
 the Mac-to-ASUS round trip. Both transcripts preserved the question. This tests
@@ -60,6 +69,16 @@ revocation removes stale reviews with the associated answer.
 Agreement is not certainty. A transcript-only source can establish what the
 automatic transcript says; these image review jobs do not independently verify
 original audio. The product must preserve that distinction.
+
+Cited partial answers also receive evidence review. Checked partial facts remain
+explicitly insufficient for the entire question, with `grounded=false`; reviewer
+agreement cannot silently turn missing evidence into a complete answer. Day
+overviews attach up to twelve original frames across the requested interval and
+carry coverage limitations through both reviewers. Continuous originals are
+retained and linked for playback, but the current automated answer path inspects
+sampled images rather than decoding every frame of those originals. See
+[continuous recording](CONTINUOUS-RECORDING.md) and
+[long-day research](../research/LONG-DAY-MEMORY.md).
 
 A real integration probe on September 19, 2026 supplied the public day-in-the-life
 clip's original frame E16 and a deliberately false claim that a white floor mat
@@ -96,6 +115,19 @@ succeeded. macOS Accessibility and Screen Recording permissions are separately
 required for GUI interaction. The Mac must stay awake and Notch must be running.
 
 ## Launch configuration
+
+The ASUS native model and authenticated processing endpoint now run as enabled
+user systemd services with restart-on-failure and user lingering enabled for boot
+startup. Their running endpoints were checked after cutover; the machine was not
+rebooted as a test. See [ASUS service setup](ASUS-SERVICES.md).
+
+The deployed workspace successfully connected Notch notes, calendar, contacts and
+Mail read-only scopes. Imported source counts and source failures remain visible;
+a connected account returning zero documents is not invented context. No actual
+appointment fell within the reminder window during this check. Reminder handling
+is regression-tested for cancellation, rescheduling, stale export time, failed
+sync, deduplication and disconnect. [Confirmed face memory](PEOPLE-MEMORY.md)
+uses a separate ASUS CPU service and never names a person from contacts alone.
 
 Use `.env.example` for the settings. Store actual tokens in ignored mode-0600
 files. For the ASUS service, leave `REWIND_PROCESSING_URL` empty, set a strong

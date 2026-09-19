@@ -1,0 +1,193 @@
+.people-panel {
+  margin: 26px 0;
+  padding: 22px;
+  background: #191e19;
+  color: #f3f4ed;
+  border: 1px solid #394037;
+  border-radius: 22px;
+  min-width: 0;
+}
+.people-panel h2 {
+  font-size: 1.45rem;
+  margin: 0;
+}
+.people-panel h3 {
+  font-size: 1.1rem;
+  margin: 26px 0 12px;
+}
+.people-panel p {
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #c3cabd;
+}
+.people-heading,
+.people-person-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.people-panel button {
+  border: 1px solid #65755a;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #ecf6e2;
+  background: #293422;
+  min-height: 44px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.people-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.people-panel button:focus-visible,
+.people-panel input:focus-visible,
+.people-panel select:focus-visible {
+  outline: 3px solid #c5f68a;
+  outline-offset: 3px;
+}
+.people-panel button[aria-pressed='true'] {
+  border-color: #c5f68a;
+  box-shadow: 0 0 0 2px #c5f68a;
+}
+.people-frames {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 5px 3px 12px;
+  max-height: 132px;
+}
+.people-frames button {
+  flex: 0 0 105px;
+  padding: 4px;
+  border-radius: 10px;
+}
+.people-frames img {
+  width: 95px;
+  height: 62px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.people-frames span {
+  display: block;
+  font-size: 0.76rem;
+  padding: 5px 0 2px;
+}
+.people-selection {
+  margin-top: 18px;
+}
+.people-picture {
+  position: relative;
+  width: 100%;
+  line-height: 0;
+}
+.people-picture > img {
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  display: block;
+}
+.people-picture .people-face-box {
+  position: absolute;
+  min-height: 0;
+  border: 3px solid #fff;
+  background: #0001;
+  border-radius: 4px;
+  padding: 0;
+}
+.people-face-box span {
+  position: absolute;
+  top: -15px;
+  left: -4px;
+  color: #142010;
+  background: #c5f68a;
+  font-size: 12px;
+  line-height: 22px;
+  min-width: 24px;
+  border-radius: 5px;
+}
+.people-panel form {
+  display: grid;
+  gap: 13px;
+  margin: 18px 0;
+}
+.people-panel label {
+  display: grid;
+  gap: 7px;
+  color: #d9e0d0;
+  font-size: 0.9rem;
+}
+.people-panel input,
+.people-panel select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #64735b;
+  border-radius: 9px;
+  background: #10170c;
+  color: #f5f7ef;
+  padding: 12px;
+  font-size: 16px;
+}
+.people-panel .people-error {
+  color: #ffc1b4;
+}
+.people-panel .people-notice {
+  color: #c5f68a;
+}
+.people-panel .people-possible {
+  background: #343321;
+  border-radius: 10px;
+  padding: 12px;
+  color: #e4dfba;
+}
+.people-saved {
+  display: grid;
+  gap: 14px;
+}
+.people-saved article {
+  padding: 14px;
+  border: 1px solid #444f3d;
+  border-radius: 15px;
+}
+.people-evidence {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  margin-bottom: 14px;
+}
+.people-evidence > div {
+  flex: 0 0 112px;
+}
+.people-evidence img {
+  width: 112px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.people-evidence button {
+  font-size: 0.75rem;
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 4px;
+}
+.people-panel .people-forget {
+  color: #f1c8bb;
+  background: transparent;
+}
+.people-panel .people-footnote {
+  font-size: 0.78rem;
+  color: #9da792;
+  margin-bottom: 0;
+}
+@media (max-width: 440px) {
+  .people-panel {
+    padding: 16px;
+  }
+  .people-heading h2 {
+    font-size: 1.25rem;
+  }
+  .people-person-heading {
+    flex-wrap: wrap;
+  }
+}

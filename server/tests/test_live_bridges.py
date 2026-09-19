@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import time
 import uuid
@@ -38,6 +39,8 @@ def setup_review(tmp_path, runner):
         "aliases": {"E1": source["id"]},
         "attached_images_in_order": ["E1"],
         "images": [str(image)],
+        "expected_image_hashes": {str(image): hashlib.sha256(image.read_bytes()).hexdigest()},
+        "expected_source_hashes": {str(image): hashlib.sha256(image.read_bytes()).hexdigest()},
         "digital_sources": [],
         "public_evidence": [source],
     }
@@ -51,7 +54,10 @@ class Runner:
 
     async def run(self, model, prompt, images, schema):
         self.calls.append((model, prompt, images))
-        result = schema.model_validate(self.responses.pop(0))
+        response = self.responses.pop(0)
+        if "verdict" in response:
+            response = {"insufficient_evidence": False, **response}
+        result = schema.model_validate(response)
         return result, {"model": model, "seconds": 1.0, "result": result.model_dump()}
 
 

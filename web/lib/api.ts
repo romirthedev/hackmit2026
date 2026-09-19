@@ -25,6 +25,14 @@ export type Recording = {
   media_url: string;
   error?: string;
   device?: string;
+  original_recording?: {
+    recording_id: string;
+    status: string;
+    complete: boolean;
+    end_reason: string | null;
+    original_url: string | null;
+    continuous_video_inspected: boolean;
+  };
   provenance?: {
     source_sha256: string;
     source_offset: number;
@@ -45,6 +53,8 @@ export type Answer = {
   verification?: {
     status: string;
     receipt: {
+      claims_reviewed?: boolean;
+      answer_complete?: boolean;
       reviews?: {
         model: string;
         seconds: number;

@@ -2,9 +2,11 @@
 
 2026-09-19. **The ASUS is online over Tailscale. The user-selected live target is
 Qwen3.5 35B-A3B; the 122B download and old 27B experiment controller are paused.**
-The 35B download is in progress and has not yet produced a measured vision result.
-Speech and original-pixel OpenCLIP indexing are running on the ASUS; the phone
-retains original recordings and waits for 35B readiness. See
+The 35B download completed and its checksummed weights are running on the GB10
+through Ollama 0.34.2's native compatible llama-server, with eight parallel slots.
+Speech and original-pixel OpenCLIP indexing also run on the ASUS. All 127 retained
+phone samples were processed successfully (113 vision frames and 14 audio clips).
+See the [35B measurements](QWEN35-LIVE.md) and
 [LIVE-PROCESSING.md](../LIVE-PROCESSING.md) for current deployment details.
 The 27B results below are retained diagnostics, not the selected live runtime.
 The ASUS has an NVIDIA GB10,
@@ -40,8 +42,9 @@ This gives **4/6 on the remaining original criteria**. The old 3B full pipeline
 has 1/6 after excluding the invalid utensil criterion. These are **different
 experiments**, not a controlled model-only improvement: input count, selection,
 transport and runtime differ. See the explicit [post-inference erratum](daylife-pov-erratum.json).
-The frozen plan and all raw responses remain intact. No Astra API evaluation
-has been run; no API key was supplied.
+The frozen plan and all raw responses remain intact. A later matched-input Astra
+comparison uses the Mac's signed-in Codex CLI, described in the 35B report; no API
+key was supplied.
 
 Raw corrected outputs are in remote `data/qwen38-pixels-fixed/results.json` and
 the Mac's ignored `data/gx10-results/qwen38-fixed.json`.

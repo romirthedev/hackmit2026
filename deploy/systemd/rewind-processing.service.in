@@ -1,0 +1,23 @@
+[Unit]
+Description=REWIND authenticated ASUS processing service
+Wants=rewind-vision.service
+After=rewind-vision.service network.target
+StartLimitIntervalSec=300
+StartLimitBurst=8
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKSPACE@
+ExecStart=@PYTHON@ -m uvicorn rewind.processing:create_processing_app --factory --app-dir server --env-file @PROCESSING_ENV@ --host 127.0.0.1 --port 11440
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rewind-processing
+
+[Install]
+WantedBy=default.target

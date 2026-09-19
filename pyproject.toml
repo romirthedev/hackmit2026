@@ -11,6 +11,7 @@ dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "pyda
 audio = ["faster-whisper>=1.1,<2"]
 video = ["av==18.1.0"]
 vision = ["open_clip_torch==3.3.0", "huggingface-hub>=0.34,<2", "safetensors>=0.5,<1"]
+faces = ["opencv-python-headless==4.11.0.86"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
 [tool.setuptools.packages.find]
 where = ["server"]

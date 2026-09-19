@@ -8,24 +8,49 @@ export type CaptureState = {
   error: string;
   awake: boolean;
   startedAt: number;
+  finalizing: boolean;
+  originalBytes: number;
 };
 type Chunk = {
   id: string;
   boot: string;
   seq: number;
-  kind: 'frame' | 'audio';
+  kind: 'frame' | 'audio' | 'video' | 'recording_end';
   at: number;
   blob: Blob;
   intent: 'memory' | 'question';
+  recordingStartedAt?: number;
+};
+type EndReason =
+  | 'stopped'
+  | 'hidden'
+  | 'interrupted'
+  | 'storage_full'
+  | 'page_closed';
+type RecordingSession = {
+  id: string;
+  mime: string;
+  startedAt: number;
+  lastAt: number;
+  chunks: number;
+  closed: boolean;
 };
 const MAX_QUEUE_BYTES = 150 * 1024 * 1024;
+// Leave room for the final recorder fragment after stopping at the soft limit.
+const STOP_QUEUE_BYTES = 120 * 1024 * 1024;
+const ORIGINAL_FRAGMENT_BYTES = 4 * 1024 * 1024;
+const activeOriginals = new Set<string>();
 let dbPromise: Promise<IDBDatabase> | undefined;
 function database() {
   if (!dbPromise)
     dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open('rewind-phone-recordings', 1);
-      req.onupgradeneeded = () =>
-        req.result.createObjectStore('chunks', { keyPath: 'id' });
+      const req = indexedDB.open('rewind-phone-recordings', 2);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains('chunks'))
+          req.result.createObjectStore('chunks', { keyPath: 'id' });
+        if (!req.result.objectStoreNames.contains('sessions'))
+          req.result.createObjectStore('sessions', { keyPath: 'id' });
+      };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
@@ -39,16 +64,68 @@ async function chunks(): Promise<Chunk[]> {
     req.onerror = () => reject(req.error);
   });
 }
-async function write(item: Chunk | string) {
+async function write(
+  item: Chunk | string,
+  session?: RecordingSession | string,
+) {
   const db = await database();
   return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('chunks', 'readwrite');
+    const tx = db.transaction(['chunks', 'sessions'], 'readwrite');
     if (typeof item === 'string') tx.objectStore('chunks').delete(item);
     else tx.objectStore('chunks').put(item);
+    if (typeof session === 'string') tx.objectStore('sessions').delete(session);
+    else if (session) tx.objectStore('sessions').put(session);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error);
   });
+}
+
+function endChunk(
+  session: RecordingSession,
+  reason: EndReason,
+  endedAt: number,
+): Chunk {
+  return {
+    id: `finish-${session.id}`,
+    boot: session.id,
+    seq: session.chunks,
+    kind: 'recording_end',
+    at: endedAt,
+    intent: 'memory',
+    blob: new Blob(
+      [
+        JSON.stringify({
+          mime: session.mime,
+          started_at: session.startedAt,
+          ended_at: Math.max(session.startedAt, endedAt),
+          chunks: session.chunks,
+          reason,
+        }),
+      ],
+      { type: 'application/json' },
+    ),
+  };
+}
+
+async function recoverSessions() {
+  const db = await database();
+  const sessions = await new Promise<RecordingSession[]>((resolve, reject) => {
+    const req = db.transaction('sessions').objectStore('sessions').getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  for (const session of sessions) {
+    if (!session.closed && !activeOriginals.has(session.id)) {
+      await write(endChunk(session, 'page_closed', session.lastAt), {
+        ...session,
+        closed: true,
+      });
+    }
+  }
+  return sessions.some(
+    (session) => !session.closed && !activeOriginals.has(session.id),
+  );
 }
 
 export class PhoneCapture {
@@ -61,10 +138,15 @@ export class PhoneCapture {
     error: '',
     awake: false,
     startedAt: 0,
+    finalizing: false,
+    originalBytes: 0,
   };
   private stream: MediaStream | null = null;
   private wake: WakeLockSentinel | null = null;
   private audio: MediaRecorder | null = null;
+  private original: MediaRecorder | null = null;
+  private releaseCaptureLease: (() => void) | null = null;
+  private endReason: EndReason = 'stopped';
   private audioTimer: ReturnType<typeof setTimeout> | null = null;
   private frameTimer: ReturnType<typeof setTimeout> | null = null;
   private uploadTimer: ReturnType<typeof setInterval>;
@@ -77,13 +159,37 @@ export class PhoneCapture {
   private speechGeneration = 0;
   private uploadError = '';
   private persist = Promise.resolve();
+  private ready: Promise<void>;
   constructor(
     private video: HTMLVideoElement,
     private changed: (state: CaptureState) => void,
   ) {
     this.uploadTimer = setInterval(() => void this.upload(), 3000);
     document.addEventListener('visibilitychange', this.visibility);
-    void this.upload();
+    window.addEventListener('pagehide', this.pagehide);
+    window.addEventListener('beforeunload', this.beforeunload);
+    const recovery = navigator.locks
+      ? navigator.locks.request(
+          'rewind-phone-capture',
+          { ifAvailable: true },
+          (lock) => (lock ? recoverSessions() : false),
+        )
+      : recoverSessions();
+    this.ready = recovery
+      .then((recovered) => {
+        if (recovered)
+          this.update({
+            error:
+              'The previous recording was interrupted. Saved video is uploading; the final seconds before the page closed may be missing.',
+          });
+      })
+      .catch(() => {
+        this.update({
+          error:
+            'Phone storage could not be opened. Recording cannot safely begin.',
+        });
+      });
+    void this.ready.then(() => this.upload());
   }
   private update(patch: Partial<CaptureState>) {
     this.state = { ...this.state, ...patch };
@@ -91,17 +197,41 @@ export class PhoneCapture {
   }
   private visibility = () => {
     if (document.visibilityState === 'hidden' && this.state.recording) {
-      this.stop();
+      this.stop('hidden');
       this.update({
         error:
           'Recording paused because this page was hidden. Open the page and tap Record to continue.',
       });
     }
   };
+  private pagehide = () => this.stop('page_closed');
+  private beforeunload = (event: BeforeUnloadEvent) => {
+    if (this.state.recording || this.state.finalizing || this.state.queued) {
+      event.preventDefault();
+    }
+  };
   async start() {
-    if (this.state.recording || this.state.requesting) return;
+    if (this.state.recording || this.state.requesting || this.state.finalizing)
+      return;
     this.update({ requesting: true, error: '' });
     try {
+      await this.ready;
+      await database();
+      await this.acquireCaptureLease();
+      // Another tab may have owned capture when this controller was created,
+      // then disappeared. Reconcile its durable session only after acquiring
+      // exclusive ownership; constructor-only recovery would miss this case.
+      if (await recoverSessions()) {
+        this.update({
+          error:
+            'The previous recording was interrupted. Saved video is uploading; the final seconds before the page closed may be missing.',
+        });
+        void this.upload();
+      }
+      if (typeof MediaRecorder === 'undefined')
+        throw new Error(
+          'This browser cannot save full video recordings. Try current Safari or Chrome.',
+        );
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
         throw new Error(
           'Open the secure HTTPS phone link to use the camera and microphone.',
@@ -116,8 +246,11 @@ export class PhoneCapture {
       });
       if (this.disposed) {
         this.stream.getTracks().forEach((t) => t.stop());
+        this.releaseStream();
         return;
       }
+      if (document.visibilityState === 'hidden')
+        throw new Error('Keep this page open to begin recording.');
       this.video.srcObject = this.stream;
       await this.video.play();
       this.boot = crypto.randomUUID();
@@ -125,14 +258,15 @@ export class PhoneCapture {
       this.stream.getTracks().forEach((track) =>
         track.addEventListener('ended', () => {
           if (this.state.recording) {
-            this.stop();
+            this.stop('interrupted');
             this.update({
               error: 'Camera or microphone stopped. Tap Record to reconnect.',
             });
           }
         }),
       );
-      this.update({ recording: true, startedAt: Date.now() });
+      this.update({ recording: true, startedAt: Date.now(), originalBytes: 0 });
+      await this.beginOriginal();
       try {
         if ('wakeLock' in navigator) {
           this.wake = await navigator.wakeLock.request('screen');
@@ -154,7 +288,7 @@ export class PhoneCapture {
       this.beginAudio();
       void this.frame();
     } catch (error) {
-      this.stop();
+      this.stop('interrupted');
       this.update({
         error:
           error instanceof Error ? error.message : 'Unable to start recording.',
@@ -163,17 +297,164 @@ export class PhoneCapture {
       this.update({ requesting: false });
     }
   }
-  stop() {
+  stop(reason: EndReason = 'stopped') {
+    this.endReason = reason;
     this.update({ recording: false, question: false });
     if (this.frameTimer) clearTimeout(this.frameTimer);
     if (this.audioTimer) clearTimeout(this.audioTimer);
     if (this.audio?.state === 'recording') this.audio.stop();
-    this.stream?.getTracks().forEach((t) => t.stop());
-    this.stream = null;
-    this.video.srcObject = null;
+    if (this.original && this.original.state !== 'inactive') {
+      this.update({ finalizing: true });
+      this.original.stop();
+    } else if (!this.state.finalizing) {
+      this.releaseStream();
+    }
     if (this.wake) void this.wake.release().catch(() => {});
     this.wake = null;
     this.update({ awake: false });
+  }
+  private releaseStream() {
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    this.video.srcObject = null;
+    this.releaseCaptureLease?.();
+    this.releaseCaptureLease = null;
+  }
+  private async acquireCaptureLease() {
+    if (!navigator.locks) return;
+    await new Promise<void>((resolve, reject) => {
+      void navigator.locks
+        .request(
+          'rewind-phone-capture',
+          { ifAvailable: true },
+          async (lock) => {
+            if (!lock) {
+              reject(
+                new Error(
+                  'Recording is already open in another tab. Use that tab or stop it first.',
+                ),
+              );
+              return;
+            }
+            await new Promise<void>((release) => {
+              this.releaseCaptureLease = release;
+              resolve();
+            });
+          },
+        )
+        .catch(reject);
+    });
+  }
+  private async beginOriginal() {
+    if (!this.stream) return;
+    const mime = ['video/webm;codecs=vp8,opus', 'video/mp4', 'video/webm'].find(
+      (type) => MediaRecorder.isTypeSupported(type),
+    );
+    if (!mime)
+      throw new Error(
+        'This browser cannot save full camera and audio recordings. Try Safari or Chrome.',
+      );
+    const recorder = new MediaRecorder(this.stream, {
+      mimeType: mime,
+      videoBitsPerSecond: 1500000,
+      audioBitsPerSecond: 64000,
+    });
+    const session: RecordingSession = {
+      id: this.boot,
+      mime: recorder.mimeType || mime,
+      startedAt: this.state.startedAt / 1000,
+      lastAt: this.state.startedAt / 1000,
+      chunks: 0,
+      closed: false,
+    };
+    const db = await database();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('sessions', 'readwrite');
+      tx.objectStore('sessions').put(session);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    if (!this.state.recording || this.disposed) {
+      await write(endChunk(session, 'interrupted', Date.now() / 1000), {
+        ...session,
+        closed: true,
+      });
+      return;
+    }
+    this.original = recorder;
+    activeOriginals.add(session.id);
+    this.endReason = 'stopped';
+    recorder.ondataavailable = (event) => {
+      if (!event.data.size) return;
+      const at = Date.now() / 1000;
+      session.lastAt = at;
+      // A fragment is part of ONE continuous container. Keep the same recording
+      // identity and exact bytes; only ordered concatenation is the original.
+      // Browsers may emit a large delayed blob despite a short timeslice. Split
+      // only its transport boundaries, preserving every byte and their order.
+      for (
+        let offset = 0;
+        offset < event.data.size;
+        offset += ORIGINAL_FRAGMENT_BYTES
+      ) {
+        const sequence = session.chunks++;
+        this.enqueue(
+          'video',
+          event.data.slice(
+            offset,
+            offset + ORIGINAL_FRAGMENT_BYTES,
+            session.mime,
+          ),
+          at,
+          'memory',
+          { boot: session.id, seq: sequence },
+          { ...session },
+        );
+      }
+    };
+    recorder.onerror = () => {
+      this.stop('interrupted');
+      this.update({
+        error:
+          'Full video recording was interrupted. Saved portions are retained. Tap Record to reconnect.',
+      });
+    };
+    recorder.onstop = () => {
+      const endedAt = Date.now() / 1000;
+      const reason = this.endReason;
+      const closed = { ...session, closed: true };
+      this.persist = this.persist
+        .then(async () => {
+          await write(endChunk(closed, reason, endedAt), closed);
+          void this.upload();
+        })
+        .catch(() => {
+          this.update({
+            error:
+              'The final recording marker could not be saved. Already saved fragments are retained; reopen this page to recover them.',
+          });
+        })
+        .finally(() => {
+          if (this.original === recorder) {
+            this.original = null;
+            activeOriginals.delete(session.id);
+            this.releaseStream();
+            this.update({ finalizing: false });
+          }
+        });
+    };
+    try {
+      recorder.start(2000);
+    } catch (error) {
+      this.original = null;
+      activeOriginals.delete(session.id);
+      await write(endChunk(session, 'interrupted', Date.now() / 1000), {
+        ...session,
+        closed: true,
+      });
+      throw error;
+    }
   }
   toggleQuestion() {
     if (!this.state.recording) return;
@@ -202,7 +483,7 @@ export class PhoneCapture {
       'audio/ogg;codecs=opus',
     ].find((type) => MediaRecorder.isTypeSupported(type));
     if (!mime) {
-      this.stop();
+      this.stop('interrupted');
       this.update({
         error: 'This browser cannot record audio. Try Safari or Chrome.',
       });
@@ -222,7 +503,7 @@ export class PhoneCapture {
       if (event.data.size) parts.push(event.data);
     };
     rec.onerror = () => {
-      this.stop();
+      this.stop('interrupted');
       this.update({
         error: 'Audio recording was interrupted. Tap Record to reconnect.',
       });
@@ -283,6 +564,7 @@ export class PhoneCapture {
     at: number,
     intent: Chunk['intent'],
     identity: { boot: string; seq: number },
+    session?: RecordingSession,
   ) {
     const item: Chunk = {
       id: crypto.randomUUID(),
@@ -291,6 +573,7 @@ export class PhoneCapture {
       blob,
       at,
       intent,
+      recordingStartedAt: session?.startedAt,
     };
     this.persist = this.persist
       .then(async () => {
@@ -302,13 +585,30 @@ export class PhoneCapture {
           throw new Error(
             'Phone storage queue is full. Reconnect to upload saved recordings, then tap Record.',
           );
-        await write(item);
-        this.update({ queued: pending.length + 1 });
+        await write(item, session);
+        this.update({
+          queued: pending.length + 1,
+          originalBytes:
+            this.state.originalBytes + (kind === 'video' ? blob.size : 0),
+        });
+        if (
+          pending.reduce((n, chunk) => n + chunk.blob.size, 0) + blob.size >
+            STOP_QUEUE_BYTES &&
+          this.state.recording
+        ) {
+          this.stop('storage_full');
+          this.update({
+            error:
+              'Recording stopped because this phone’s upload queue is almost full. Reconnect to save the queued originals, then tap Record.',
+          });
+        }
         void this.upload();
       })
       .catch((error) => {
-        this.stop();
-        this.update({ error: String(error) });
+        this.stop('storage_full');
+        this.update({
+          error: `A recording fragment could not be saved. Recording stopped to prevent further loss. ${String(error)}`,
+        });
       });
   }
   async upload() {
@@ -325,7 +625,12 @@ export class PhoneCapture {
         if (this.disposed) break;
         await Promise.all(
           pending.slice(i, i + 2).map(async (item) => {
-            const response = await fetch('/api/ingest/' + item.kind, {
+            const recording =
+              item.kind === 'video' || item.kind === 'recording_end';
+            const url = recording
+              ? `/api/continuous-recordings/${item.boot}/${item.kind === 'video' ? `chunks/${item.seq}` : 'finish'}`
+              : '/api/ingest/' + item.kind;
+            const response = await fetch(url, {
               method: 'POST',
               headers: {
                 'Content-Type': item.blob.type,
@@ -333,6 +638,11 @@ export class PhoneCapture {
                 'X-Sequence': String(item.seq),
                 'X-Captured-At': String(item.at),
                 'X-Intent': item.intent,
+                ...(item.recordingStartedAt
+                  ? {
+                      'X-Recording-Started-At': String(item.recordingStartedAt),
+                    }
+                  : {}),
               },
               body: item.blob,
               signal: AbortSignal.timeout(20000),
@@ -345,7 +655,10 @@ export class PhoneCapture {
                     ? 'The memory server is full. Recordings remain queued on this phone.'
                     : 'Connection interrupted. Saved recordings will retry.',
               );
-            await write(item.id);
+            await write(
+              item.id,
+              item.kind === 'recording_end' ? item.boot : undefined,
+            );
             this.update({
               saved: this.state.saved + 1,
               queued: Math.max(0, this.state.queued - 1),
@@ -397,9 +710,11 @@ export class PhoneCapture {
     this.disposed = true;
     this.speechGeneration++;
     this.speechQueue = [];
-    this.stop();
+    this.stop('page_closed');
     clearInterval(this.uploadTimer);
     document.removeEventListener('visibilitychange', this.visibility);
+    window.removeEventListener('pagehide', this.pagehide);
+    window.removeEventListener('beforeunload', this.beforeunload);
     window.speechSynthesis?.cancel();
   }
 }
