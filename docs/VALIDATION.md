@@ -1,10 +1,10 @@
 # Validation performed in this workspace
 
-Date: 2026-09-19. Development host: macOS ARM64, Python 3.12. Server tests inject deterministic model responses unless explicitly testing the HTTP provider adapter. No real model inference or real camera footage was claimed.
+Date: 2026-09-19. Development host: macOS ARM64, Python 3.12. Unit tests inject deterministic model responses unless explicitly testing the HTTP provider adapter. A separate [real YouTube video evaluation](evaluations/YOUTUBE-VIDEO-2026-09-19.md) now records actual local model inference; it does not validate physical necklace capture or ASUS inference.
 
 | Check | Result |
 |---|---|
-| Backend suite | 29 tests passed, including browser invitations and optional local test-code boundaries |
+| Backend suite | 34 tests passed, including browser invitations, optional local test-code boundaries, citation rendering/rejection, and spatial/temporal planner regression cases |
 | Python lint | `ruff check server scripts` passed |
 | Python source compilation | Passed |
 | Dashboard type checking | TypeScript `--noEmit` passed |
@@ -17,10 +17,13 @@ Date: 2026-09-19. Development host: macOS ARM64, Python 3.12. Server tests injec
 | Latest September 19 interface rebuild | Actual pinned React Bits sources plus installed shadcn components; OGL and Motion bundled locally |
 | Interface code checks | Changed React files passed Oxlint; TypeScript and the final production export passed |
 | Updated production smoke check | Root page, seven linked production assets, seven authenticated read routes, 0000 0000 sign-in, remembered cookie, logout and unauthorized access passed on production and dev proxy; no recordings changed |
+| Real local video inference | Qwen2.5-VL 3B, M5/16 GiB: 19 sampled frames plus complete audio processed, zero failed jobs; recall inaccurate/unusable, not an acceptance pass |
+| ASUS connection attempt | `asus@10.189.60.212` timed out before authentication, including a separate Wi-Fi-bound TCP check; larger-model comparison not run |
+| Final video-test code smoke check | Restarted production and isolated evaluation APIs; root/status, denied unauthorized access, test-code login, cookie access and logout passed on both ports |
 
 The tests exercise auth separation, original storage, idempotent retries/conflicts, restart persistence, stale leases, per-frame job processing, failure/retry, bounded uploads, time filters, citation validation, voice question routing, monitoring cooldowns, deletion, sequence gaps, model request formats and malformed responses, and point-cloud export.
 
-Not yet verified: physical FORIOT pinout, camera focus, battery lifetime, Wi-Fi/SD endurance, actual INMP441 wiring/audio quality, real model accuracy or latency, ASUS GPU/PyTorch/Ollama setup, LingBot GPU inference, Docker execution, or browser visual/interaction QA. Browser QA was not requested; the dashboard was type-checked, built, and its server responses checked.
+Not yet verified: physical FORIOT pinout, camera focus, battery lifetime, Wi-Fi/SD endurance, actual INMP441 wiring/audio quality, representative model accuracy, ASUS GPU/PyTorch/Ollama setup and latency, LingBot GPU inference, Docker execution, or browser visual/interaction QA. The one short Mac video test is not a general accuracy benchmark. Browser QA was not requested; the dashboard was type-checked, built, and its server responses checked.
 
 Interface review covered stale-search cancellation, empty/error states, keyboard handlers, original-recording selection across polling, bounded thumbnail rendering, microphone permission/unmount cleanup, and reduced-motion paths. External component sites were inspected with computer use. This does not constitute browser interaction or visual QA of REWIND itself.
 

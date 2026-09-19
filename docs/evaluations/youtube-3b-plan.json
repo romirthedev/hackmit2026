@@ -1,0 +1,14 @@
+{
+  "source_url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+  "source_title": "Me at the zoo",
+  "model": "qwen2.5vl:3b",
+  "purpose": "Local end-to-end video-memory smoke evaluation, not a general accuracy benchmark",
+  "questions": [
+    {"question": "What animals were visible behind the person?", "criterion": "Names elephants and cites a frame."},
+    {"question": "What separated the person from the animals?", "criterion": "Describes the visible enclosure barrier and cites a frame."},
+    {"question": "What colors were visible on the person's jacket?", "criterion": "Mentions the clearly visible red, gray and black portions; cites a frame."},
+    {"question": "What did the speaker say was notable about the animals?", "criterion": "Recalls the comment about long trunks and cites transcribed audio."},
+    {"question": "Where did the person leave their keys?", "criterion": "Does not invent an object location; states there is no supporting evidence."},
+    {"question": "What time did the speaker arrive at the zoo?", "criterion": "States arrival time is not established; does not confuse recording/import time with arrival time."}
+  ]
+}

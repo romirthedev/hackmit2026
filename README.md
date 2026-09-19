@@ -13,6 +13,7 @@ A battery-powered ESP32 camera records over Wi-Fi to an ASUS-hosted memory serve
 - [Architecture, storage, and model deployment](docs/ARCHITECTURE.md)
 - [Capture protocol and API](docs/API.md)
 - [Research provenance and limitations](research/README.md)
+- [Real YouTube video test: local 3B results and ASUS comparison procedure](docs/evaluations/YOUTUBE-VIDEO-2026-09-19.md)
 
 ## What is implemented
 
@@ -594,7 +595,9 @@ cd ..
 pio run -d firmware
 ```
 
-Backend tests cover real HTTP routes and database/file storage with injected deterministic inference: auth boundaries, cookies/CSRF, idempotency, conflicts, persistence, failed jobs, stale leases, per-frame processing, malformed uploads, disk limits, citations, temporal filters, audio questions, wake phrases, alert cooldowns, deletion, sequence gaps, and reconstruction export. Both firmware variants are compilation targets. Hardware radio/power/audio quality, model accuracy, GPU latency, Docker startup, and 20-hour endurance still require the actual setup.
+Backend tests cover real HTTP routes and database/file storage with injected deterministic inference: auth boundaries, cookies/CSRF, idempotency, conflicts, persistence, failed jobs, stale leases, per-frame processing, malformed uploads, disk limits, citations, temporal filters, audio questions, wake phrases, alert cooldowns, deletion, sequence gaps, and reconstruction export. Both firmware variants are compilation targets. Hardware radio/power/audio quality, ASUS model accuracy and GPU latency, Docker startup, and 20-hour endurance still require the actual setup.
+
+A [real local video evaluation](docs/evaluations/YOUTUBE-VIDEO-2026-09-19.md) used Qwen2.5-VL 3B on an Apple M5 with 16 GiB RAM. All 19 sampled frames and the full audio track processed in approximately 5 minutes 48 seconds, but recall was unreliable: source-format errors, incorrect speech recognition, and unsupported details remained. This setup cannot sustain 1 fps analysis. Valid citations establish a link to a recording, **not that the answer is factually correct**. The report includes the unchanged baseline, follow-up run, exact scope, timings, and reproduction commands. `scripts/evaluate_recall.py` saves actual responses and checks source links without pretending to grade factual accuracy.
 
 ## Dashboard controls
 

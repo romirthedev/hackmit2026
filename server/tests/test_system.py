@@ -471,3 +471,105 @@ def test_new_event_endpoint_returns_full_evidence(context):
     process(a)
     event = c.get("/api/events/" + r["id"], headers=admin()).json()
     assert event["objects"][0]["label"] == "wallet" and "embedding" not in event
+
+
+def test_recall_renders_valid_source_ids_without_model_inline_formatting(context):
+    c, a, p = context
+    send(c)
+    process(a)
+    original = p.structured
+
+    async def list_only(system, content, schema, *args, **kwargs):
+        result = await original(system, content, schema, *args, **kwargs)
+        if schema is RecallAnswer:
+            result.answer = "The wallet was last observed left of the notebook."
+        return result
+
+    p.structured = list_only
+    r = c.post("/api/ask", headers=admin(), json={"question": "Where was my wallet?"}).json()
+    assert r["mode"] == "model" and r["grounded"]
+    assert f"[{r['evidence'][0]['id']}]" in r["answer"]
+    p.bad_citations = True
+    bad = c.post("/api/ask", headers=admin(), json={"question": "Where was my wallet?"}).json()
+    assert bad["mode"] == "evidence_only" and not bad["grounded"]
+
+
+def test_recall_does_not_display_uncited_model_claims(context):
+    c, a, p = context
+    send(c)
+    process(a)
+    original = p.structured
+    insufficient = True
+
+    async def uncited(system, content, schema, *args, **kwargs):
+        if schema is RecallAnswer:
+            return RecallAnswer(
+                answer="Unverified assertion that must not be displayed.",
+                evidence_ids=[],
+                insufficient_evidence=insufficient,
+            )
+        return await original(system, content, schema, *args, **kwargs)
+
+    p.structured = uncited
+    r = c.post("/api/ask", headers=admin(), json={"question": "Where was my wallet?"}).json()
+    assert not r["grounded"] and not r["evidence"]
+    assert "do not establish" in r["answer"] and "Unverified assertion" not in r["answer"]
+    insufficient = False
+    r = c.post("/api/ask", headers=admin(), json={"question": "Where was my wallet?"}).json()
+    assert r["mode"] == "evidence_only" and "Unverified assertion" not in r["answer"]
+
+
+def test_recall_rejects_inline_ids_outside_declared_sources(context):
+    c, a, p = context
+    send(c)
+    process(a)
+    original = p.structured
+
+    async def invalid_inline(system, content, schema, *args, **kwargs):
+        result = await original(system, content, schema, *args, **kwargs)
+        if schema is RecallAnswer:
+            result.answer += " [00000000-0000-0000-0000-000000000000]"
+        return result
+
+    p.structured = invalid_inline
+    r = c.post("/api/ask", headers=admin(), json={"question": "Where was my wallet?"}).json()
+    assert r["mode"] == "evidence_only" and not r["grounded"]
+
+
+def test_spatial_question_does_not_accept_invented_temporal_anchor(context):
+    c, a, p = context
+    send(c)
+    process(a)
+    original = p.structured
+
+    async def confused_planner(system, content, schema, *args, **kwargs):
+        if schema is SearchPlan:
+            return SearchPlan(terms="wallet", anchor_terms="nonexistent-anchor", relation="before")
+        return await original(system, content, schema, *args, **kwargs)
+
+    p.structured = confused_planner
+    r = c.post("/api/ask", headers=admin(), json={"question": "Was the wallet behind the notebook?"}).json()
+    assert r["grounded"]
+    temporal = c.post(
+        "/api/ask", headers=admin(), json={"question": "Where was the wallet before moving it?"}
+    ).json()
+    assert not temporal["grounded"]  # A genuinely requested but missing temporal anchor still matters.
+
+
+def test_recall_rejects_source_ids_in_place_of_answer(context):
+    c, a, p = context
+    send(c)
+    process(a)
+    original = p.structured
+
+    async def source_only(system, content, schema, *args, **kwargs):
+        result = await original(system, content, schema, *args, **kwargs)
+        if schema is RecallAnswer:
+            event_id = result.evidence_ids[0]
+            result.answer = f"{event_id} [{event_id}]"
+        return result
+
+    p.structured = source_only
+    r = c.post("/api/ask", headers=admin(), json={"question": "Where was my wallet?"}).json()
+    assert r["mode"] == "evidence_only" and not r["grounded"]
+    assert "not a verified answer" in r["answer"]

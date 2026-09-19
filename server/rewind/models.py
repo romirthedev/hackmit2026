@@ -19,9 +19,9 @@ class Observation(BaseModel):
 
 
 class RecallAnswer(BaseModel):
-    answer: str = Field(max_length=8000)
-    evidence_ids: list[str] = Field(default_factory=list, max_length=20)
-    insufficient_evidence: bool = True
+    answer: str = Field(max_length=8000, description="Plain-language answer to the user's question, not a source ID")
+    evidence_ids: list[str] = Field(max_length=20, description="IDs of recorded events supporting the answer")
+    insufficient_evidence: bool = Field(description="True when the recordings do not establish the answer")
 
 
 class SearchPlan(BaseModel):
