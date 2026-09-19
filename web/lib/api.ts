@@ -7,7 +7,11 @@ export type Observation = {
 };
 export type Recording = {
   id: string;
-  kind: 'frame' | 'audio';
+  kind: 'frame' | 'audio' | 'context';
+  source?: 'notch';
+  context_kind?: string;
+  title?: string;
+  text?: string;
   captured_at: number;
   received_at?: number;
   clock_quality: string;
@@ -68,7 +72,12 @@ export type Status = {
   observed_sequence_gaps: number;
   embedding_failures: number;
   timezone: string;
-  visual_index?: { enabled: boolean; indexed: number; pending: number; failed: number };
+  visual_index?: {
+    enabled: boolean;
+    indexed: number;
+    pending: number;
+    failed: number;
+  };
 };
 export type Rule = { id: string; instruction: string; enabled: number };
 export type Alert = {
@@ -117,9 +126,12 @@ export function clock(time: number, zone?: string) {
   });
 }
 export function recordingClock(recording: Recording) {
-  if (recording.clock_quality === 'synthetic') return 'import timeline · real capture time unknown';
+  if (recording.source === 'notch') return 'Notch source · last synced';
+  if (recording.clock_quality === 'synthetic')
+    return 'import timeline · real capture time unknown';
   if (recording.clock_quality === 'imported') return 'imported capture time';
-  if (recording.clock_quality === 'received_only') return 'capture time unknown · receive time';
+  if (recording.clock_quality === 'received_only')
+    return 'capture time unknown · receive time';
   return 'device timestamp';
 }
 export function bytes(n: number) {

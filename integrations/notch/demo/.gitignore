@@ -1,0 +1,16 @@
+# Media contains real screen recordings of the desktop (Slack, sheets,
+# personal info) and a licensed music track — never commit these.
+raw/
+narration/
+clips/
+out/
+audio/
+sandbox/
+__pycache__/
+*.mov
+*.mp4
+*.wav
+*.mp3
+*.aiff
+segments.json
+.last-*

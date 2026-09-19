@@ -22,6 +22,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from .config import Settings
+from .context import ContextScopes, NotchContext
 from .db import Database, event_public
 from .memory import Memory
 from .models import AskRequest, RuleRequest, VideoProvenance
@@ -64,7 +65,8 @@ def create_app(settings=None, provider=None):
     media_dir.mkdir(exist_ok=True)
     p = provider or Provider(s)
     visual = VisualIndex(db, s)
-    memory = Memory(db, p, s, visual=visual if s.visual_embeddings else None)
+    context = NotchContext(db, s)
+    memory = Memory(db, p, s, visual=visual if s.visual_embeddings else None, context=context)
     worker = Worker(db, p, memory, s)
     ingestion_lock = asyncio.Lock()
     pairing = BrowserPairing(db, s.admin_token)
@@ -149,6 +151,7 @@ def create_app(settings=None, provider=None):
         if s.visual_embeddings and s.workers:
             tasks.append(asyncio.create_task(visual.run()))
         tasks.append(asyncio.create_task(worker.elastic_sync()))
+        tasks.append(asyncio.create_task(context.run()))
         try:
             yield
         finally:
@@ -168,6 +171,7 @@ def create_app(settings=None, provider=None):
     app.state.db, app.state.worker, app.state.memory = db, worker, memory
     app.state.settings = s
     app.state.visual = visual
+    app.state.context = context
 
     @app.middleware("http")
     async def headers(request, call_next):
@@ -194,7 +198,7 @@ def create_app(settings=None, provider=None):
 
     @app.post("/api/pairing", dependencies=[Depends(admin)])
     async def create_pairing():
-        return pairing.create()
+        return {**pairing.create(), "public_url": s.public_url}
 
     @app.post("/api/pair")
     async def pair_browser(body: PairBrowser, req: Request, response: Response):
@@ -240,6 +244,48 @@ def create_app(settings=None, provider=None):
         totals["observed_sequence_gaps"] = db.one("""SELECT COALESCE(SUM(span-n),0) n FROM
             (SELECT MAX(seq)-MIN(seq)+1 span,COUNT(*) n FROM media GROUP BY device,boot,kind)""")["n"]
         return totals
+
+    @app.get("/api/context/status", dependencies=[Depends(admin)])
+    async def context_status():
+        return context.status()
+
+    @app.post("/api/context/connect", dependencies=[Depends(admin)])
+    async def context_connect(scopes: ContextScopes):
+        try:
+            return await context.sync(scopes)
+        except ValueError as error:
+            raise HTTPException(503, str(error))
+
+    @app.post("/api/context/disconnect", dependencies=[Depends(admin)])
+    async def context_disconnect():
+        async with context.lock:
+            context.disconnect()
+        return context.status()
+
+    @app.get("/api/context/graph", dependencies=[Depends(admin)])
+    async def context_graph():
+        return context.graph()
+
+    @app.get("/api/context/documents/{document_id}", dependencies=[Depends(admin)])
+    async def context_document(document_id: str):
+        row = db.one("SELECT * FROM context_documents WHERE id=?", (document_id,))
+        if not row:
+            raise HTTPException(404, "Context source not found")
+        return context.public(row)
+
+    @app.get("/api/context/reminders", dependencies=[Depends(admin)])
+    async def context_reminders():
+        if time.time() - (db.setting("notch_last_sync", 0) or 0) > 300:
+            return []
+        context.refresh_reminders()
+        return db.all(
+            "SELECT * FROM context_reminders WHERE starts_at>? ORDER BY starts_at LIMIT 30", (time.time(),)
+        )
+
+    @app.post("/api/context/reminders/{reminder_id}/seen", dependencies=[Depends(admin)])
+    async def context_reminder_seen(reminder_id: str):
+        db.execute("UPDATE context_reminders SET seen=1 WHERE id=?", (reminder_id,))
+        return {"ok": True}
 
     @app.get("/api/provider", dependencies=[Depends(admin)])
     async def provider_status():
@@ -554,5 +600,11 @@ def create_app(settings=None, provider=None):
 
     public = Path("web/dist/client")
     if public.exists():
+
+        @app.get("/phone", include_in_schema=False)
+        @app.get("/phone/", include_in_schema=False)
+        async def phone_page():
+            return FileResponse(public / "phone.html", media_type="text/html")
+
         app.mount("/", StaticFiles(directory=public, html=True), name="dashboard")
     return app

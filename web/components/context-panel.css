@@ -1,0 +1,247 @@
+.context-panel {
+  color: #eeeaf7;
+  background: #14121c;
+  border: 1px solid #302a40;
+  border-radius: 24px;
+  padding: 28px;
+  max-width: 900px;
+}
+.context-heading {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+}
+.context-symbol {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid #4c405d;
+  border-radius: 16px;
+  background: #292035;
+  color: #d3bfea;
+}
+.context-eyebrow {
+  font-size: 9px;
+  letter-spacing: 1.8px;
+  color: #b8a4d4;
+}
+.context-heading h2 {
+  font-size: 28px;
+  letter-spacing: -1px;
+  margin: 3px 0;
+}
+.context-description {
+  color: #a8a1b5;
+  line-height: 1.65;
+  margin: 18px 0 24px;
+}
+.context-sources {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.context-source {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #322c3e;
+  background: #1b1723;
+  border-radius: 15px;
+  padding: 16px;
+}
+.context-source > svg {
+  color: #bfa8e2;
+  flex-shrink: 0;
+}
+.context-source span {
+  flex: 1;
+}
+.context-source strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+.context-source small {
+  display: block;
+  color: #9d91ac;
+  font-size: 10px;
+  margin-top: 5px;
+}
+.context-source input {
+  accent-color: #c8b4ed;
+  width: 17px;
+  height: 17px;
+}
+.context-connect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  padding: 15px;
+  border-radius: 14px;
+  background: #d0bdf1;
+  color: #241334;
+  border: none;
+  margin: 18px 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.context-connect:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.context-help {
+  color: #91859f;
+  font-size: 11px;
+  line-height: 1.7;
+  margin: 12px 0;
+}
+.context-error {
+  color: #ffc1bc;
+  font-size: 13px;
+}
+.context-graph-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-top: 28px;
+}
+.context-graph-heading h3 {
+  font-size: 16px;
+  font-weight: 500;
+}
+.context-graph-heading > span {
+  font-size: 10px;
+  color: #aaa0bb;
+}
+.context-graph {
+  background: radial-gradient(ellipse, #282036, transparent 65%);
+  border: 1px solid #2d253a;
+  border-radius: 18px;
+  margin-top: 12px;
+}
+.context-graph svg {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  overflow: visible;
+}
+.context-graph line {
+  color: #67567d;
+  opacity: 0.45;
+}
+.context-graph text {
+  fill: #c6bad5;
+  font-size: 8px;
+}
+.context-graph g {
+  cursor: pointer;
+}
+.context-graph g:focus circle {
+  stroke: white;
+  stroke-width: 2px;
+}
+.context-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 12px 17px;
+  color: #a99abd;
+  font-size: 9px;
+  text-transform: capitalize;
+}
+.context-legend span {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.context-legend i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.context-empty {
+  text-align: center;
+  padding: 50px 15px;
+  color: #8c799e;
+  border: 1px dashed #44364f;
+  border-radius: 18px;
+  margin-top: 14px;
+}
+.context-empty svg {
+  margin: auto;
+}
+.context-empty h3 {
+  font-size: 16px;
+  font-weight: 400;
+  color: #d2c6e1;
+  margin: 15px 0 8px;
+}
+.context-empty p {
+  font-size: 12px;
+}
+.context-document {
+  background: #211a2b;
+  border: 1px solid #574367;
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 15px;
+}
+.context-document > button {
+  float: right;
+  background: transparent;
+  border: none;
+  color: #bcacca;
+  font-size: 24px;
+  cursor: pointer;
+}
+.context-document small {
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 9px;
+  color: #c5a6e5;
+}
+.context-document h3 {
+  margin: 8px 0 12px;
+}
+.context-document p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.7;
+  max-height: 350px;
+  overflow: auto;
+}
+.context-document img {
+  max-width: 100%;
+  border-radius: 12px;
+  margin-top: 12px;
+}
+.context-disconnect {
+  background: none;
+  border: none;
+  text-decoration: underline;
+  color: #a393b5;
+  font-size: 11px;
+  margin-top: 10px;
+  cursor: pointer;
+}
+@media (max-width: 550px) {
+  .context-panel {
+    padding: 20px;
+    border-radius: 22px;
+  }
+  .context-sources {
+    grid-template-columns: 1fr;
+  }
+  .context-graph-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+}

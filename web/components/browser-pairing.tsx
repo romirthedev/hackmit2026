@@ -5,8 +5,15 @@ import { CatalogButton } from '@/components/catalog';
 import { useEffect, useState } from 'react';
 import { Check, Copy, Link2, LoaderCircle, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
+import QRCode from 'qrcode';
+import { FrameImage } from '@/components/catalog';
 
-type Invitation = { code: string; ticket: string; expires_at: number };
+type Invitation = {
+  code: string;
+  ticket: string;
+  expires_at: number;
+  public_url?: string;
+};
 
 export function BrowserPairing() {
   const [invitation, setInvitation] = useState<Invitation | null>(null);
@@ -15,6 +22,8 @@ export function BrowserPairing() {
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(0);
   const [localLink, setLocalLink] = useState(false);
+  const [qr, setQr] = useState('');
+  const [phoneLink, setPhoneLink] = useState('');
   useEffect(() => {
     if (!invitation) return;
     const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
@@ -30,8 +39,20 @@ export function BrowserPairing() {
     try {
       const result = await api<Invitation>('/pairing', { method: 'POST' });
       setNow(Date.now() / 1000);
+      const origin = result.public_url || window.location.origin;
+      const link =
+        origin.replace(/\/$/, '') + '/phone/#connect=' + result.ticket;
+      setPhoneLink(link);
       setLocalLink(
-        ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname),
+        ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname),
+      );
+      setQr(
+        await QRCode.toDataURL(link, {
+          width: 280,
+          margin: 2,
+          errorCorrectionLevel: 'M',
+          color: { dark: '#20172d', light: '#ffffff' },
+        }),
       );
       setInvitation(result);
     } catch (e) {
@@ -43,9 +64,7 @@ export function BrowserPairing() {
   async function copyLink() {
     if (!invitation || !remaining) return;
     try {
-      await navigator.clipboard.writeText(
-        window.location.origin + '/#connect=' + invitation.ticket,
-      );
+      await navigator.clipboard.writeText(phoneLink);
       setCopied(true);
     } catch {
       setError(
@@ -58,16 +77,32 @@ export function BrowserPairing() {
       <span className="section-icon">
         <Link2 size={20} />
       </span>
-      <h2>Connect another browser</h2>
+      <h2>Connect your phone</h2>
       <p className="muted">
-        Open this workspace’s address in another browser and enter a short code.
-        Or send yourself a one-click sign-in link.
+        Scan the code with your phone, then tap Record to start remembering your
+        day.
       </p>
       {invitation && (
         <div className={'pairing-invitation ' + (!remaining ? 'expired' : '')}>
+          {remaining > 0 && qr && (
+            <FrameImage
+              className="phone-pairing-qr"
+              src={qr}
+              alt="Scan to securely connect your phone"
+              width={240}
+              height={240}
+              style={{ borderRadius: 16, margin: '16px auto' }}
+            />
+          )}
+          {remaining > 0 && localLink && (
+            <p className="error-text">
+              This address works only on this computer. Use the HTTPS phone link
+              before scanning.
+            </p>
+          )}
           <span className="meta">
             {remaining
-              ? 'YOUR ONE-TIME PAIRING CODE'
+              ? 'OR ENTER THIS ONE-TIME PAIRING CODE'
               : 'THIS INVITATION HAS EXPIRED'}
           </span>
           <strong
@@ -111,8 +146,8 @@ export function BrowserPairing() {
         {busy
           ? 'Creating…'
           : invitation
-            ? 'Create a new code'
-            : 'Get pairing code'}
+            ? 'Create a new QR code'
+            : 'Create phone QR code'}
       </CatalogButton>
       {error && (
         <p className="error-text" role="alert">
@@ -121,8 +156,8 @@ export function BrowserPairing() {
       )}
       <p className="meta">
         Only the newest invitation works. Share it only with a browser you want
-        to connect. For another computer, use the server’s LAN address or your
-        existing SSH tunnel.
+        to connect. Camera and microphone recording on your phone require an
+        HTTPS address.
       </p>
     </Card>
   );

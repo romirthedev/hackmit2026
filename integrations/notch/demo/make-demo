@@ -1,0 +1,27 @@
+#!/bin/bash
+# One command → a finished Notch demo video. Fire it and walk away.
+#
+#   ~/notch/demo/make-demo
+#
+# First run: click "Allow" when the macOS screen-recording prompt appears
+# during the warm-up. After that, macOS stays quiet for weeks — every run
+# is fully unattended.
+set -e
+cd "$(dirname "$0")"
+
+# Notch must be running (the director drives it over its local API).
+TOKEN=$(cat ~/.notch/remote-token 2>/dev/null | tr -d '\n')
+if ! curl -s -m 4 "http://127.0.0.1:8737/t/${TOKEN}/state" >/dev/null 2>&1; then
+  echo "Notch isn't running — launching it…"
+  open ~/notch/build/Notch.app
+  sleep 4
+fi
+
+echo "🎬 Building your Notch demo. Clean desktop recommended (this records your screen)."
+python3 director.py "${1:-beats.json}"
+
+FINAL=~/NotchOutbox/notch-demo.mp4
+if [ -f "$FINAL" ]; then
+  echo "✓ $FINAL"
+  open "$FINAL"
+fi

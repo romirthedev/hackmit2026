@@ -1,8 +1,8 @@
 # Vision and concurrency on the GX10
 
-2026-09-19. Tailscale SSH access was established. **Later in this session the
-ASUS stopped responding to SSH and Tailscale pings; final GPU measurements and
-full-pipeline deployment are blocked until it reconnects.** The ASUS has an NVIDIA GB10,
+2026-09-19. **The ASUS is back online over Tailscale; the native GPU benchmark,
+CPU indexing dependencies, and 122B download were restarted after its reboot.**
+The ASUS has an NVIDIA GB10,
 121 GiB of unified memory (117 GiB initially available), Linux ARM64, CUDA 13.0,
 and driver 580.159.03. Initial disk headroom was 793 GB. Services used here bind
 loopback; the Mac uses a separate userspace Tailscale client without changing
@@ -81,15 +81,34 @@ The test uses `--parallel 8 --ctx-size 65536 --gpu-layers all --flash-attn on`,
 original model/projector files, no thinking, and disabled prompt/checkpoint
 caches. The initial direct-server CPU fallback was stopped before completing
 a measured batch; it is not a GPU result. The corrected server is separately
-logged as `llama-cuda-parallel.log`. Eight slots were verified through `/slots`;
+logged as `llama-resumed.log` for the resumed run. Eight slots were verified through `/slots`;
 GPU utilization was verified during inference. The bundled binary reports
-commit `9d77fa172`. Direct llama.cpp does not automatically enable Ollama's
+build `b1-391fac164` in the resumed `/props` response. Direct llama.cpp does not automatically enable Ollama's
 single-slot MTP speculation, another reason to measure rather than assume speed.
 
 `benchmark_concurrency.py` measures eight real frames per profile, then submits
 a question during labeling. It records warm-up separately, complete/schema-valid
 outputs, throughput and question latency. These checks do not grade factual
-accuracy. Pending measured profiles: 1, 2, 4, 7 and 8 workers. Keep at most seven
+accuracy. The resumed results are in `data/qwen38-cuda-resumed.json`. Initial
+completed profiles (one batch each, not repeated estimates):
+
+| Label workers | Frames/minute | Question seconds | Question format/source check |
+| --- | --- | --- | --- |
+| 1 | 1.89 | 176.624 | Truncated, invalid JSON |
+| 2 | 2.19 | 12.229 | JSON parses but invents E2–E20 sources |
+| 4 | 4.04 | 17.816 | JSON parses but invents E2–E20 sources |
+| 7 | 4.32 | 216.458 | No valid E1-only citation result |
+| 8 | 4.83 | 47.560 | No valid E1-only citation result |
+
+All five batches produced 8/8 complete, schema-valid frame labels. That does
+not grade their content. The two fast question responses say white and invent
+citations despite being given only E1; they are **not usable answer results**.
+The benchmark now records valid citation IDs separately from JSON validity.
+The controller requires both, and uses a 20-second limit when the serial
+question baseline fails. If no profile qualifies, it retains a one-worker
+full-pipeline diagnostic labeled experimental; it does not promote that profile
+to the phone deployment. None of these profiles passed the question check.
+Even the highest observed labeling throughput is below one frame/second. Keep at most seven
 label workers with an eight-slot server when reserving question capacity.
 
 The frame prompt now limits repeated object entries and asks for concise
@@ -120,12 +139,12 @@ Run one API process; internal workers share a durable SQLite queue.
 
 ## Large candidate and remaining work
 
-`qwen3.5:122b-a10b-q4_K_M` was downloading at last contact: an 81 GB multimodal package with more
-plausible headroom than filling all 128 GB with weights. At last contact about 6.8 GB had downloaded, with several hours remaining at
-the observed transfer rate. The current remote state is unknown after the
-connection dropped. Download completion, successful load, accuracy and
-throughput are separate checks. It has **not yet
-produced an inference result here**. Source: [Ollama package](https://ollama.com/library/qwen3.5:122b-a10b-q4_K_M).
+`qwen3.5:122b-a10b-q4_K_M` is downloading again: an 81 GB multimodal package with
+more plausible headroom than filling all 128 GB with weights. The resumed pull
+had reached approximately 7 GB (9%) at the last recorded check, with hours
+remaining. Download completion, successful load, accuracy and throughput are
+separate checks. It has **not yet produced an inference result here**. Source:
+[Ollama package](https://ollama.com/library/qwen3.5:122b-a10b-q4_K_M).
 
 Newer does not guarantee better results. Qwen3.8-Flash-Next's Ollama Q4 package
 is 120 GB; its smaller NVFP4 listing is MLX, not Linux CUDA. A community IQ4_XS
@@ -142,7 +161,7 @@ separate embeddings and source-code hashes even in a copied tree without Git.
 The 31-frame diagnostic additionally verifies sufficient per-slot context on
 llama.cpp. Use new output paths; raw failures remain reviewable.
 
-Validation: **52 backend tests pass** (two existing dependency warnings), Ruff
+Validation: **58 backend tests pass** (two existing dependency warnings), Ruff
 passes, and no whitespace errors. Tests cover image ordering, withheld grading
 criteria, truncated output, recall routing, both local wire formats, and lease
 renewal during a slow job. These tests do not substitute for hardware results.
@@ -159,9 +178,11 @@ python scripts/serve_vision.py --model qwen3.8:latest \
 ```
 
 The initial Ollama controller was deliberately stopped when its serial-only
-scheduler was discovered. Its stale status file is not evidence that an
-automatic large-model evaluation is still queued. A revised controller is
-prepared locally under ignored `data/gx10-run-queue-v2.py`, but was **not
-uploaded or started before the outage**. The native CUDA benchmark, CPU-only
-indexing dependency install and downloads were launched detached; their current
-state must be checked after reconnecting.
+scheduler was discovered. After reconnection, the revised controller
+`gx10-run-queue-v2.py` was uploaded and started on the ASUS, then tightened to
+reject invented question citations. `queue-status-v2.json` is its current stage;
+`queue-v2.log` and stage-specific logs preserve failures. CPU-only torch,
+Whisper/OpenCLIP dependencies, and the embedding model are installed. The queue
+runs a fresh 27B pipeline, waits for the 122B download, runs its 31-image diagnostic,
+then its eight-slot benchmark and fresh full pipeline. No final model is selected
+without reviewing source-grounded answers. All runs use new output paths.

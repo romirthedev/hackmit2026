@@ -1,0 +1,67 @@
+{
+  "title": "Notch",
+  "subtitle": "The laptop is the assistant.",
+  "closing": "Built with Fable 5 in Claude Code.",
+  "beats": [
+    {
+      "id": "whoareyou",
+      "command": "Who are you? Give me a short, confident introduction.",
+      "caption": "Meet Notch.",
+      "narration": "Meet Notch \u2014 a voice-native assistant that lives in your MacBook's notch, and answers out loud.",
+      "wait_for": "responding",
+      "max_wait": 90,
+      "settle": 4.0,
+      "punch_in": true
+    },
+    {
+      "id": "changevoice",
+      "command": "Change your own voice to a warmer, friendlier ElevenLabs voice \u2014 pick a good one, save it to your config, and confirm in your new voice.",
+      "caption": "Ask it to change itself \u2014 it rewrites its own settings.",
+      "narration": "Ask it to change itself, and it does \u2014 here, switching its own voice to something friendlier, on the fly.",
+      "wait_for": "responding",
+      "max_wait": 150,
+      "settle": 4.0,
+      "punch_in": true
+    },
+    {
+      "id": "sheet",
+      "command": "Open the demobespoke Google Sheet in Safari, read through all of its tabs, find any discrepancies in the data, and email a clear summary of them to romptl8@gmail.com.",
+      "caption": "Give it real work \u2014 across your apps.",
+      "narration": "Give it something real. It opens your spreadsheet, reads every tab, finds the discrepancies, and emails them \u2014 start to finish.",
+      "wait_for": "responding",
+      "max_wait": 360,
+      "settle": 4.0,
+      "punch_in": false
+    },
+    {
+      "id": "memes",
+      "command": "Open a meme generator website and create two or three genuinely funny memes grounded in our team's Slack humor. Keep them light and good-natured \u2014 nothing offensive to anyone, and never leak any internal or confidential information.",
+      "caption": "It even has a sense of humor.",
+      "narration": "It can be playful, too \u2014 spinning up a few memes from your team's inside jokes, without ever leaking anything real.",
+      "wait_for": "responding",
+      "max_wait": 360,
+      "settle": 4.0,
+      "punch_in": false
+    },
+    {
+      "id": "persona",
+      "command": "Open Persona Chat, have a short conversation with the Mahesh personality, and compare how it responds against his real Slack messages.",
+      "caption": "It learns the people you work with.",
+      "narration": "It even learns the people you work with \u2014 modeling a teammate's voice, and checking it against how they really talk.",
+      "wait_for": "responding",
+      "max_wait": 360,
+      "settle": 4.0,
+      "punch_in": false
+    },
+    {
+      "id": "notion",
+      "command": "Look through my Slack messages with Anirudha, and create a new private Notion document outlining exactly what I need to work on with him.",
+      "caption": "From a scattered chat to a plan \u2014 automatically.",
+      "narration": "And it turns scattered conversations into action \u2014 reading your chats, and writing you a private plan in Notion.",
+      "wait_for": "responding",
+      "max_wait": 480,
+      "settle": 5.0,
+      "punch_in": false
+    }
+  ]
+}

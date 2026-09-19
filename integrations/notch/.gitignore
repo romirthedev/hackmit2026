@@ -1,0 +1,23 @@
+# build products
+.build/
+build/
+.swiftpm/
+*.xcodeproj
+
+# demo director runtime output (screen recordings — never commit)
+demo/raw/
+demo/out/
+demo/clips/
+demo/audio/
+demo/narration/
+demo/beats/
+demo/sandbox/
+demo/segments.json
+__pycache__/
+
+# local media
+*.mp4
+
+# misc
+.DS_Store
+.env

@@ -90,6 +90,9 @@ async def run(args):
             try:
                 result["parsed"] = schema.model_validate_json(output).model_dump()
                 result["schema_valid"] = True
+                if question:
+                    ids = set(result["parsed"]["evidence_ids"])
+                    result["citations_valid"] = ids <= {"E1"} and bool(ids)
             except (KeyError, ValueError):
                 result["schema_valid"] = False
             return result
@@ -126,6 +129,9 @@ async def run(args):
                 "frames_per_minute": round(60 * len(labels) / label_seconds, 2),
                 "mean_request_seconds": round(statistics.mean(r["seconds"] for r in labels), 3),
                 "question_seconds": question["seconds"],
+                "question_usable_format": bool(
+                    question["schema_valid"] and question["complete"] and question.get("citations_valid")
+                ),
                 "valid_complete_labels": sum(r["schema_valid"] and r["complete"] for r in labels),
                 "labels": labels,
                 "question": question,

@@ -39,6 +39,7 @@ import Login from '@/components/login';
 import { WorkspaceTabsList } from '@/components/workspace-navigation';
 import { Brand } from '@/components/brand';
 import { BrowserPairing } from '@/components/browser-pairing';
+import { ContextPanel } from '@/components/context-panel';
 import { MemoryCommand } from '@/components/memory-command';
 import { MemoryComposer } from '@/components/memory-composer';
 import { MemoryLibrary } from '@/components/memory-library';
@@ -686,8 +687,7 @@ export default function Home() {
                         {current.status === 'done'
                           ? 'Analyzed'
                           : current.status || 'Evidence'}{' '}
-                        ·{' '}
-                        {recordingClock(current)}
+                        · {recordingClock(current)}
                       </span>
                     )}
                   </div>
@@ -924,8 +924,14 @@ export default function Home() {
                                 onClick={() => setSelected(r)}
                               >
                                 [{i + 1}]{' '}
-                                {clock(r.captured_at, status?.timezone)}{' '}
-                                {r.kind === 'audio' ? 'Audio' : 'Frame'}
+                                {r.source === 'notch'
+                                  ? r.title
+                                  : clock(r.captured_at, status?.timezone)}{' '}
+                                {r.source === 'notch'
+                                  ? 'Notch'
+                                  : r.kind === 'audio'
+                                    ? 'Audio'
+                                    : 'Frame'}
                               </CatalogButton>
                             ))}
                           </div>
@@ -1158,6 +1164,7 @@ export default function Home() {
             <TabsContent value="system">
               <div className="system-grid">
                 <BrowserPairing />
+                <ContextPanel />
                 <Card className="card">
                   <h2>Necklace connection</h2>
                   {status?.devices.length ? (
@@ -1236,7 +1243,10 @@ export default function Home() {
                   <div className="row">
                     <CatalogButton
                       className="quiet"
-                      disabled={busy || !(status?.failed || status?.visual_index?.failed)}
+                      disabled={
+                        busy ||
+                        !(status?.failed || status?.visual_index?.failed)
+                      }
                       onClick={() =>
                         void action(() => api('/retry', { method: 'POST' }))
                       }
@@ -1281,13 +1291,16 @@ export default function Home() {
         }}
       >
         <DialogContent className="evidence-dialog">
-          <DialogTitle>Recorded evidence</DialogTitle>
+          <DialogTitle>
+            {selected?.source === 'notch'
+              ? 'Connected source'
+              : 'Recorded evidence'}
+          </DialogTitle>
           <DialogDescription>
             {selected
               ? new Date(selected.captured_at * 1000).toLocaleString()
               : ''}{' '}
-            ·{' '}
-            {selected ? recordingClock(selected) : 'recording'}
+            · {selected ? recordingClock(selected) : 'recording'}
           </DialogDescription>
           {selected && (
             <>
@@ -1298,9 +1311,11 @@ export default function Home() {
                   {selected.provenance.frame_index != null
                     ? `Source frame #${selected.provenance.frame_index} · `
                     : ''}
-                  {selected.provenance.source_offset.toFixed(3)} seconds into source
+                  {selected.provenance.source_offset.toFixed(3)} seconds into
+                  source
                   <br />
-                  Source {selected.provenance.source_sha256.slice(0, 12)} · zero-based numbering
+                  Source {selected.provenance.source_sha256.slice(0, 12)} ·
+                  zero-based numbering
                 </p>
               )}
               <p>{selected.summary || 'Analysis not yet available.'}</p>
@@ -1314,27 +1329,30 @@ export default function Home() {
                   </small>
                 </div>
               )}
-              <div className="row">
-                <CatalogButton
-                  variant="outline"
-                  nativeButton={false}
-                  render={
-                    <a
-                      href={selected.media_url}
-                      download
-                      aria-label="Download original"
-                    />
-                  }
-                >
-                  Download original
-                </CatalogButton>
-                <CatalogButton
-                  className="quiet danger"
-                  onClick={() => setDeleting(selected)}
-                >
-                  <Trash2 size={16} /> Delete recording
-                </CatalogButton>
-              </div>
+              {selected.source !== 'notch' && (
+                <div className="row">
+                  <CatalogButton
+                    variant="outline"
+                    nativeButton={false}
+                    render={
+                      <a
+                        href={selected.media_url}
+                        download
+                        aria-label="Download original"
+                      />
+                    }
+                  >
+                    Download original
+                  </CatalogButton>
+                  <CatalogButton
+                    className="quiet danger"
+                    disabled={selected.source === 'notch'}
+                    onClick={() => setDeleting(selected)}
+                  >
+                    <Trash2 size={16} /> Delete recording
+                  </CatalogButton>
+                </div>
+              )}
             </>
           )}
         </DialogContent>
@@ -1375,6 +1393,14 @@ export default function Home() {
   );
 }
 function Media({ recording: r }: { recording: Recording }) {
+  if (r.source === 'notch')
+    return (
+      <article className="context-document">
+        <small>Notch · {r.context_kind}</small>
+        <h3>{r.title}</h3>
+        <p>{r.text}</p>
+      </article>
+    );
   return r.kind === 'frame' ? (
     <FrameImage
       className="evidence-image"

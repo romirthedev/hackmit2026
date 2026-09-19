@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     admin_token: str = ""
     device_token: str = ""
     device_id: str = "necklace-01"
+    public_url: str = ""
+    notch_url: str = ""
+    notch_token: str = ""
     data_dir: Path = Path("data")
     provider: Literal["ollama", "openai", "disabled"] = "ollama"
     ollama_url: str = "http://127.0.0.1:11434"

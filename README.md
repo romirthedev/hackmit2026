@@ -1,6 +1,11 @@
 # REWIND
 
-A battery-powered ESP32 camera records over Wi-Fi to an ASUS-hosted memory server. Ask where you last saw an object, search conversations, inspect the original evidence, rewind a timeline, and set visual monitoring requests. Collaborator matching is intentionally excluded per the updated request.
+**Phone-first personal memory, connected to Notch.** Scan a QR code, tap Record,
+and clip the phone to your chest. Ask about recorded moments and connected
+notes, emails, appointments, friends, and family in one workspace. Read the
+[user-confirmed product brief](docs/PRODUCT-VISION.md) and the
+[phone and Notch setup](docs/PHONE-NOTCH.md). The existing ESP32 camera is an
+additional capture input.
 
 **This is an implemented prototype, not a guarantee of perfect recall.** All received frames get their own AI job, including identical frames. The default capture rate is 1 JPEG/second, not 30 fps video. Events outside the camera view, missed captures, unclear speech, power loss, and model errors cannot be reconstructed reliably. Originals, processing failures, queue depth, device errors, and timestamp quality remain visible.
 
@@ -20,6 +25,8 @@ A battery-powered ESP32 camera records over Wi-Fi to an ASUS-hosted memory serve
 
 | Component | Included |
 |---|---|
+| Phone capture | One-use QR pairing, one-button camera/microphone, foreground screen wake lock, durable offline queue, voice/text questions and inspectable sources |
+| Notch context | Complete pinned upstream codebase, read-only Mac bridge, notes/contacts/calendar/Mail graph, shared recall, 30-minute appointment reminders |
 | ESP32-CAM firmware | OV2640 capture, PSRAM, FAT32 microSD spool, Wi-Fi reconnect, retries, per-stream sequence IDs, heartbeat, clock sync, recording LED, pause command |
 | Optional wearable microphone | INMP441 on I2S1; camera remains on I2S0; 8-second PCM16 chunks; spoken “Hey Rewind, …” question routing |
 | Capture server | Authenticated bounded uploads, validation, atomic original storage, SQLite WAL transactions, duplicate/conflicting retry handling, disk budget enforcement |
@@ -34,7 +41,10 @@ No synthetic memories or fake model results are used in the application. Tests u
 
 ## Connection and startup guide
 
-Follow steps 1–8 in order for the core demo. Use **one ESP32-CAM**, the ASUS as the server, and the computer microphone first. Add the wearable microphone and 3D reconstruction after those checks pass. The [20-hour plan](docs/20-HOUR-PLAN.md) time-boxes the optional work.
+For the primary phone experience, start with [phone and Notch setup](docs/PHONE-NOTCH.md).
+The following steps cover the optional **ESP32-CAM** path and the shared ASUS
+backend. Add the wearable microphone and 3D reconstruction after the core checks
+pass. The [20-hour plan](docs/20-HOUR-PLAN.md) records the earlier hardware plan.
 
 The commands below assume **Ubuntu/Debian Linux on the ASUS**, with a working NVIDIA driver, and run from this repository's root unless a different directory is shown. The ASUS model, operating system, GPU and actual FORIOT board still need physical verification. A Windows installation requires a separate deployment plan; these are not PowerShell commands. Text such as `/path/to/rewind`, `YOUR_ASUS_USER`, and `ASUS_LAN_IP` must be replaced with your actual values.
 
@@ -631,6 +641,7 @@ firmware/             PlatformIO C++ camera and optional microphone firmware
 server/rewind/        FastAPI, durable jobs, providers, retrieval and alerts
 server/tests/         Backend and reconstruction-export verification
 web/                  React dashboard, built with the Sites/Vinext scaffold
+integrations/notch/   Complete pinned Notch app plus read-only context bridge
 scripts/              Setup, provisioning, recording, importing, benchmarking, 3D
 research/             Upstream attribution and integration boundaries
 deploy/               systemd and HTTPS deployment templates
