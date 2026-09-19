@@ -6,6 +6,8 @@ This repository integrates upstream capture/model libraries with its own evidenc
 
 [Source audit, licenses, integration, setup, and limitations](VIDEO-MEMORY.md) covers OMI/OmiGlass, VideoRAG, Screenpipe, OpenCLIP, PyAV and faster-whisper. OpenCLIP pixel retrieval and PyAV timestamped streaming import are implemented and tested locally; full upstream product stacks are not claimed as integrated.
 
+[Model versus retrieval diagnosis](MODEL-GAP.md) compares the assistant's review workflow with the 3B pipeline, records same-model evidence probes, and explains the available stronger-model API path.
+
 ## LingBot-Map
 
 - [Official source](https://github.com/Robbyant/lingbot-map)

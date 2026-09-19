@@ -134,3 +134,7 @@ yt-dlp --no-playlist -f 'worst[ext=mp4]/worst' \
 ```
 
 Keep exact cached bytes for repeat comparisons and confirm checksums. Use a new output directory per configuration. `--text-only` supports an image-index ablation; it was not run in this evaluation. A larger-model run must replace **both** ingestion and reasoning in a fresh workspace to count as an end-to-end comparison. Model weights are not committed.
+
+## Follow-up: model versus evidence-pipeline diagnosis
+
+The user asked why this assistant could inspect the clip more successfully than the local model. A [separate diagnosis](../../research/MODEL-GAP.md) documents the unequal context/workflow and three actual same-model probes with six selected chronological frames. Better evidence fixed the action-order answer, but the model still missed the tongs and invented a shift start. These diagnostic probes do not change the scores above. The document also verifies the available GPT-6 Astra API path; no cloud API evaluation was run because no key was configured.
