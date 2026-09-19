@@ -1,7 +1,12 @@
 # Vision and concurrency on the GX10
 
-2026-09-19. **The ASUS is back online over Tailscale; the native GPU benchmark,
-CPU indexing dependencies, and 122B download were restarted after its reboot.**
+2026-09-19. **The ASUS is online over Tailscale. The user-selected live target is
+Qwen3.5 35B-A3B; the 122B download and old 27B experiment controller are paused.**
+The 35B download is in progress and has not yet produced a measured vision result.
+Speech and original-pixel OpenCLIP indexing are running on the ASUS; the phone
+retains original recordings and waits for 35B readiness. See
+[LIVE-PROCESSING.md](../LIVE-PROCESSING.md) for current deployment details.
+The 27B results below are retained diagnostics, not the selected live runtime.
 The ASUS has an NVIDIA GB10,
 121 GiB of unified memory (117 GiB initially available), Linux ARM64, CUDA 13.0,
 and driver 580.159.03. Initial disk headroom was 793 GB. Services used here bind
@@ -66,7 +71,7 @@ changed throughput from 3.05 to 3.13 frames/minute, while question latency rose
 from 6.28 to 20.90 seconds. Both batches had one truncated repetitive label out
 of eight. This is evidence of queuing, not effective parallel decoding.
 
-A separate user-owned llama.cpp server now exposes eight 8,192-token slots via
+A separate user-owned llama.cpp server was tested with eight 8,192-token slots via
 its native chat-completions API. CUDA must be explicitly discoverable in this
 Ollama distribution:
 
@@ -137,12 +142,11 @@ settings route questions separately. Embeddings continue to use the Ollama
 embedding endpoint. llama.cpp context capacity is configured at server launch.
 Run one API process; internal workers share a durable SQLite queue.
 
-## Large candidate and remaining work
+## Earlier large candidate and remaining work
 
-`qwen3.5:122b-a10b-q4_K_M` is downloading again: an 81 GB multimodal package with
-more plausible headroom than filling all 128 GB with weights. The resumed pull
-had reached approximately 7 GB (9%) at the last recorded check, with hours
-remaining. Download completion, successful load, accuracy and throughput are
+The `qwen3.5:122b-a10b-q4_K_M` download is paused at approximately 7 GB (9%)
+following the user’s selection of 35B for live processing. This 81 GB multimodal
+package remains an unevaluated candidate. Download completion, successful load, accuracy and throughput are
 separate checks. It has **not yet produced an inference result here**. Source:
 [Ollama package](https://ollama.com/library/qwen3.5:122b-a10b-q4_K_M).
 
@@ -161,7 +165,7 @@ separate embeddings and source-code hashes even in a copied tree without Git.
 The 31-frame diagnostic additionally verifies sufficient per-slot context on
 llama.cpp. Use new output paths; raw failures remain reviewable.
 
-Validation: **58 backend tests pass** (two existing dependency warnings), Ruff
+Validation at the time of the 27B diagnostic: **58 backend tests passed** (two existing dependency warnings), Ruff
 passes, and no whitespace errors. Tests cover image ordering, withheld grading
 criteria, truncated output, recall routing, both local wire formats, and lease
 renewal during a slow job. These tests do not substitute for hardware results.
@@ -182,7 +186,7 @@ scheduler was discovered. After reconnection, the revised controller
 `gx10-run-queue-v2.py` was uploaded and started on the ASUS, then tightened to
 reject invented question citations. `queue-status-v2.json` is its current stage;
 `queue-v2.log` and stage-specific logs preserve failures. CPU-only torch,
-Whisper/OpenCLIP dependencies, and the embedding model are installed. The queue
-runs a fresh 27B pipeline, waits for the 122B download, runs its 31-image diagnostic,
-then its eight-slot benchmark and fresh full pipeline. No final model is selected
-without reviewing source-grounded answers. All runs use new output paths.
+Whisper/OpenCLIP dependencies, and the embedding model are installed. That controller is now deliberately paused (`paused_user_selected_35b`); it must
+not restart the old 27B/122B workloads alongside the live 35B target. No final
+performance profile is selected without reviewing source-grounded answers.
+All runs use new output paths.

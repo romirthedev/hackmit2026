@@ -26,6 +26,10 @@ def percentile(values, fraction):
 async def run(args):
     manifest = json.loads(args.manifest.read_text())
     frames = manifest["frames"][: args.frames]
+    if len(frames) < 3:
+        raise ValueError("At least three retained original frames are required")
+    if args.output.exists():
+        raise ValueError("Output exists; retain the earlier run and choose a new path")
     s = Settings(
         _env_file=None,
         vision_model=args.model,
@@ -123,10 +127,12 @@ async def run(args):
         elapsed = time.monotonic() - started
         latencies = [r["capture_to_result_seconds"] for r in report["frames"]]
         by_capture = sorted(report["frames"], key=lambda r: r["capture_after_seconds"])
+        completed = sum(r["complete"] for r in report["frames"])
         report["summary"] = {
             "elapsed_seconds": elapsed,
-            "completed_frames": sum(r["complete"] for r in report["frames"]),
-            "effective_frames_per_second": len(frames) / elapsed,
+            "attempted_frames": len(frames),
+            "completed_frames": completed,
+            "effective_frames_per_second": completed / elapsed,
             "capture_to_result_p50_seconds": percentile(latencies, 0.5),
             "capture_to_result_p95_seconds": percentile(latencies, 0.95),
             "last_frame_queue_seconds": by_capture[-1]["queue_seconds"],
