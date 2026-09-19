@@ -20,7 +20,7 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
       canvas.width = w * dpr;
       canvas.height = h * dpr;
       ctx.scale(dpr, dpr);
-      ctx.fillStyle = '#101711';
+      ctx.fillStyle = '#1d202d';
       ctx.fillRect(0, 0, w, h);
       const points = scene.points;
       let center = [0, 0, 0];
@@ -58,7 +58,7 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
       for (const m of scene.markers || []) {
         if (m.captured_at > at) continue;
         const [x, y] = project(m.position);
-        ctx.fillStyle = '#c3f66b';
+        ctx.fillStyle = '#aca4ff';
         ctx.beginPath();
         ctx.arc(x, y, 4, 0, Math.PI * 2);
         ctx.fill();
@@ -75,12 +75,11 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
     return (
       <div className="scene-empty">
         <Box size={42} />
-        <h3>A place to return to</h3>
+        <h3>No scene yet</h3>
         <p>
           Your reconstructed surroundings appear here after a scan is processed
           on the ASUS computer.
         </p>
-        <code>python scripts/reconstruct.py --help</code>
         <span>Record a slow, overlapping sweep of a mostly static scene.</span>
       </div>
     );

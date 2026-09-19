@@ -22,8 +22,20 @@ import {
   Box,
   FileAudio,
   RefreshCw,
+  ShieldCheck,
+  ChevronRight,
+  Sparkles,
+  CalendarDays,
+  X,
+  CheckCircle2,
 } from 'lucide-react';
 import Login from '@/components/login';
+import { Brand } from '@/components/brand';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { AudioCapture } from '@/components/audio-capture';
 import { SceneView } from '@/components/scene-view';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -82,9 +94,18 @@ export default function Home() {
     [playing, setPlaying] = useState(false),
     [tab, setTab] = useState('memory'),
     [from, setFrom] = useState(''),
-    [to, setTo] = useState('');
+    [to, setTo] = useState(''),
+    [filtersOpen, setFiltersOpen] = useState(false),
+    [asking, setAsking] = useState(false),
+    [historyMode, setHistoryMode] = useState<'recent' | 'search' | 'earlier'>(
+      'recent',
+    ),
+    [hasEarlier, setHasEarlier] = useState(true);
+  const questionRef = useRef<HTMLTextAreaElement>(null);
+  const historyRef = useRef<HTMLElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const initial = useRef(true);
+  const signedOut = useRef(false);
   const load = useCallback(async () => {
     try {
       const [s, r, a, ru, al] = await Promise.all([
@@ -94,6 +115,7 @@ export default function Home() {
         api<Rule[]>('/rules'),
         api<Alert[]>('/alerts'),
       ]);
+      if (signedOut.current) return;
       setStatus(s);
       setRecords(r);
       setAnswers(a);
@@ -107,6 +129,7 @@ export default function Home() {
           .catch(() => {});
       }
     } catch (e) {
+      if (signedOut.current) return;
       if (String(e).includes('access key')) setAuth(false);
       else setError(String(e));
     }
@@ -119,9 +142,13 @@ export default function Home() {
   }, [load, auth]);
   useEffect(() => {
     if (!playing) return;
-    const t = setInterval(() => setIndex((i) => Math.max(0, i - 1)), 1000);
-    return () => clearInterval(t);
-  }, [playing]);
+    if (index <= 0) {
+      setPlaying(false);
+      return;
+    }
+    const t = setTimeout(() => setIndex((i) => Math.max(0, i - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [playing, index]);
   const current = records[Math.min(index, Math.max(0, records.length - 1))];
   async function action(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -138,6 +165,8 @@ export default function Home() {
   async function ask(e: React.FormEvent) {
     e.preventDefault();
     if (!question.trim()) return;
+    if (!validTimeRange()) return;
+    setAsking(true);
     await action(async () => {
       const a = await api<Answer>('/ask', {
         method: 'POST',
@@ -150,14 +179,55 @@ export default function Home() {
       setAnswers((prev) => [a, ...prev.filter((v) => v.id !== a.id)]);
       setQuestion('');
     });
+    setAsking(false);
+  }
+  function validTimeRange() {
+    if (from && to && new Date(from) > new Date(to)) {
+      setError('Choose an end time after the start time.');
+      setFiltersOpen(true);
+      return false;
+    }
+    return true;
+  }
+  function clearSearch() {
+    setResults(null);
+    setSearch('');
+    setFrom('');
+    setTo('');
+    setHistoryMode('recent');
+    setHasEarlier(true);
+  }
+  function suggestQuestion(value: string) {
+    setQuestion(value);
+    questionRef.current?.focus();
+  }
+  async function signOut() {
+    setBusy(true);
+    try {
+      await api('/logout', { method: 'POST' });
+      signedOut.current = true;
+      setAuth(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
   async function doSearch(e: React.FormEvent) {
     e.preventDefault();
+    if (!validTimeRange()) return;
     await action(async () => {
       const params = new URLSearchParams({ q: search, limit: '100' });
       if (from) params.set('after', String(new Date(from).getTime() / 1000));
       if (to) params.set('before', String(new Date(to).getTime() / 1000));
       setResults(await api<Recording[]>('/events?' + params));
+      setHistoryMode('search');
+      historyRef.current?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'instant'
+          : 'smooth',
+        block: 'start',
+      });
     });
   }
   async function upload(file: File) {
@@ -193,13 +263,15 @@ export default function Home() {
     return (
       <main className="shell">
         <header>
-          <a className="brand" href="/">
-            <Aperture /> REWIND
-          </a>
+          <Brand />
         </header>
         <div className="connect-panel loading-panel">
-          <Activity />
-          <h2>Connecting to your memory</h2>
+          <Activity className={error ? '' : 'pulse'} />
+          <h2>
+            {error
+              ? 'Unable to reach your workspace'
+              : 'Opening your workspace'}
+          </h2>
           <p>{error || 'Checking the local recording server…'}</p>
           <button onClick={() => load()}>Try again</button>
         </div>
@@ -208,718 +280,942 @@ export default function Home() {
   const online = status?.devices.some(
     (d) => Date.now() / 1000 - d.last_seen < 30,
   );
-  const percentage = status?.received
-    ? Math.round((status.analyzed / status.received) * 100)
-    : 0;
+  const unread = alerts.filter((a) => !a.seen).length;
+  const pageTitles: Record<string, [string, string]> = {
+    memory: ['Your memory', 'Find a moment. Pick up where you left off.'],
+    scene: ['Your surroundings', 'Revisit a space from your recordings.'],
+    monitor: ['Watch for me', 'A little help noticing what matters.'],
+    system: [
+      'Device & storage',
+      'Everything behind your memory, in one place.',
+    ],
+  };
   return (
-    <main className="shell dashboard">
-      <header>
-        <a className="brand" href="/">
-          <Aperture /> REWIND<span className="tag">PERSONAL MEMORY</span>
-        </a>
-        <div className="header-actions">
-          <span className={'status ' + (!online ? 'offline' : '')}>
-            <i />
-            {online ? 'Necklace connected' : 'Waiting for necklace'}
-          </span>
-          <button
-            className="quiet icon-button"
-            aria-label="Sign out"
-            onClick={() =>
-              action(async () => {
-                await api('/logout', { method: 'POST' });
-                setAuth(false);
-              })
-            }
-          >
-            <LogOut size={17} />
-          </button>
-        </div>
-      </header>
-      <div className="workspace-heading">
-        <div>
-          <p className="eyebrow">YOUR DAY, WITH CONTEXT</p>
-          <h1>Your day, within reach.</h1>
-          <p>Return to the recording.</p>
-        </div>
-        <div className="capture-actions">
-          <AudioCapture onUpdate={load} onError={setError} />
-          <button className="quiet" onClick={() => fileRef.current?.click()}>
-            <Upload size={16} /> Import recording
-          </button>
-          <input
-            ref={fileRef}
-            className="hidden"
-            type="file"
-            accept="image/jpeg,audio/wav,audio/webm,audio/ogg,audio/mp4"
-            onChange={(e) => {
-              if (e.target.files?.[0]) upload(e.target.files[0]);
-              e.target.value = '';
-            }}
-          />
-          <button
-            disabled={busy}
-            onClick={() =>
-              action(() =>
-                api('/capture/pause', {
-                  method: 'POST',
-                  body: JSON.stringify({ paused: !status?.paused }),
-                }),
-              )
-            }
-          >
-            {status?.paused ? <Play size={16} /> : <Pause size={16} />}{' '}
-            {status?.paused ? 'Resume capture' : 'Pause capture'}
-          </button>
-        </div>
-      </div>
-      {error && (
-        <div className="banner error" role="alert">
-          {error}
-          <button className="quiet" onClick={() => setError('')}>
-            Dismiss
-          </button>
-        </div>
-      )}
-      {notice && (
-        <div className="banner" role="status">
-          {notice}
-          <button className="quiet" onClick={() => setNotice('')}>
-            Dismiss
-          </button>
-        </div>
-      )}
-      <div className="metrics">
-        <div>
-          <Camera size={18} />
-          <span>Recordings received</span>
-          <strong>{status?.received.toLocaleString()}</strong>
-        </div>
-        <div>
-          <Activity size={18} />
-          <span>Analyzed</span>
-          <strong>
-            {percentage}
-            <em>%</em>
-          </strong>
-        </div>
-        <div>
-          <Clock3 size={18} />
-          <span>Waiting for analysis</span>
-          <strong>{status?.pending.toLocaleString()}</strong>
-        </div>
-        <div>
-          <HardDrive size={18} />
-          <span>Originals retained</span>
-          <strong>{bytes(status?.stored_bytes || 0)}</strong>
-        </div>
-      </div>
-      <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
-        <div className="navigation-row">
-          <TabsList variant="line">
+    <main className="workspace">
+      <a href="#workspace-content" className="skip-link">
+        Skip to workspace
+      </a>
+      <Tabs
+        className="workspace-tabs"
+        orientation="vertical"
+        value={tab}
+        onValueChange={(v) => setTab(String(v))}
+      >
+        <aside className="sidebar">
+          <Brand />
+          <p className="sidebar-label">WORKSPACE</p>
+          <TabsList className="workspace-nav" aria-label="Workspace navigation">
             <TabsTrigger value="memory">
-              <Clock3 /> Memory
-            </TabsTrigger>
-            <TabsTrigger value="scene">
-              <Box /> 3D scene
+              <Clock3 /> Your memory
             </TabsTrigger>
             <TabsTrigger value="monitor">
               <Bell /> Watch for me{' '}
-              {alerts.filter((a) => !a.seen).length > 0 && (
-                <span className="count">
-                  {alerts.filter((a) => !a.seen).length}
-                </span>
-              )}
+              {unread > 0 && <span className="count">{unread}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="scene">
+              <Box /> 3D scene
             </TabsTrigger>
             <TabsTrigger value="system">
               <Wifi /> Device & storage
             </TabsTrigger>
           </TabsList>
-          <span className="meta">
-            {status?.timezone} · all received frames queued for AI
-          </span>
-        </div>
-        <TabsContent value="memory">
-          <div className="memory-grid">
-            <section className="visual-panel">
-              <div className="panel-top">
-                <span className="eyebrow">
-                  {index === 0 ? 'LATEST RECORDING' : 'REWIND'}
-                </span>
-                <span className="meta">
-                  {current
-                    ? clock(current.captured_at, status?.timezone)
-                    : 'No recordings yet'}
-                </span>
-              </div>
-              <div className="camera-stage">
-                {current ? (
-                  <Media recording={current} />
-                ) : (
-                  <div className="stage-empty">
-                    <Camera size={44} />
-                    <h2>Your view starts here.</h2>
-                    <p>
-                      Power the necklace on your Wi-Fi, or import a recording to
-                      try recall.
-                    </p>
-                    <button
-                      className="quiet"
-                      onClick={() => fileRef.current?.click()}
-                    >
-                      <Upload size={16} /> Import a JPEG or audio clip
-                    </button>
-                  </div>
-                )}
-                {current && (
-                  <span className="frame-state">
-                    {current.status === 'done'
-                      ? 'Analyzed'
-                      : current.status || 'Evidence'}{' '}
-                    ·{' '}
-                    {current.clock_quality === 'received_only'
-                      ? 'receive time only'
-                      : 'device timestamp'}
-                  </span>
-                )}
-              </div>
-              <div className="timeline-controls">
-                <button
-                  className="quiet icon-button"
-                  disabled={!records.length}
-                  onClick={() =>
-                    setIndex((i) => Math.min(records.length - 1, i + 1))
-                  }
-                  aria-label="Previous recording"
-                >
-                  <ArrowLeft size={17} />
-                </button>
-                <button
-                  className="quiet icon-button"
-                  disabled={!records.length}
-                  onClick={() => setPlaying(!playing)}
-                  aria-label={playing ? 'Pause replay' : 'Play replay'}
-                >
-                  {playing ? <Pause size={17} /> : <Play size={17} />}
-                </button>
-                <Slider
-                  aria-label="Recording timeline"
-                  value={[Math.max(0, records.length - 1 - index)]}
-                  min={0}
-                  max={Math.max(1, records.length - 1)}
-                  onValueChange={(v) => {
-                    const n = Array.isArray(v) ? v[0] : v;
-                    setIndex(Math.max(0, records.length - 1 - n));
-                    setPlaying(false);
-                  }}
-                />
-                <button
-                  className="quiet icon-button"
-                  disabled={!records.length}
-                  onClick={() => setIndex((i) => Math.max(0, i - 1))}
-                  aria-label="Next recording"
-                >
-                  <ArrowRight size={17} />
-                </button>
-              </div>
-              <div className="observation">
-                <div className="row">
-                  <h3>Observed in this moment</h3>
-                  {current && (
-                    <button
-                      className="text-button"
-                      onClick={() => setSelected(current)}
-                    >
-                      Open evidence <ArrowUpRight size={14} />
-                    </button>
-                  )}
-                </div>
-                <p>
-                  {current?.summary ||
-                    'Descriptions will appear after AI analysis. Your original recordings are saved first.'}
-                </p>
-                <div className="chips">
-                  {current?.objects?.map((o, i) => (
-                    <button
-                      key={i}
-                      className="chip"
-                      onClick={() => {
-                        setSearch(o.label);
-                        setQuestion(
-                          'Where was my ' + o.label + ' last observed?',
-                        );
-                      }}
-                    >
-                      {o.label}
-                      <span>{o.location}</span>
-                    </button>
-                  ))}
-                </div>
-                {current?.error && (
-                  <p className="error-text">
-                    Analysis pending: {current.error}
-                  </p>
-                )}
-              </div>
-            </section>
-            <aside className="recall-panel">
-              <div className="panel-top">
-                <span className="eyebrow">ASK YOUR MEMORY</span>
-                <Aperture size={18} />
-              </div>
-              <h2>“Where did I put it?”</h2>
-              <p className="muted">
-                An answer is only as useful as the evidence behind it.
-              </p>
-              <form onSubmit={ask}>
-                <label htmlFor="question" className="sr-only">
-                  Ask a question about your recordings
-                </label>
-                <textarea
-                  id="question"
-                  value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
-                  placeholder="Where was my wallet before I moved the notebook?"
-                  rows={3}
-                  required
-                  maxLength={2000}
-                />
-                <div className="row">
-                  <AudioCapture
-                    question
-                    onUpdate={() => {
-                      load();
-                      setNotice(
-                        'Voice question saved. The answer will appear here after transcription.',
-                      );
-                    }}
-                    onError={setError}
-                  />
-                  <button
-                    type="submit"
-                    disabled={busy || !question.trim()}
-                    aria-label="Ask memory"
-                  >
-                    {busy ? 'Thinking…' : <ArrowUpRight size={20} />}
-                  </button>
-                </div>
-              </form>
-              <div className="answers" aria-live="polite">
-                {answers.length === 0 ? (
-                  <div className="empty-answer">
-                    <span className="meta">TRY ASKING</span>
-                    {[
-                      'Where did I leave my keys?',
-                      'What did we discuss about the project?',
-                      'What changed on the table?',
-                    ].map((q) => (
-                      <button
-                        key={q}
-                        className="suggestion"
-                        onClick={() => setQuestion(q)}
-                      >
-                        {q}
-                        <ArrowUpRight size={14} />
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  answers.slice(0, 6).map((a) => (
-                    <article className="answer" key={a.id}>
-                      <div className="row">
-                        <span className="meta">
-                          {clock(a.created_at, status?.timezone)}
-                        </span>
-                        <button
-                          className="quiet icon-button"
-                          aria-label="Read answer aloud"
-                          onClick={() => speak(a.answer)}
-                        >
-                          <Volume2 size={15} />
-                        </button>
-                      </div>
-                      <h3>{a.question}</h3>
-                      <p>
-                        {a.answer.replace(/\[([0-9a-f-]{36})\]/g, (_, id) => {
-                          const i = a.evidence.findIndex((e) => e.id === id);
-                          return i >= 0 ? `[${i + 1}]` : '[unverified]';
-                        })}
-                      </p>
-                      <span className="answer-kind">
-                        {a.grounded
-                          ? 'Recorded evidence cited'
-                          : 'Evidence incomplete'}
-                      </span>
-                      <div className="evidence-links">
-                        {a.evidence.map((r, i) => (
-                          <button
-                            className="chip"
-                            key={r.id}
-                            onClick={() => setSelected(r)}
-                          >
-                            [{i + 1}] {clock(r.captured_at, status?.timezone)}{' '}
-                            {r.kind === 'audio' ? 'Audio' : 'Frame'}
-                          </button>
-                        ))}
-                      </div>
-                    </article>
-                  ))
-                )}
-              </div>
-            </aside>
-          </div>
-          <section className="history">
-            <div className="row">
-              <h2>A thread through your day</h2>
-              <span className="meta">
-                {results ? 'SEARCH RESULTS' : 'LATEST 60 RECORDINGS'}
-              </span>
-            </div>
-            <form className="search-row" onSubmit={doSearch}>
-              <div className="search-field">
-                <Search size={18} />
-                <input
-                  aria-label="Search observations and transcripts"
-                  placeholder="Search objects, words, places…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              <label>
-                From
-                <input
-                  type="datetime-local"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                />
-              </label>
-              <label>
-                To
-                <input
-                  type="datetime-local"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                />
-              </label>
-              <button disabled={busy}>Search</button>
-              {results && (
-                <button
-                  type="button"
-                  className="quiet"
-                  onClick={() => {
-                    setResults(null);
-                    setSearch('');
-                    setFrom('');
-                    setTo('');
-                  }}
-                >
-                  Clear
-                </button>
-              )}
-            </form>
-            <div className="recording-grid">
-              {(results ?? records).map((r) => (
-                <button
-                  className="recording-card"
-                  key={r.id}
-                  onClick={() => setSelected(r)}
-                >
-                  {r.kind === 'frame' ? (
-                    <img
-                      loading="lazy"
-                      src={r.media_url}
-                      alt={r.summary || 'Recorded camera frame'}
-                    />
-                  ) : (
-                    <div className="audio-thumb">
-                      <FileAudio size={24} />
-                      <span>Recorded audio</span>
-                    </div>
-                  )}
-                  <div>
-                    <span className="meta">
-                      {clock(r.captured_at, status?.timezone)} · {r.kind}
-                    </span>
-                    <p>{r.summary || 'Saved · waiting for analysis'}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-            {(results ?? records).length === 0 && (
-              <p className="empty-line">
-                {results
-                  ? 'No matching evidence. Try fewer words or a wider time range.'
-                  : 'Your recordings will appear here in time order.'}
-              </p>
-            )}
-            {!results && records.length >= 60 && (
-              <button
-                className="quiet"
-                onClick={() =>
-                  action(async () => {
-                    const older = await api<Recording[]>(
-                      '/recordings?before=' +
-                        (records[records.length - 1].captured_at - 0.001),
-                    );
-                    setResults([...records, ...older]);
-                  })
-                }
-              >
-                Load earlier recordings
-              </button>
-            )}
-          </section>
-        </TabsContent>
-        <TabsContent value="scene">
-          <div className="scene-header">
-            <div>
-              <h2>Your surroundings, reconstructed.</h2>
-              <p className="muted">
-                Static geometry from a scan. Object markers show observations at
-                a particular time.
-              </p>
-            </div>
+          <div className="sidebar-bottom">
             <button
-              className="quiet"
-              onClick={() =>
-                action(async () => setScene(await api<Scene>('/scene')))
-              }
+              className="quiet icon-button mobile-signout"
+              aria-label="Sign out"
+              onClick={signOut}
+              disabled={busy}
             >
-              <RefreshCw size={16} /> Refresh scene
+              <LogOut size={17} />
             </button>
-          </div>
-          <SceneView
-            scene={scene}
-            at={current?.captured_at || Date.now() / 1000}
-          />
-          {scene.available && (
-            <div className="timeline-controls">
-              <span className="meta">
-                Observed through{' '}
-                {current
-                  ? clock(current.captured_at, status?.timezone)
-                  : 'latest scan'}
+            <button
+              className="device-shortcut"
+              onClick={() => setTab('system')}
+            >
+              <span className={'device-icon ' + (online ? 'connected' : '')}>
+                <Camera size={19} />
               </span>
-              <Slider
-                aria-label="Object history timeline"
-                value={[Math.max(0, records.length - 1 - index)]}
-                min={0}
-                max={Math.max(1, records.length - 1)}
-                onValueChange={(v) =>
-                  setIndex(records.length - 1 - (Array.isArray(v) ? v[0] : v))
-                }
+              <span>
+                <strong>Your necklace</strong>
+                <span
+                  className={'connection-label ' + (online ? 'connected' : '')}
+                >
+                  <i />
+                  {online
+                    ? status?.paused
+                      ? 'Capture paused'
+                      : 'Connected'
+                    : 'Not connected'}
+                </span>
+              </span>
+              <ChevronRight size={16} />
+            </button>
+            <div className="workspace-account">
+              <span className="account-avatar">
+                <Aperture size={18} />
+              </span>
+              <div>
+                <strong>Personal workspace</strong>
+                <span>
+                  {status?.provider === 'ollama'
+                    ? 'Local AI'
+                    : 'Your recordings'}
+                </span>
+              </div>
+              <button
+                className="quiet icon-button"
+                aria-label="Sign out"
+                title="Sign out"
+                onClick={signOut}
+                disabled={busy}
+              >
+                <LogOut size={17} />
+              </button>
+            </div>
+          </div>
+        </aside>
+        <div className="workspace-main" id="workspace-content" tabIndex={-1}>
+          <header className="workspace-header">
+            <div className="workspace-heading">
+              <p className="eyebrow">YOUR PERSONAL MEMORY</p>
+              <h1>{pageTitles[tab][0]}</h1>
+              <p>{pageTitles[tab][1]}</p>
+            </div>
+            <div className="capture-actions">
+              <button
+                className="quiet import-button"
+                onClick={() => fileRef.current?.click()}
+                disabled={busy}
+              >
+                <Upload size={16} /> Import
+              </button>
+              <AudioCapture onUpdate={load} onError={setError} />
+              <input
+                ref={fileRef}
+                className="hidden"
+                type="file"
+                aria-label="Import a recording"
+                accept="image/jpeg,audio/wav,audio/webm,audio/ogg,audio/mp4"
+                onChange={(e) => {
+                  if (e.target.files?.[0]) upload(e.target.files[0]);
+                  e.target.value = '';
+                }}
               />
             </div>
-          )}
-        </TabsContent>
-        <TabsContent value="monitor">
-          <div className="monitor-grid">
-            <section className="card">
-              <p className="eyebrow">A LITTLE HELP STAYING PRESENT</p>
-              <h2>Tell REWIND what to watch for.</h2>
-              <p className="muted">
-                Alerts use recent analyzed observations. A growing analysis
-                queue can delay them.
-              </p>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  action(async () => {
-                    await api('/rules', {
-                      method: 'POST',
-                      body: JSON.stringify({ instruction: rule }),
-                    });
-                    setRule('');
-                  });
-                }}
-              >
-                <label htmlFor="rule">Monitoring request</label>
-                <textarea
-                  id="rule"
-                  value={rule}
-                  onChange={(e) => setRule(e.target.value)}
-                  placeholder="Tell me if I pick up my bag while my wallet is visibly on the table."
-                  required
-                  minLength={3}
-                  maxLength={1000}
-                />
-                <button disabled={busy} className="mt-4">
-                  <Bell size={16} /> Watch for this
+          </header>
+          <div className="workspace-body">
+            {error && (
+              <div className="banner error" role="alert">
+                <span>{error.replace(/^Error: /, '')}</span>
+                <button
+                  className="quiet icon-button"
+                  aria-label="Dismiss error"
+                  onClick={() => setError('')}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+            {notice && (
+              <div className="banner" role="status">
+                <CheckCircle2 size={18} />
+                <span>{notice}</span>
+                <button
+                  className="quiet icon-button"
+                  aria-label="Dismiss notification"
+                  onClick={() => setNotice('')}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+            <TabsContent value="memory">
+              <form className="search-row" onSubmit={doSearch}>
+                <div className="search-field">
+                  <Search size={19} />
+                  <input
+                    aria-label="Search observations and transcripts"
+                    placeholder="Search your memories…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+                <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+                  <PopoverTrigger
+                    type="button"
+                    className={
+                      'quiet filter-button ' + (from || to ? 'has-filter' : '')
+                    }
+                  >
+                    <CalendarDays size={16} />
+                    {from || to ? 'Date range set' : 'All time'}
+                  </PopoverTrigger>
+                  <PopoverContent className="date-filter" align="end">
+                    <h3>Choose a time range</h3>
+                    <p className="muted">Applies to searches and questions.</p>
+                    <label htmlFor="date-from">From</label>
+                    <input
+                      id="date-from"
+                      type="datetime-local"
+                      value={from}
+                      max={to || undefined}
+                      onChange={(e) => setFrom(e.target.value)}
+                    />
+                    <label htmlFor="date-to">To</label>
+                    <input
+                      id="date-to"
+                      type="datetime-local"
+                      value={to}
+                      min={from || undefined}
+                      onChange={(e) => setTo(e.target.value)}
+                    />
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => {
+                          setFrom('');
+                          setTo('');
+                        }}
+                      >
+                        Reset dates
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFiltersOpen(false)}
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <button disabled={busy} type="submit">
+                  Search
                 </button>
               </form>
-              <div className="rule-list">
-                {rules.map((r) => (
-                  <div key={r.id} className="row">
-                    <p>{r.instruction}</p>
+              <div className="metrics">
+                <div>
+                  <span className="metric-icon">
+                    <Camera size={18} />
+                  </span>
+                  <span className="metric-copy">
+                    <span>Recordings saved</span>
+                    <strong>{status?.received.toLocaleString()}</strong>
+                  </span>
+                </div>
+                <div>
+                  <span className="metric-icon">
+                    <CheckCircle2 size={18} />
+                  </span>
+                  <span className="metric-copy">
+                    <span>Ready to recall</span>
+                    <strong>{status?.analyzed.toLocaleString()}</strong>
+                  </span>
+                </div>
+                <div>
+                  <span className="metric-icon">
+                    <Clock3 size={18} />
+                  </span>
+                  <span className="metric-copy">
+                    <span>Processing</span>
+                    <strong>{status?.pending.toLocaleString()}</strong>
+                  </span>
+                </div>
+                <div>
+                  <span className="metric-icon">
+                    <HardDrive size={18} />
+                  </span>
+                  <span className="metric-copy">
+                    <span>Memory stored</span>
+                    <strong>{bytes(status?.stored_bytes || 0)}</strong>
+                  </span>
+                </div>
+              </div>
+
+              <div className="memory-grid">
+                <section className="visual-panel">
+                  <div className="panel-top">
+                    <span className="panel-heading">
+                      <span
+                        className={
+                          'live-dot ' +
+                          (!online || status?.paused ? 'inactive' : '')
+                        }
+                      />
+                      {index === 0 ? 'Latest recording' : 'Replaying a moment'}
+                    </span>
+                    <span className="meta">
+                      {current
+                        ? clock(current.captured_at, status?.timezone)
+                        : 'No recordings yet'}
+                    </span>
+                  </div>
+                  <div className="camera-stage">
+                    {current ? (
+                      <Media recording={current} />
+                    ) : (
+                      <div className="stage-empty">
+                        <Camera size={44} />
+                        <h2>No recordings yet</h2>
+                        <p>
+                          Connect your necklace or import a recording. Your
+                          moments will appear here.
+                        </p>
+                        <div className="empty-actions">
+                          <button
+                            className="quiet"
+                            onClick={() => fileRef.current?.click()}
+                            disabled={busy}
+                          >
+                            <Upload size={16} /> Import recording
+                          </button>
+                          <button
+                            className="text-button"
+                            onClick={() => setTab('system')}
+                          >
+                            Connect necklace <ArrowUpRight size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {current && (
+                      <span className="frame-state">
+                        {current.status === 'done'
+                          ? 'Analyzed'
+                          : current.status || 'Evidence'}{' '}
+                        ·{' '}
+                        {current.clock_quality === 'received_only'
+                          ? 'receive time only'
+                          : 'device timestamp'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="timeline-controls">
                     <button
                       className="quiet icon-button"
-                      aria-label="Remove monitoring rule"
+                      disabled={!records.length || index >= records.length - 1}
+                      onClick={() =>
+                        setIndex((i) => Math.min(records.length - 1, i + 1))
+                      }
+                      aria-label="Previous recording"
+                    >
+                      <ArrowLeft size={17} />
+                    </button>
+                    <button
+                      className="quiet icon-button replay-button"
+                      disabled={records.length < 2}
+                      onClick={() => {
+                        if (!playing && index === 0)
+                          setIndex(records.length - 1);
+                        setPlaying(!playing);
+                      }}
+                      aria-label={playing ? 'Pause replay' : 'Play replay'}
+                    >
+                      {playing ? <Pause size={17} /> : <Play size={17} />}
+                    </button>
+                    <Slider
+                      aria-label="Recording timeline"
+                      disabled={records.length < 2}
+                      value={[Math.max(0, records.length - 1 - index)]}
+                      min={0}
+                      max={Math.max(1, records.length - 1)}
+                      onValueChange={(v) => {
+                        const n = Array.isArray(v) ? v[0] : v;
+                        setIndex(Math.max(0, records.length - 1 - n));
+                        setPlaying(false);
+                      }}
+                    />
+                    <button
+                      className="quiet icon-button"
+                      disabled={!records.length || index === 0}
+                      onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                      aria-label="Next recording"
+                    >
+                      <ArrowRight size={17} />
+                    </button>
+                  </div>
+                  <div className="capture-status-row">
+                    <span className="meta">
+                      {current
+                        ? new Date(
+                            current.captured_at * 1000,
+                          ).toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            timeZone: status?.timezone,
+                          })
+                        : 'Ready when you are'}
+                    </span>
+                    <button
+                      className="text-button"
+                      disabled={busy}
                       onClick={() =>
                         action(() =>
-                          api('/rules/' + r.id, { method: 'DELETE' }),
+                          api('/capture/pause', {
+                            method: 'POST',
+                            body: JSON.stringify({ paused: !status?.paused }),
+                          }),
                         )
                       }
                     >
-                      <Trash2 size={16} />
+                      {status?.paused ? (
+                        <Play size={14} />
+                      ) : (
+                        <Pause size={14} />
+                      )}
+                      {status?.paused ? 'Resume capture' : 'Pause capture'}
                     </button>
                   </div>
-                ))}
-              </div>
-            </section>
-            <section className="card">
-              <h2>Things worth your attention</h2>
-              {alerts.length ? (
-                alerts.map((a) => (
-                  <article key={a.id} className="alert-entry">
-                    <span className="meta">
-                      {clock(a.created_at, status?.timezone)}
-                    </span>
-                    <p>{a.message}</p>
+                  <div className="observation">
                     <div className="row">
-                      <button
-                        className="text-button"
-                        onClick={() => {
-                          const r = records.find((r) => r.id === a.event_id);
-                          if (r) setSelected(r);
-                          else
-                            action(async () => {
-                              setSelected(
-                                await api<Recording>('/events/' + a.event_id),
-                              );
-                            });
-                        }}
-                      >
-                        View evidence <ArrowUpRight size={14} />
-                      </button>
-                      {!a.seen && (
+                      <h3>In this moment</h3>
+                      {current && (
                         <button
-                          className="quiet"
-                          onClick={() =>
-                            action(() =>
-                              api('/alerts/' + a.id + '/seen', {
-                                method: 'POST',
-                              }),
-                            )
-                          }
+                          className="text-button"
+                          onClick={() => setSelected(current)}
                         >
-                          Mark read
+                          Open evidence <ArrowUpRight size={14} />
                         </button>
                       )}
                     </div>
-                  </article>
-                ))
-              ) : (
-                <p className="muted">
-                  No alerts yet. REWIND will surface a moment here when recorded
-                  evidence meets a monitoring request.
-                </p>
-              )}
-            </section>
-          </div>
-        </TabsContent>
-        <TabsContent value="system">
-          <div className="system-grid">
-            <section className="card">
-              <h2>Necklace connection</h2>
-              {status?.devices.length ? (
-                status.devices.map((d) => (
-                  <div key={d.id}>
-                    <div className="row">
-                      <h3>{d.id}</h3>
-                      <span className="status">
-                        {Date.now() / 1000 - d.last_seen < 30
-                          ? 'Online'
-                          : 'Offline'}
-                      </span>
+                    <p>
+                      {current?.summary ||
+                        (current
+                          ? 'Saved safely. A description will appear after analysis.'
+                          : 'Each recording will include a description and its original evidence.')}
+                    </p>
+                    <div className="chips">
+                      {current?.objects?.map((o, i) => (
+                        <button
+                          key={i}
+                          className="chip"
+                          onClick={() => {
+                            setSearch(o.label);
+                            suggestQuestion(
+                              'Where was my ' + o.label + ' last observed?',
+                            );
+                          }}
+                        >
+                          {o.label}
+                          <span>{o.location}</span>
+                        </button>
+                      ))}
                     </div>
-                    <dl>
-                      <dt>Last contact</dt>
-                      <dd>{clock(d.last_seen, status.timezone)}</dd>
-                      <dt>On-device queue</dt>
-                      <dd>{d.state.queued} recordings</dd>
-                      <dt>Reported missed captures</dt>
-                      <dd>{d.state.dropped}</dd>
-                      <dt>Wi-Fi signal</dt>
-                      <dd>{d.state.rssi} dBm</dd>
-                      <dt>Free SD space</dt>
-                      <dd>{bytes(d.state.free_sd_bytes)}</dd>
-                    </dl>
-                    {d.state.error && (
-                      <p className="error-text">{d.state.error}</p>
+                    {current?.error && (
+                      <p className="error-text">
+                        Analysis needs attention: {current.error}
+                      </p>
                     )}
                   </div>
-                ))
-              ) : (
-                <>
+                </section>
+                <aside className="recall-panel">
+                  <div className="panel-top">
+                    <h2 className="recall-heading">Ask your memory</h2>
+                    <Sparkles size={18} />
+                  </div>
                   <p className="muted">
-                    No device has checked in. Provision the ESP32 with the
-                    server address, Wi-Fi details, and device key.
+                    Find answers in your recordings, with evidence to revisit.
                   </p>
-                  <ol>
-                    <li>Insert a FAT32 microSD card.</li>
-                    <li>Flash the firmware over USB.</li>
-                    <li>Power it from a USB battery bank.</li>
-                    <li>Keep the necklace and server on the same Wi-Fi.</li>
-                  </ol>
-                </>
-              )}
-            </section>
-            <section className="card">
-              <h2>Memory health</h2>
-              <dl>
-                <dt>Vision model</dt>
-                <dd>{status?.model}</dd>
-                <dt>Provider</dt>
-                <dd>{status?.provider}</dd>
-                <dt>Average analysis time</dt>
-                <dd>
-                  {status?.average_analysis_ms
-                    ? (status.average_analysis_ms / 1000).toFixed(1) + ' s'
-                    : 'Not measured yet'}
-                </dd>
-                <dt>Storage allowance</dt>
-                <dd>{bytes(status?.storage_limit_bytes || 0)}</dd>
-                <dt>Disk free</dt>
-                <dd>{bytes(status?.free_bytes || 0)}</dd>
-                <dt>Failed analysis jobs</dt>
-                <dd>{status?.failed}</dd>
-                <dt>Sequence gaps so far</dt>
-                <dd>{status?.observed_sequence_gaps}</dd>
-                <dt>Missing semantic embeddings</dt>
-                <dd>{status?.embedding_failures}</dd>
-              </dl>
-              <div className="row">
+                  <form className="question-composer" onSubmit={ask}>
+                    <label htmlFor="question" className="sr-only">
+                      Ask a question about your recordings
+                    </label>
+                    <textarea
+                      id="question"
+                      ref={questionRef}
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      placeholder="What would you like to remember?"
+                      rows={3}
+                      required
+                      maxLength={2000}
+                    />
+                    <div className="row">
+                      <AudioCapture
+                        question
+                        onUpdate={() => {
+                          load();
+                          setNotice(
+                            'Voice question saved. The answer will appear here after transcription.',
+                          );
+                        }}
+                        onError={setError}
+                      />
+                      <button
+                        type="submit"
+                        className="ask-button"
+                        disabled={busy || !question.trim()}
+                        aria-label="Ask memory"
+                      >
+                        {asking ? (
+                          'Thinking…'
+                        ) : (
+                          <>
+                            Ask <ArrowUpRight size={16} />
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                  {(from || to) && (
+                    <p className="filter-note">
+                      <CalendarDays size={13} /> Using your selected time range{' '}
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setFrom('');
+                          setTo('');
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </p>
+                  )}
+                  {asking && (
+                    <p className="thinking-note" role="status">
+                      <span className="pulse">
+                        <Sparkles size={15} />
+                      </span>{' '}
+                      Looking through your recordings…
+                    </p>
+                  )}
+                  <div className="answers" aria-live="polite">
+                    {answers.length === 0 ? (
+                      <div className="empty-answer">
+                        <span className="meta">TRY ASKING</span>
+                        {[
+                          'Where did I leave my keys?',
+                          'What did we discuss about the project?',
+                          'What changed on the table?',
+                        ].map((q) => (
+                          <button
+                            key={q}
+                            className="suggestion"
+                            onClick={() => suggestQuestion(q)}
+                          >
+                            {q}
+                            <ArrowUpRight size={14} />
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      answers.slice(0, 6).map((a) => (
+                        <article className="answer" key={a.id}>
+                          <div className="row">
+                            <span className="meta">
+                              {clock(a.created_at, status?.timezone)}
+                            </span>
+                            <button
+                              className="quiet icon-button"
+                              aria-label="Read answer aloud"
+                              onClick={() => speak(a.answer)}
+                            >
+                              <Volume2 size={15} />
+                            </button>
+                          </div>
+                          <h3>{a.question}</h3>
+                          <p>
+                            {a.answer.replace(
+                              /\[([0-9a-f-]{36})\]/g,
+                              (_, id) => {
+                                const i = a.evidence.findIndex(
+                                  (e) => e.id === id,
+                                );
+                                return i >= 0 ? `[${i + 1}]` : '[unverified]';
+                              },
+                            )}
+                          </p>
+                          <span className="answer-kind">
+                            {a.grounded
+                              ? 'Recorded evidence cited'
+                              : 'Evidence incomplete'}
+                          </span>
+                          <div className="evidence-links">
+                            {a.evidence.map((r, i) => (
+                              <button
+                                className="chip"
+                                key={r.id}
+                                onClick={() => setSelected(r)}
+                              >
+                                [{i + 1}]{' '}
+                                {clock(r.captured_at, status?.timezone)}{' '}
+                                {r.kind === 'audio' ? 'Audio' : 'Frame'}
+                              </button>
+                            ))}
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </aside>
+              </div>
+              <section className="history" ref={historyRef}>
+                <div className="row">
+                  <h2>
+                    {historyMode === 'search'
+                      ? 'Search results'
+                      : 'Recent memories'}
+                  </h2>
+                  <div className="history-actions">
+                    <span className="meta">
+                      {(results ?? records).length} recordings
+                      {historyMode === 'search' && search
+                        ? ` matching “${search}”`
+                        : ''}
+                    </span>
+                    {results !== null && (
+                      <button className="text-button" onClick={clearSearch}>
+                        <X size={14} /> Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="recording-grid">
+                  {(results ?? records).map((r) => (
+                    <button
+                      className="recording-card"
+                      key={r.id}
+                      onClick={() => setSelected(r)}
+                    >
+                      {r.kind === 'frame' ? (
+                        <img
+                          loading="lazy"
+                          src={r.media_url}
+                          alt={r.summary || 'Recorded camera frame'}
+                        />
+                      ) : (
+                        <div className="audio-thumb">
+                          <FileAudio size={24} />
+                          <span>Recorded audio</span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="meta">
+                          {new Date(r.captured_at * 1000).toLocaleDateString(
+                            [],
+                            {
+                              month: 'short',
+                              day: 'numeric',
+                              timeZone: status?.timezone,
+                            },
+                          )}{' '}
+                          · {clock(r.captured_at, status?.timezone)}
+                        </span>
+                        <p>
+                          {r.summary ||
+                            (r.status === 'failed'
+                              ? 'Analysis needs attention'
+                              : 'Saved · waiting for analysis')}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                {(results ?? records).length === 0 && (
+                  <div className="empty-line">
+                    <Clock3 size={24} />
+                    <strong>
+                      {results
+                        ? 'No matching memories'
+                        : 'Your timeline starts here'}
+                    </strong>
+                    <span>
+                      {results
+                        ? 'Try fewer words or a wider time range.'
+                        : 'Your recordings will be collected here, ready to revisit.'}
+                    </span>
+                  </div>
+                )}
+                {historyMode !== 'search' &&
+                  hasEarlier &&
+                  (results ?? records).length >= 60 && (
+                    <button
+                      className="quiet load-earlier"
+                      disabled={busy}
+                      onClick={() =>
+                        action(async () => {
+                          const visible = results ?? records;
+                          const older = await api<Recording[]>(
+                            '/recordings?before=' +
+                              (visible[visible.length - 1].captured_at - 0.001),
+                          );
+                          setResults([...visible, ...older]);
+                          setHistoryMode('earlier');
+                          setHasEarlier(older.length >= 60);
+                        })
+                      }
+                    >
+                      Load earlier recordings
+                    </button>
+                  )}
+              </section>
+            </TabsContent>
+            <TabsContent value="scene">
+              <div className="scene-header">
+                <div>
+                  <h2>Your surroundings, reconstructed.</h2>
+                  <p className="muted">
+                    Static geometry from a scan. Object markers show
+                    observations at a particular time.
+                  </p>
+                </div>
                 <button
                   className="quiet"
-                  disabled={busy || !status?.failed}
                   onClick={() =>
-                    action(() => api('/retry', { method: 'POST' }))
+                    action(async () => setScene(await api<Scene>('/scene')))
                   }
                 >
-                  <RefreshCw size={16} /> Retry failures
+                  <RefreshCw size={16} /> Refresh scene
                 </button>
-                <a
-                  className="button-link"
-                  href="/api/export"
-                  download="rewind-memory.json"
-                >
-                  <Download size={16} /> Export metadata
-                </a>
               </div>
-              <p className="meta mt-4">
-                Original recordings are never automatically deleted. At the
-                storage limit, uploads wait on the necklace.
-              </p>
-            </section>
+              <SceneView
+                scene={scene}
+                at={current?.captured_at || Date.now() / 1000}
+              />
+              {scene.available && (
+                <div className="timeline-controls">
+                  <span className="meta">
+                    Observed through{' '}
+                    {current
+                      ? clock(current.captured_at, status?.timezone)
+                      : 'latest scan'}
+                  </span>
+                  <Slider
+                    aria-label="Object history timeline"
+                    value={[Math.max(0, records.length - 1 - index)]}
+                    min={0}
+                    max={Math.max(1, records.length - 1)}
+                    disabled={records.length < 2}
+                    onValueChange={(v) => {
+                      setIndex(
+                        Math.max(
+                          0,
+                          records.length - 1 - (Array.isArray(v) ? v[0] : v),
+                        ),
+                      );
+                      setPlaying(false);
+                    }}
+                  />
+                </div>
+              )}
+            </TabsContent>
+            <TabsContent value="monitor">
+              <div className="monitor-grid">
+                <section className="card">
+                  <span className="section-icon">
+                    <Bell size={20} />
+                  </span>
+                  <h2>What should I look out for?</h2>
+                  <p className="muted">
+                    Alerts use recent analyzed observations. A growing analysis
+                    queue can delay them.
+                  </p>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      action(async () => {
+                        await api('/rules', {
+                          method: 'POST',
+                          body: JSON.stringify({ instruction: rule }),
+                        });
+                        setRule('');
+                      });
+                    }}
+                  >
+                    <label htmlFor="rule">Monitoring request</label>
+                    <textarea
+                      id="rule"
+                      value={rule}
+                      onChange={(e) => setRule(e.target.value)}
+                      placeholder="Tell me if I pick up my bag while my wallet is visibly on the table."
+                      required
+                      minLength={3}
+                      maxLength={1000}
+                    />
+                    <button disabled={busy} className="mt-4">
+                      <Bell size={16} /> Watch for this
+                    </button>
+                  </form>
+                  <div className="rule-list">
+                    {rules.map((r) => (
+                      <div key={r.id} className="row">
+                        <p>{r.instruction}</p>
+                        <button
+                          className="quiet icon-button"
+                          aria-label="Remove monitoring rule"
+                          onClick={() =>
+                            action(() =>
+                              api('/rules/' + r.id, { method: 'DELETE' }),
+                            )
+                          }
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <section className="card">
+                  <h2>Your alerts</h2>
+                  {alerts.length ? (
+                    alerts.map((a) => (
+                      <article key={a.id} className="alert-entry">
+                        <span className="meta">
+                          {clock(a.created_at, status?.timezone)}
+                        </span>
+                        <p>{a.message}</p>
+                        <div className="row">
+                          <button
+                            className="text-button"
+                            onClick={() => {
+                              const r = records.find(
+                                (r) => r.id === a.event_id,
+                              );
+                              if (r) setSelected(r);
+                              else
+                                action(async () => {
+                                  setSelected(
+                                    await api<Recording>(
+                                      '/events/' + a.event_id,
+                                    ),
+                                  );
+                                });
+                            }}
+                          >
+                            View evidence <ArrowUpRight size={14} />
+                          </button>
+                          {!a.seen && (
+                            <button
+                              className="quiet"
+                              onClick={() =>
+                                action(() =>
+                                  api('/alerts/' + a.id + '/seen', {
+                                    method: 'POST',
+                                  }),
+                                )
+                              }
+                            >
+                              Mark read
+                            </button>
+                          )}
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="muted">
+                      All quiet for now. When a recording matches one of your
+                      requests, it will appear here with its evidence.
+                    </p>
+                  )}
+                </section>
+              </div>
+            </TabsContent>
+            <TabsContent value="system">
+              <div className="system-grid">
+                <section className="card">
+                  <h2>Necklace connection</h2>
+                  {status?.devices.length ? (
+                    status.devices.map((d) => (
+                      <div key={d.id}>
+                        <div className="row">
+                          <h3>{d.id}</h3>
+                          <span className="status">
+                            {Date.now() / 1000 - d.last_seen < 30
+                              ? 'Online'
+                              : 'Offline'}
+                          </span>
+                        </div>
+                        <dl>
+                          <dt>Last contact</dt>
+                          <dd>{clock(d.last_seen, status.timezone)}</dd>
+                          <dt>On-device queue</dt>
+                          <dd>{d.state.queued} recordings</dd>
+                          <dt>Reported missed captures</dt>
+                          <dd>{d.state.dropped}</dd>
+                          <dt>Wi-Fi signal</dt>
+                          <dd>{d.state.rssi} dBm</dd>
+                          <dt>Free SD space</dt>
+                          <dd>{bytes(d.state.free_sd_bytes)}</dd>
+                        </dl>
+                        {d.state.error && (
+                          <p className="error-text">{d.state.error}</p>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <>
+                      <p className="muted">
+                        No device has checked in. Provision the ESP32 with the
+                        server address, Wi-Fi details, and device key.
+                      </p>
+                      <ol>
+                        <li>Insert a FAT32 microSD card.</li>
+                        <li>Flash the firmware over USB.</li>
+                        <li>Power it from a USB battery bank.</li>
+                        <li>Keep the necklace and server on the same Wi-Fi.</li>
+                      </ol>
+                    </>
+                  )}
+                </section>
+                <section className="card">
+                  <h2>Memory health</h2>
+                  <dl>
+                    <dt>Vision model</dt>
+                    <dd>{status?.model}</dd>
+                    <dt>Provider</dt>
+                    <dd>{status?.provider}</dd>
+                    <dt>Average analysis time</dt>
+                    <dd>
+                      {status?.average_analysis_ms
+                        ? (status.average_analysis_ms / 1000).toFixed(1) + ' s'
+                        : 'Not measured yet'}
+                    </dd>
+                    <dt>Storage allowance</dt>
+                    <dd>{bytes(status?.storage_limit_bytes || 0)}</dd>
+                    <dt>Disk free</dt>
+                    <dd>{bytes(status?.free_bytes || 0)}</dd>
+                    <dt>Failed analysis jobs</dt>
+                    <dd>{status?.failed}</dd>
+                    <dt>Sequence gaps so far</dt>
+                    <dd>{status?.observed_sequence_gaps}</dd>
+                    <dt>Missing semantic embeddings</dt>
+                    <dd>{status?.embedding_failures}</dd>
+                  </dl>
+                  <div className="row">
+                    <button
+                      className="quiet"
+                      disabled={busy || !status?.failed}
+                      onClick={() =>
+                        action(() => api('/retry', { method: 'POST' }))
+                      }
+                    >
+                      <RefreshCw size={16} /> Retry failures
+                    </button>
+                    <a
+                      className="button-link"
+                      href="/api/export"
+                      download="rewind-memory.json"
+                    >
+                      <Download size={16} /> Export metadata
+                    </a>
+                  </div>
+                  <p className="meta mt-4">
+                    Original recordings are never automatically deleted. At the
+                    storage limit, uploads wait on the necklace.
+                  </p>
+                </section>
+              </div>
+            </TabsContent>
+            <footer className="workspace-footer">
+              <span>
+                <ShieldCheck size={14} /> Originals saved. Answers linked to
+                evidence.
+              </span>
+              <span>{status?.timezone.replaceAll('_', ' ')}</span>
+            </footer>
           </div>
-        </TabsContent>
+        </div>
       </Tabs>
-      <footer>
-        <span>CAPTURE → OBSERVE → RECALL</span>
-        <span className="muted">
-          A record, not a guarantee. Occluded moments remain unknown.
-        </span>
-      </footer>
       <Dialog
         open={!!selected}
         onOpenChange={(o) => {
@@ -988,6 +1284,8 @@ export default function Home() {
                   setDeleting(null);
                   setSelected(null);
                   setResults(null);
+                  setHistoryMode('recent');
+                  setHasEarlier(true);
                 })
               }
             >

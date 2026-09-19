@@ -92,6 +92,8 @@ export function AudioCapture({
   }
   return (
     <button
+      type="button"
+      aria-pressed={active}
       className={active ? 'recording-button' : 'quiet'}
       disabled={sending}
       onClick={active ? stop : start}
