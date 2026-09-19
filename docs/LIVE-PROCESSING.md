@@ -37,7 +37,10 @@ speech latency and transport, not noisy real-world accuracy.
 Enable `REWIND_CODEX_VERIFY=true` on the Mac API. The installed Codex CLI uses
 its existing ChatGPT login, with model names `gpt-6-astra` and `gpt-5.6-sol`.
 No API key is required. These are separate ephemeral Codex jobs, not turns
-in an already-running desktop chat.
+in an already-running desktop chat. The Mac launches these jobs, but Astra and
+Sol inference runs through OpenAI's cloud service using that login; their weights
+are not running on the Mac or ASUS. Selected original evidence is supplied to
+those review jobs. The local vision, speech, and retrieval models run on the ASUS.
 
 1. Qwen proposes an answer with strictly checked source labels.
 2. A durable review job marks it as a **draft / checking**, never grounded yet.
