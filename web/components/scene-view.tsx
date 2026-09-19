@@ -1,4 +1,6 @@
 'use client';
+import { Card } from '@/components/ui/card';
+import { CatalogButton } from '@/components/catalog';
 import { useEffect, useRef, useState } from 'react';
 import { Box, RotateCcw } from 'lucide-react';
 import type { Scene } from '@/lib/api';
@@ -20,7 +22,7 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
       canvas.width = w * dpr;
       canvas.height = h * dpr;
       ctx.scale(dpr, dpr);
-      ctx.fillStyle = '#1d202d';
+      ctx.fillStyle = '#111710';
       ctx.fillRect(0, 0, w, h);
       const points = scene.points;
       let center = [0, 0, 0];
@@ -58,7 +60,7 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
       for (const m of scene.markers || []) {
         if (m.captured_at > at) continue;
         const [x, y] = project(m.position);
-        ctx.fillStyle = '#aca4ff';
+        ctx.fillStyle = '#c5f68a';
         ctx.beginPath();
         ctx.arc(x, y, 4, 0, Math.PI * 2);
         ctx.fill();
@@ -73,7 +75,7 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
   }, [scene, rotation, zoom, at]);
   if (!scene.available)
     return (
-      <div className="scene-empty">
+      <Card className="scene-empty">
         <Box size={42} />
         <h3>No scene yet</h3>
         <p>
@@ -81,7 +83,7 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
           on the ASUS computer.
         </p>
         <span>Record a slow, overlapping sweep of a mostly static scene.</span>
-      </div>
+      </Card>
     );
   return (
     <div className="point-scene">
@@ -106,21 +108,21 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
         }}
       />
       <div className="scene-tools">
-        <button
+        <CatalogButton
           className="quiet"
           onClick={() => setZoom((v) => Math.min(4, v + 0.2))}
           aria-label="Zoom in"
         >
           +
-        </button>
-        <button
+        </CatalogButton>
+        <CatalogButton
           className="quiet"
           onClick={() => setZoom((v) => Math.max(0.2, v - 0.2))}
           aria-label="Zoom out"
         >
           −
-        </button>
-        <button
+        </CatalogButton>
+        <CatalogButton
           className="quiet"
           onClick={() => {
             setRotation(-0.5);
@@ -129,7 +131,7 @@ export function SceneView({ scene, at }: { scene: Scene; at: number }) {
           aria-label="Reset view"
         >
           <RotateCcw size={16} />
-        </button>
+        </CatalogButton>
       </div>
       <small className="scene-caption">
         {scene.points.length.toLocaleString()} reconstructed points · positions

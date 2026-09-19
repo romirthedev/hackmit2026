@@ -1,34 +1,38 @@
-# Interface references and controls
+# Interface sources and controls
 
-The September 19, 2026 interface pass used computer use to visit 21st.dev and ReactBits, inspect their live component pages, and adapt nine patterns to REWIND. These are original implementations composed with the repository's existing shadcn/Base UI and cmdk components. No new runtime dependency, copied demo data, or third-party component source was added. Existing dependencies retain their own licenses.
+The current interface uses actual React Bits sources alongside the installed shadcn/Base UI components listed on 21st.dev. This replaces the earlier pass of homemade approximations. The dashboard layout, spacing, color palette, branding, and REWIND data bindings are application-specific compositions of these components. Recording images are the user's original evidence, never component demo imagery.
 
-| Pattern | Reference visited | REWIND implementation |
+## Sourced components
+
+| Component | Source | Where it is used |
 |---|---|---|
-| Command palette | [shadcn Command on 21st](https://21st.dev/@shadcn/components/command) | **Quick search**, opened with Command/Ctrl+K. Debounced search across actual recordings, recent memories, section navigation, and import. Arrow keys and Enter select; Escape closes. Requests cancel when the query changes or the dialog closes. |
-| Question composer | [Vlad Vovk's AI Prompt Input on 21st](https://21st.dev/@senommu/components/ai-prompt-input) | Expanding text area, contextual AI label, character count, voice action, and submit control. Command/Ctrl+Enter submits. The toolbar reflects the configured provider; the request uses the existing question API. |
-| Spotlight cards | [ReactBits Spotlight Card](https://reactbits.dev/components/spotlight-card) | Soft pointer-following highlights on real recording cards, with a keyboard focus equivalent. |
-| Animated memory list | [ReactBits Animated List](https://reactbits.dev/components/animated-list) | Grid/list switch, short staggered entry transitions, stable recording keys, and compact list rows. Up/Down/Home/End navigate the list's recording buttons; Enter opens evidence. |
-| Animated counters | [ReactBits Count Up](https://reactbits.dev/text-animations/count-up) | Counters ease between actual API updates. Assistive technology receives the final value rather than intermediate animation values. Initial counts are immediately accurate. |
-| Selection controls | [ReactBits Glide Select](https://reactbits.dev/micro/glide-select) | Pill-shaped All/Frames/Audio filters, counts, and clearly selected states, adapted as accessible installed toggle groups rather than a dropdown. |
-| Visual filmstrip | [ReactBits Carousel](https://reactbits.dev/components/carousel) | A bounded strip of up to eight nearby original recordings. Select a thumbnail to replay that moment. The selected recording stays in view and remains selected when newer recordings arrive. |
-| Processing journey | [ReactBits Stepper](https://reactbits.dev/components/stepper) | Saved → Processing → Ready counts, analyzed fraction, failure count, and a link to Device & storage. This is a read-only view of server state, not an estimated timer or a setup wizard. |
-| Voice recording pill | [ReactBits Voice Pill](https://reactbits.dev/micro/voice-pill) | Real microphone permission, recording, and upload states with elapsed time and the existing 30-second question / 60-second conversation limits. No simulated audio waveform. Stop remains available during recording. |
+| Aurora | [React Bits](https://reactbits.dev/backgrounds/aurora) | Sign-in visual and empty recording preview; actual OGL shader |
+| Star Border | [React Bits](https://reactbits.dev/animations/star-border) | Primary actions, composed with shadcn Button |
+| Spotlight Card | [React Bits](https://reactbits.dev/components/spotlight-card) | Original recording cards with pointer/focus highlights |
+| Animated List / AnimatedItem | [React Bits](https://reactbits.dev/components/animated-list) | Recording entry animation, extracted around accessible buttons |
+| Count Up | [React Bits](https://reactbits.dev/text-animations/count-up) | Real saved/ready/processing counters; storage uses exact formatted bytes |
+| Button | [shadcn on 21st](https://21st.dev/@shadcn/components/button) | All visible application buttons, including replay, microphone, import, search, evidence, and settings |
+| Card | [shadcn on 21st](https://21st.dev/@shadcn/components/card) | Metrics, preview, recall, answers, device details, sign-in and empty states |
+| Sidebar | [shadcn on 21st](https://21st.dev/@shadcn/components/sidebar) | Desktop workspace navigation and mobile sheet |
+| Input OTP | [shadcn on 21st](https://21st.dev/@shadcn/components/input-otp) | Eight-digit pairing sign-in, including paste and numeric input |
+| Command | [shadcn on 21st](https://21st.dev/@shadcn/components/command) | Command/Ctrl+K search across actual recordings and workspace actions |
+| Additional shadcn primitives | [21st shadcn catalog](https://21st.dev/@shadcn) | Input, Textarea, Checkbox, Accordion, Tabs, ToggleGroup, Slider, Progress, AspectRatio, Popover, Dialog, AlertDialog, Sheet |
 
-## Behavior details
+The 21st pages were inspected using computer use. The installed shadcn implementation uses Base UI; catalog pages may show a different primitive version. No unknown-license dashboard template was copied. React Bits code was retrieved from its official public repository at pinned commit `23b6d2c0ab10b949c7891b3e76b2f801dff186a3`.
 
-- Quick search searches **all time** and labels this explicitly. The main search and question composer retain their shared date range.
-- Frames/Audio filter the **currently loaded** recordings or search results. Load earlier recordings to expand the history. They do not imply that the complete archive has been loaded.
-- Empty, loading, search error, recording failure, and disconnected-device states use actual server state. No example recordings or generated answers are inserted.
-- The new motion respects `prefers-reduced-motion`. Pointer effects do not run for touch input. All key actions remain available as visible controls.
-- The interface uses the same local API and authentication. External reference sites are not contacted by the running app.
+## License and local modifications
 
-## Implementation
+React Bits sources and their **MIT + Commons Clause License Condition v1.0** are retained together in [`web/components/react-bits`](../web/components/react-bits). The license permits use as part of an application; the components must not be sold or redistributed as a standalone component library. [`SOURCE.md`](../web/components/react-bits/SOURCE.md) records original paths and adaptations. The existing shadcn components retain their own MIT licensing.
 
-- `web/components/memory-command.tsx`: command navigation and cancellable search.
-- `web/components/memory-composer.tsx`: question input and keyboard submission.
-- `web/components/memory-library.tsx`: filters, layouts, recording cards, and list navigation.
-- `web/components/memory-details.tsx`: counters, spotlight, status badges, filmstrip, and processing journey.
-- `web/components/audio-capture.tsx`: actual browser recording and elapsed-time display.
-- `web/app/memory-interactions.css`: shared responsive styling and motion.
+Changes include client directives, typed button composition, spans inside Star Border buttons, removal of an unused type, counter initialization, and extracting AnimatedItem without AnimatedList's global keyboard listener. Aurora's shader is unchanged; its lifecycle is adapted for 24 fps, device pixel ratio 1, resize cleanup, out-of-view/background pausing, reduced motion, and unavailable WebGL. Reduced-motion users get static counters and entry transitions. No live CDN or reference-site connection is required; OGL and Motion are bundled locally.
 
-Run `pnpm build` in `web` after source edits to update the dashboard served by FastAPI. See [README](../README.md) for the complete hardware and server setup, and [validation notes](VALIDATION.md) for the verification boundary.
+## Preserved behavior
+
+- Eight-digit sign-in, single-use links, advanced key fallback, remembered sessions, and the opt-in local `0000 0000` test code.
+- Importing originals, actual microphone recording, capture pause/resume, replay selection and evidence downloads.
+- Main search and questions share a date range. Quick search explicitly searches all time.
+- Filters apply to currently loaded records. Grid/list layouts, keyboard list navigation and loading earlier recordings remain available.
+- Recorded answers retain their citations. Monitoring, scene reconstruction, device health, retry and export still call the existing local API.
+- All empty, processing and disconnected states reflect the server. No demo recordings, simulated activity, or generated evidence were added.
+
+Run `pnpm build` inside `web` to update the dashboard served by FastAPI. See [README](../README.md) for hardware and server setup and [validation notes](VALIDATION.md) for what was actually verified.

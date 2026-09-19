@@ -1,4 +1,6 @@
 'use client';
+import { Textarea } from '@/components/ui/textarea';
+import { CatalogButton } from '@/components/catalog';
 
 import { useEffect, type RefObject, type SubmitEvent } from 'react';
 import { ArrowUp, Sparkles, LoaderCircle } from 'lucide-react';
@@ -50,7 +52,7 @@ export function MemoryComposer({
       <label htmlFor="question" className="sr-only">
         Ask a question about your recordings
       </label>
-      <textarea
+      <Textarea
         id="question"
         ref={inputRef}
         value={question}
@@ -78,7 +80,7 @@ export function MemoryComposer({
           onUpdate={onVoiceUpdate}
           onError={onError}
         />
-        <button
+        <CatalogButton
           type="submit"
           className="composer-send"
           disabled={busy || !question.trim()}
@@ -90,7 +92,7 @@ export function MemoryComposer({
           ) : (
             <ArrowUp size={19} />
           )}
-        </button>
+        </CatalogButton>
       </div>
       <div className="composer-hint">
         <span>

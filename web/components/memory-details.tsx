@@ -1,14 +1,14 @@
 'use client';
+import { CatalogButton } from '@/components/catalog';
 // Camera originals use authenticated same-origin URLs, without an image optimizer.
 /* oxlint-disable next/no-img-element */
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ButtonHTMLAttributes,
-  type CSSProperties,
-} from 'react';
+import { useEffect, useRef, type ComponentProps } from 'react';
+import { useReducedMotion } from 'motion/react';
+import CountUp from '@/components/react-bits/CountUp';
+import ReactBitsSpotlight from '@/components/react-bits/SpotlightCard';
+import AnimatedItem from '@/components/react-bits/AnimatedItem';
+import { FrameImage } from '@/components/catalog';
 import {
   Camera,
   Check,
@@ -23,43 +23,26 @@ import { clock, type Recording, type Status } from '@/lib/api';
 
 export function AnimatedNumber({
   value,
-  format = (n: number) => Math.round(n).toLocaleString(),
+  format,
 }: {
   value: number;
   format?: (n: number) => string;
 }) {
-  const [display, setDisplay] = useState(value);
-  const previous = useRef(value);
-  useEffect(() => {
-    const from = previous.current;
-    previous.current = value;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let frame = 0;
-    if (reduced.matches || from === value || document.hidden) {
-      setDisplay(value);
-      return;
-    }
-    const start = performance.now();
-    const finish = () => {
-      cancelAnimationFrame(frame);
-      setDisplay(value);
-    };
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / 650);
-      setDisplay(from + (value - from) * (1 - (1 - t) ** 3));
-      if (t < 1) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    reduced.addEventListener('change', finish);
-    return () => {
-      cancelAnimationFrame(frame);
-      reduced.removeEventListener('change', finish);
-    };
-  }, [value]);
+  const reduced = useReducedMotion();
   return (
     <>
-      <span aria-hidden="true">{format(display)}</span>
-      <span className="sr-only">{format(value)}</span>
+      <span aria-hidden="true">
+        {format ? (
+          format(value)
+        ) : reduced ? (
+          value.toLocaleString()
+        ) : (
+          <CountUp to={value} duration={0.7} separator="," />
+        )}
+      </span>
+      <span className="sr-only">
+        {format ? format(value) : value.toLocaleString()}
+      </span>
     </>
   );
 }
@@ -69,36 +52,18 @@ export function SpotlightCard({
   order = 0,
   children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { order?: number }) {
+}: ComponentProps<typeof CatalogButton> & { order?: number }) {
   return (
-    <button
-      {...props}
-      className={'spotlight-card memory-enter ' + className}
-      style={
-        {
-          ...props.style,
-          '--entry-delay': `${Math.min(order, 7) * 35}ms`,
-        } as CSSProperties
-      }
-      onPointerMove={(e) => {
-        if (
-          e.pointerType !== 'mouse' ||
-          window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        )
-          return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        e.currentTarget.style.setProperty(
-          '--spot-x',
-          `${e.clientX - rect.left}px`,
-        );
-        e.currentTarget.style.setProperty(
-          '--spot-y',
-          `${e.clientY - rect.top}px`,
-        );
-      }}
-    >
-      {children}
-    </button>
+    <AnimatedItem index={order} delay={Math.min(order, 7) * 0.025}>
+      <ReactBitsSpotlight
+        className="recording-spotlight"
+        spotlightColor="rgba(197, 246, 138, 0.12)"
+      >
+        <CatalogButton variant="ghost" {...props} className={className}>
+          {children}
+        </CatalogButton>
+      </ReactBitsSpotlight>
+    </AnimatedItem>
   );
 }
 
@@ -171,7 +136,7 @@ export function MemoryFilmstrip({
     <fieldset ref={strip} className="filmstrip">
       <legend className="sr-only">Nearby recordings</legend>
       {windowRecords.map((r, i) => (
-        <button
+        <CatalogButton
           key={r.id}
           type="button"
           className={
@@ -182,12 +147,12 @@ export function MemoryFilmstrip({
           onClick={() => onSelect(start + i)}
         >
           {r.kind === 'frame' ? (
-            <img src={r.media_url} alt="" loading="lazy" />
+            <FrameImage ratio={1.4} src={r.media_url} alt="" loading="lazy" />
           ) : (
             <FileAudio size={22} />
           )}
           <span>{clock(r.captured_at, timezone)}</span>
-        </button>
+        </CatalogButton>
       ))}
     </fieldset>
   );
@@ -224,12 +189,12 @@ export function ProcessingJourney({
         aria-label="Saved recordings analyzed"
         className="analysis-progress"
       />
-      <button type="button" className="text-button" onClick={onOpen}>
+      <CatalogButton type="button" className="text-button" onClick={onOpen}>
         {status.failed
           ? `${status.failed.toLocaleString()} need attention`
           : 'View status'}{' '}
         <ArrowRight size={13} />
-      </button>
+      </CatalogButton>
     </div>
   );
 }

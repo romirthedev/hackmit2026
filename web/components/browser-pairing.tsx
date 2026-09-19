@@ -1,4 +1,6 @@
 'use client';
+import { Card } from '@/components/ui/card';
+import { CatalogButton } from '@/components/catalog';
 
 import { useEffect, useState } from 'react';
 import { Check, Copy, Link2, LoaderCircle, RefreshCw } from 'lucide-react';
@@ -52,7 +54,7 @@ export function BrowserPairing() {
     }
   }
   return (
-    <section className="card browser-pairing-card">
+    <Card className="card browser-pairing-card">
       <span className="section-icon">
         <Link2 size={20} />
       </span>
@@ -79,7 +81,7 @@ export function BrowserPairing() {
               : 'Create a new code to connect.'}
           </span>
           {remaining > 0 && (
-            <button
+            <CatalogButton
               type="button"
               className="quiet"
               onClick={() => void copyLink()}
@@ -90,11 +92,15 @@ export function BrowserPairing() {
                 : localLink
                   ? 'Copy link for this computer'
                   : 'Copy sign-in link'}
-            </button>
+            </CatalogButton>
           )}
         </div>
       )}
-      <button type="button" disabled={busy} onClick={() => void create()}>
+      <CatalogButton
+        type="button"
+        disabled={busy}
+        onClick={() => void create()}
+      >
         {busy ? (
           <LoaderCircle size={16} className="spin" />
         ) : invitation ? (
@@ -107,7 +113,7 @@ export function BrowserPairing() {
           : invitation
             ? 'Create a new code'
             : 'Get pairing code'}
-      </button>
+      </CatalogButton>
       {error && (
         <p className="error-text" role="alert">
           {error}
@@ -118,6 +124,6 @@ export function BrowserPairing() {
         to connect. For another computer, use the server’s LAN address or your
         existing SSH tunnel.
       </p>
-    </section>
+    </Card>
   );
 }

@@ -1,4 +1,8 @@
 'use client';
+import { MemoryAurora, FrameImage, CatalogButton } from '@/components/catalog';
+import { Input } from '@/components/ui/input';
+import { Card } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
 // Serve authenticated originals directly; native audio has an adjacent transcript.
 /* oxlint-disable next/no-img-element, jsx-a11y/media-has-caption */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -32,6 +36,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import Login from '@/components/login';
+import { WorkspaceTabsList } from '@/components/workspace-navigation';
 import { Brand } from '@/components/brand';
 import { BrowserPairing } from '@/components/browser-pairing';
 import { MemoryCommand } from '@/components/memory-command';
@@ -49,7 +54,16 @@ import {
 } from '@/components/ui/popover';
 import { AudioCapture } from '@/components/audio-capture';
 import { SceneView } from '@/components/scene-view';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Sidebar,
+  SidebarProvider,
+  SidebarInset,
+  SidebarHeader,
+  SidebarContent,
+  SidebarFooter,
+  SidebarTrigger,
+} from '@/components/ui/sidebar';
+import { Tabs, TabsContent, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
 import {
   Dialog,
@@ -312,7 +326,7 @@ export default function Home() {
               : 'Opening your workspace'}
           </h2>
           <p>{error || 'Checking the local recording server…'}</p>
-          <button onClick={() => load()}>Try again</button>
+          <CatalogButton onClick={() => load()}>Try again</CatalogButton>
         </div>
       </main>
     );
@@ -330,7 +344,10 @@ export default function Home() {
     ],
   };
   return (
-    <main className="workspace">
+    <SidebarProvider
+      className="workspace"
+      style={{ '--sidebar-width': '238px' } as React.CSSProperties}
+    >
       <a href="#workspace-content" className="skip-link">
         Skip to workspace
       </a>
@@ -340,44 +357,51 @@ export default function Home() {
         value={tab}
         onValueChange={(v) => setTab(String(v))}
       >
-        <aside className="sidebar">
-          <Brand />
-          <MemoryCommand
-            records={records}
-            timezone={status?.timezone}
-            busy={busy}
-            onSelect={setSelected}
-            onNavigate={(destination) => {
-              if (destination === 'import') fileRef.current?.click();
-              else setTab(destination);
-            }}
-          />
-          <p className="sidebar-label">WORKSPACE</p>
-          <TabsList className="workspace-nav" aria-label="Workspace navigation">
-            <TabsTrigger value="memory">
-              <Clock3 /> Your memory
-            </TabsTrigger>
-            <TabsTrigger value="monitor">
-              <Bell /> Watch for me{' '}
-              {unread > 0 && <span className="count">{unread}</span>}
-            </TabsTrigger>
-            <TabsTrigger value="scene">
-              <Box /> 3D scene
-            </TabsTrigger>
-            <TabsTrigger value="system">
-              <Wifi /> Device & storage
-            </TabsTrigger>
-          </TabsList>
-          <div className="sidebar-bottom">
-            <button
+        <Sidebar className="workspace-sidebar" collapsible="offcanvas">
+          <SidebarHeader className="sidebar-top">
+            <Brand />
+          </SidebarHeader>
+          <SidebarContent>
+            <MemoryCommand
+              records={records}
+              timezone={status?.timezone}
+              busy={busy}
+              onSelect={setSelected}
+              onNavigate={(destination) => {
+                if (destination === 'import') fileRef.current?.click();
+                else setTab(destination);
+              }}
+            />
+            <p className="sidebar-label">WORKSPACE</p>
+            <WorkspaceTabsList
+              className="workspace-nav"
+              aria-label="Workspace navigation"
+            >
+              <TabsTrigger value="memory">
+                <Clock3 /> Your memory
+              </TabsTrigger>
+              <TabsTrigger value="monitor">
+                <Bell /> Watch for me{' '}
+                {unread > 0 && <span className="count">{unread}</span>}
+              </TabsTrigger>
+              <TabsTrigger value="scene">
+                <Box /> 3D scene
+              </TabsTrigger>
+              <TabsTrigger value="system">
+                <Wifi /> Device & storage
+              </TabsTrigger>
+            </WorkspaceTabsList>
+          </SidebarContent>
+          <SidebarFooter className="sidebar-bottom">
+            <CatalogButton
               className="quiet icon-button mobile-signout"
               aria-label="Sign out"
               onClick={signOut}
               disabled={busy}
             >
               <LogOut size={17} />
-            </button>
-            <button
+            </CatalogButton>
+            <CatalogButton
               className="device-shortcut"
               onClick={() => setTab('system')}
             >
@@ -398,7 +422,7 @@ export default function Home() {
                 </span>
               </span>
               <ChevronRight size={16} />
-            </button>
+            </CatalogButton>
             <div className="workspace-account">
               <span className="account-avatar">
                 <Aperture size={18} />
@@ -411,7 +435,7 @@ export default function Home() {
                     : 'Your recordings'}
                 </span>
               </div>
-              <button
+              <CatalogButton
                 className="quiet icon-button"
                 aria-label="Sign out"
                 title="Sign out"
@@ -419,25 +443,32 @@ export default function Home() {
                 disabled={busy}
               >
                 <LogOut size={17} />
-              </button>
+              </CatalogButton>
             </div>
-          </div>
-        </aside>
-        <div className="workspace-main" id="workspace-content" tabIndex={-1}>
+          </SidebarFooter>
+        </Sidebar>
+        <SidebarInset
+          className="workspace-main"
+          id="workspace-content"
+          tabIndex={-1}
+        >
           <header className="workspace-header">
-            <div className="workspace-heading">
-              <p className="eyebrow">YOUR PERSONAL MEMORY</p>
-              <h1>{pageTitles[tab][0]}</h1>
-              <p>{pageTitles[tab][1]}</p>
+            <div className="header-title-row">
+              <SidebarTrigger className="mobile-menu-trigger" />
+              <div className="workspace-heading">
+                <p className="eyebrow">YOUR PERSONAL MEMORY</p>
+                <h1>{pageTitles[tab][0]}</h1>
+                <p>{pageTitles[tab][1]}</p>
+              </div>
             </div>
             <div className="capture-actions">
-              <button
+              <CatalogButton
                 className="quiet import-button"
                 onClick={() => fileRef.current?.click()}
                 disabled={busy}
               >
                 <Upload size={16} /> Import
-              </button>
+              </CatalogButton>
               <AudioCapture onUpdate={load} onError={setError} />
               <input
                 ref={fileRef}
@@ -456,33 +487,33 @@ export default function Home() {
             {error && (
               <div className="banner error" role="alert">
                 <span>{error.replace(/^Error: /, '')}</span>
-                <button
+                <CatalogButton
                   className="quiet icon-button"
                   aria-label="Dismiss error"
                   onClick={() => setError('')}
                 >
                   <X size={16} />
-                </button>
+                </CatalogButton>
               </div>
             )}
             {notice && (
               <output className="banner">
                 <CheckCircle2 size={18} />
                 <span>{notice}</span>
-                <button
+                <CatalogButton
                   className="quiet icon-button"
                   aria-label="Dismiss notification"
                   onClick={() => setNotice('')}
                 >
                   <X size={16} />
-                </button>
+                </CatalogButton>
               </output>
             )}
             <TabsContent value="memory">
               <form className="search-row" onSubmit={doSearch}>
                 <div className="search-field">
                   <Search size={19} />
-                  <input
+                  <Input
                     aria-label="Search observations and transcripts"
                     placeholder="Search your memories…"
                     value={search}
@@ -491,9 +522,13 @@ export default function Home() {
                 </div>
                 <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
                   <PopoverTrigger
-                    type="button"
-                    className={
-                      'quiet filter-button ' + (from || to ? 'has-filter' : '')
+                    render={
+                      <CatalogButton
+                        variant="outline"
+                        className={
+                          'filter-button ' + (from || to ? 'has-filter' : '')
+                        }
+                      />
                     }
                   >
                     <CalendarDays size={16} />
@@ -503,7 +538,7 @@ export default function Home() {
                     <h3>Choose a time range</h3>
                     <p className="muted">Applies to searches and questions.</p>
                     <label htmlFor="date-from">From</label>
-                    <input
+                    <Input
                       id="date-from"
                       type="datetime-local"
                       value={from}
@@ -511,7 +546,7 @@ export default function Home() {
                       onChange={(e) => setFrom(e.target.value)}
                     />
                     <label htmlFor="date-to">To</label>
-                    <input
+                    <Input
                       id="date-to"
                       type="datetime-local"
                       value={to}
@@ -519,7 +554,7 @@ export default function Home() {
                       onChange={(e) => setTo(e.target.value)}
                     />
                     <div className="row">
-                      <button
+                      <CatalogButton
                         type="button"
                         className="text-button"
                         onClick={() => {
@@ -528,22 +563,22 @@ export default function Home() {
                         }}
                       >
                         Reset dates
-                      </button>
-                      <button
+                      </CatalogButton>
+                      <CatalogButton
                         type="button"
                         onClick={() => setFiltersOpen(false)}
                       >
                         Done
-                      </button>
+                      </CatalogButton>
                     </div>
                   </PopoverContent>
                 </Popover>
-                <button disabled={busy} type="submit">
+                <CatalogButton disabled={busy} type="submit">
                   Search
-                </button>
+                </CatalogButton>
               </form>
               <div className="metrics">
-                <div>
+                <Card>
                   <span className="metric-icon">
                     <Camera size={18} />
                   </span>
@@ -553,8 +588,8 @@ export default function Home() {
                       <AnimatedNumber value={status?.received || 0} />
                     </strong>
                   </span>
-                </div>
-                <div>
+                </Card>
+                <Card>
                   <span className="metric-icon">
                     <CheckCircle2 size={18} />
                   </span>
@@ -564,8 +599,8 @@ export default function Home() {
                       <AnimatedNumber value={status?.analyzed || 0} />
                     </strong>
                   </span>
-                </div>
-                <div>
+                </Card>
+                <Card>
                   <span className="metric-icon">
                     <Clock3 size={18} />
                   </span>
@@ -575,8 +610,8 @@ export default function Home() {
                       <AnimatedNumber value={status?.pending || 0} />
                     </strong>
                   </span>
-                </div>
-                <div>
+                </Card>
+                <Card>
                   <span className="metric-icon">
                     <HardDrive size={18} />
                   </span>
@@ -589,7 +624,7 @@ export default function Home() {
                       />
                     </strong>
                   </span>
-                </div>
+                </Card>
               </div>
 
               {status && (
@@ -599,7 +634,7 @@ export default function Home() {
                 />
               )}
               <div className="memory-grid">
-                <section className="visual-panel">
+                <Card className="visual-panel">
                   <div className="panel-top">
                     <span className="panel-heading">
                       <span
@@ -621,6 +656,7 @@ export default function Home() {
                       <Media recording={current} />
                     ) : (
                       <div className="stage-empty">
+                        <MemoryAurora />
                         <Camera size={44} />
                         <h2>No recordings yet</h2>
                         <p>
@@ -628,19 +664,19 @@ export default function Home() {
                           moments will appear here.
                         </p>
                         <div className="empty-actions">
-                          <button
+                          <CatalogButton
                             className="quiet"
                             onClick={() => fileRef.current?.click()}
                             disabled={busy}
                           >
                             <Upload size={16} /> Import recording
-                          </button>
-                          <button
+                          </CatalogButton>
+                          <CatalogButton
                             className="text-button"
                             onClick={() => setTab('system')}
                           >
                             Connect necklace <ArrowUpRight size={14} />
-                          </button>
+                          </CatalogButton>
                         </div>
                       </div>
                     )}
@@ -666,7 +702,7 @@ export default function Home() {
                     }}
                   />
                   <div className="timeline-controls">
-                    <button
+                    <CatalogButton
                       className="quiet icon-button"
                       disabled={!records.length || index >= records.length - 1}
                       onClick={() =>
@@ -675,8 +711,8 @@ export default function Home() {
                       aria-label="Previous recording"
                     >
                       <ArrowLeft size={17} />
-                    </button>
-                    <button
+                    </CatalogButton>
+                    <CatalogButton
                       className="quiet icon-button replay-button"
                       disabled={records.length < 2}
                       onClick={() => {
@@ -687,7 +723,7 @@ export default function Home() {
                       aria-label={playing ? 'Pause replay' : 'Play replay'}
                     >
                       {playing ? <Pause size={17} /> : <Play size={17} />}
-                    </button>
+                    </CatalogButton>
                     <Slider
                       aria-label="Recording timeline"
                       disabled={records.length < 2}
@@ -700,14 +736,14 @@ export default function Home() {
                         setPlaying(false);
                       }}
                     />
-                    <button
+                    <CatalogButton
                       className="quiet icon-button"
                       disabled={!records.length || index === 0}
                       onClick={() => setIndex((i) => Math.max(0, i - 1))}
                       aria-label="Next recording"
                     >
                       <ArrowRight size={17} />
-                    </button>
+                    </CatalogButton>
                   </div>
                   <div className="capture-status-row">
                     <span className="meta">
@@ -721,7 +757,7 @@ export default function Home() {
                           })
                         : 'Ready when you are'}
                     </span>
-                    <button
+                    <CatalogButton
                       className="text-button"
                       disabled={busy}
                       onClick={() =>
@@ -739,18 +775,18 @@ export default function Home() {
                         <Pause size={14} />
                       )}
                       {status?.paused ? 'Resume capture' : 'Pause capture'}
-                    </button>
+                    </CatalogButton>
                   </div>
                   <div className="observation">
                     <div className="row">
                       <h3>In this moment</h3>
                       {current && (
-                        <button
+                        <CatalogButton
                           className="text-button"
                           onClick={() => setSelected(current)}
                         >
                           Open evidence <ArrowUpRight size={14} />
-                        </button>
+                        </CatalogButton>
                       )}
                     </div>
                     <p>
@@ -761,7 +797,7 @@ export default function Home() {
                     </p>
                     <div className="chips">
                       {current?.objects?.map((o, i) => (
-                        <button
+                        <CatalogButton
                           key={i}
                           className="chip"
                           onClick={() => {
@@ -773,7 +809,7 @@ export default function Home() {
                         >
                           {o.label}
                           <span>{o.location}</span>
-                        </button>
+                        </CatalogButton>
                       ))}
                     </div>
                     {current?.error && (
@@ -782,8 +818,8 @@ export default function Home() {
                       </p>
                     )}
                   </div>
-                </section>
-                <aside className="recall-panel">
+                </Card>
+                <Card className="recall-panel">
                   <div className="panel-top">
                     <h2 className="recall-heading">Ask your memory</h2>
                     <Sparkles size={18} />
@@ -811,7 +847,7 @@ export default function Home() {
                   {(from || to) && (
                     <p className="filter-note">
                       <CalendarDays size={13} /> Using your selected time range{' '}
-                      <button
+                      <CatalogButton
                         className="text-button"
                         onClick={() => {
                           setFrom('');
@@ -819,7 +855,7 @@ export default function Home() {
                         }}
                       >
                         Clear
-                      </button>
+                      </CatalogButton>
                     </p>
                   )}
                   {asking && (
@@ -839,30 +875,30 @@ export default function Home() {
                           'What did we discuss about the project?',
                           'What changed on the table?',
                         ].map((q) => (
-                          <button
+                          <CatalogButton
                             key={q}
                             className="suggestion"
                             onClick={() => suggestQuestion(q)}
                           >
                             {q}
                             <ArrowUpRight size={14} />
-                          </button>
+                          </CatalogButton>
                         ))}
                       </div>
                     ) : (
                       answers.slice(0, 6).map((a) => (
-                        <article className="answer memory-enter" key={a.id}>
+                        <Card className="answer memory-enter" key={a.id}>
                           <div className="row">
                             <span className="meta">
                               {clock(a.created_at, status?.timezone)}
                             </span>
-                            <button
+                            <CatalogButton
                               className="quiet icon-button"
                               aria-label="Read answer aloud"
                               onClick={() => speak(a.answer)}
                             >
                               <Volume2 size={15} />
-                            </button>
+                            </CatalogButton>
                           </div>
                           <h3>{a.question}</h3>
                           <p>
@@ -883,7 +919,7 @@ export default function Home() {
                           </span>
                           <div className="evidence-links">
                             {a.evidence.map((r, i) => (
-                              <button
+                              <CatalogButton
                                 className="chip"
                                 key={r.id}
                                 onClick={() => setSelected(r)}
@@ -891,14 +927,14 @@ export default function Home() {
                                 [{i + 1}]{' '}
                                 {clock(r.captured_at, status?.timezone)}{' '}
                                 {r.kind === 'audio' ? 'Audio' : 'Frame'}
-                              </button>
+                              </CatalogButton>
                             ))}
                           </div>
-                        </article>
+                        </Card>
                       ))
                     )}
                   </div>
-                </aside>
+                </Card>
               </div>
               <section className="history" ref={historyRef}>
                 <div className="row">
@@ -915,9 +951,12 @@ export default function Home() {
                         : ''}
                     </span>
                     {results !== null && (
-                      <button className="text-button" onClick={clearSearch}>
+                      <CatalogButton
+                        className="text-button"
+                        onClick={clearSearch}
+                      >
                         <X size={14} /> Clear
-                      </button>
+                      </CatalogButton>
                     )}
                   </div>
                 </div>
@@ -930,7 +969,7 @@ export default function Home() {
                 {historyMode !== 'search' &&
                   hasEarlier &&
                   (results ?? records).length >= 60 && (
-                    <button
+                    <CatalogButton
                       className="quiet load-earlier"
                       disabled={busy}
                       onClick={() =>
@@ -947,7 +986,7 @@ export default function Home() {
                       }
                     >
                       Load earlier recordings
-                    </button>
+                    </CatalogButton>
                   )}
               </section>
             </TabsContent>
@@ -960,7 +999,7 @@ export default function Home() {
                     observations at a particular time.
                   </p>
                 </div>
-                <button
+                <CatalogButton
                   className="quiet"
                   onClick={() =>
                     void action(async () =>
@@ -969,7 +1008,7 @@ export default function Home() {
                   }
                 >
                   <RefreshCw size={16} /> Refresh scene
-                </button>
+                </CatalogButton>
               </div>
               <SceneView
                 scene={scene}
@@ -1004,7 +1043,7 @@ export default function Home() {
             </TabsContent>
             <TabsContent value="monitor">
               <div className="monitor-grid">
-                <section className="card">
+                <Card className="card">
                   <span className="section-icon">
                     <Bell size={20} />
                   </span>
@@ -1026,7 +1065,7 @@ export default function Home() {
                     }}
                   >
                     <label htmlFor="rule">Monitoring request</label>
-                    <textarea
+                    <Textarea
                       id="rule"
                       value={rule}
                       onChange={(e) => setRule(e.target.value)}
@@ -1035,15 +1074,19 @@ export default function Home() {
                       minLength={3}
                       maxLength={1000}
                     />
-                    <button disabled={busy} className="mt-4">
+                    <CatalogButton
+                      type="submit"
+                      disabled={busy}
+                      className="mt-4"
+                    >
                       <Bell size={16} /> Watch for this
-                    </button>
+                    </CatalogButton>
                   </form>
                   <div className="rule-list">
                     {rules.map((r) => (
                       <div key={r.id} className="row">
                         <p>{r.instruction}</p>
-                        <button
+                        <CatalogButton
                           className="quiet icon-button"
                           aria-label="Remove monitoring rule"
                           onClick={() =>
@@ -1053,22 +1096,22 @@ export default function Home() {
                           }
                         >
                           <Trash2 size={16} />
-                        </button>
+                        </CatalogButton>
                       </div>
                     ))}
                   </div>
-                </section>
-                <section className="card">
+                </Card>
+                <Card className="card">
                   <h2>Your alerts</h2>
                   {alerts.length ? (
                     alerts.map((a) => (
-                      <article key={a.id} className="alert-entry">
+                      <Card key={a.id} className="alert-entry">
                         <span className="meta">
                           {clock(a.created_at, status?.timezone)}
                         </span>
                         <p>{a.message}</p>
                         <div className="row">
-                          <button
+                          <CatalogButton
                             className="text-button"
                             onClick={() => {
                               const r = records.find(
@@ -1086,9 +1129,9 @@ export default function Home() {
                             }}
                           >
                             View evidence <ArrowUpRight size={14} />
-                          </button>
+                          </CatalogButton>
                           {!a.seen && (
-                            <button
+                            <CatalogButton
                               className="quiet"
                               onClick={() =>
                                 void action(() =>
@@ -1099,10 +1142,10 @@ export default function Home() {
                               }
                             >
                               Mark read
-                            </button>
+                            </CatalogButton>
                           )}
                         </div>
-                      </article>
+                      </Card>
                     ))
                   ) : (
                     <p className="muted">
@@ -1110,13 +1153,13 @@ export default function Home() {
                       requests, it will appear here with its evidence.
                     </p>
                   )}
-                </section>
+                </Card>
               </div>
             </TabsContent>
             <TabsContent value="system">
               <div className="system-grid">
                 <BrowserPairing />
-                <section className="card">
+                <Card className="card">
                   <h2>Necklace connection</h2>
                   {status?.devices.length ? (
                     status.devices.map((d) => (
@@ -1160,8 +1203,8 @@ export default function Home() {
                       </ol>
                     </>
                   )}
-                </section>
-                <section className="card">
+                </Card>
+                <Card className="card">
                   <h2>Memory health</h2>
                   <dl>
                     <dt>Vision model</dt>
@@ -1186,7 +1229,7 @@ export default function Home() {
                     <dd>{status?.embedding_failures}</dd>
                   </dl>
                   <div className="row">
-                    <button
+                    <CatalogButton
                       className="quiet"
                       disabled={busy || !status?.failed}
                       onClick={() =>
@@ -1194,20 +1237,26 @@ export default function Home() {
                       }
                     >
                       <RefreshCw size={16} /> Retry failures
-                    </button>
-                    <a
-                      className="button-link"
-                      href="/api/export"
-                      download="rewind-memory.json"
+                    </CatalogButton>
+                    <CatalogButton
+                      variant="outline"
+                      nativeButton={false}
+                      render={
+                        <a
+                          href="/api/export"
+                          download="rewind-memory.json"
+                          aria-label="Export metadata"
+                        />
+                      }
                     >
                       <Download size={16} /> Export metadata
-                    </a>
+                    </CatalogButton>
                   </div>
                   <p className="meta mt-4">
                     Original recordings are never automatically deleted. At the
                     storage limit, uploads wait on the necklace.
                   </p>
-                </section>
+                </Card>
               </div>
             </TabsContent>
             <footer className="workspace-footer">
@@ -1218,7 +1267,7 @@ export default function Home() {
               <span>{status?.timezone.replaceAll('_', ' ')}</span>
             </footer>
           </div>
-        </div>
+        </SidebarInset>
       </Tabs>
       <Dialog
         open={!!selected}
@@ -1252,15 +1301,25 @@ export default function Home() {
                 </div>
               )}
               <div className="row">
-                <a className="button-link" href={selected.media_url} download>
+                <CatalogButton
+                  variant="outline"
+                  nativeButton={false}
+                  render={
+                    <a
+                      href={selected.media_url}
+                      download
+                      aria-label="Download original"
+                    />
+                  }
+                >
                   Download original
-                </a>
-                <button
+                </CatalogButton>
+                <CatalogButton
                   className="quiet danger"
                   onClick={() => setDeleting(selected)}
                 >
                   <Trash2 size={16} /> Delete recording
-                </button>
+                </CatalogButton>
               </div>
             </>
           )}
@@ -1298,12 +1357,12 @@ export default function Home() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </main>
+    </SidebarProvider>
   );
 }
 function Media({ recording: r }: { recording: Recording }) {
   return r.kind === 'frame' ? (
-    <img
+    <FrameImage
       className="evidence-image"
       src={r.media_url}
       alt={r.summary || 'Original recorded frame'}

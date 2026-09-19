@@ -1,4 +1,5 @@
 'use client';
+import { CatalogButton } from '@/components/catalog';
 import { useEffect, useRef, useState } from 'react';
 import { Mic, Square, LoaderCircle } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -117,7 +118,7 @@ export function AudioCapture({
     if (recorder.current?.state === 'recording') recorder.current.stop();
   }
   return (
-    <button
+    <CatalogButton
       type="button"
       aria-pressed={active}
       className={'voice-pill ' + (active ? 'recording-button' : 'quiet')}
@@ -150,6 +151,6 @@ export function AudioCapture({
           <span> / {question ? '0:30' : '1:00'}</span>
         </span>
       )}
-    </button>
+    </CatalogButton>
   );
 }

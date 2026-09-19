@@ -8,6 +8,22 @@ import {
   LoaderCircle,
   ShieldCheck,
 } from 'lucide-react';
+import { CatalogButton, MemoryAurora } from '@/components/catalog';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from '@/components/ui/accordion';
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+  InputOTPSeparator,
+} from '@/components/ui/input-otp';
 import { Brand } from '@/components/brand';
 
 export default function Login() {
@@ -64,141 +80,181 @@ export default function Login() {
   }, [connect]);
   return (
     <main className="login-page">
-      <div className="login-brand">
+      <section className="login-story" aria-label="REWIND personal memory">
+        <MemoryAurora />
         <Brand />
-      </div>
-      <section
-        className="login-card pairing-login"
-        aria-labelledby="login-title"
-      >
-        <span className="login-icon">
-          <Link2 size={24} strokeWidth={1.6} />
-        </span>
-        <span className="login-eyebrow">A SIMPLE HELLO</span>
-        <h1 id="login-title">Your memory, one step away.</h1>
-        <p>
-          Open your sign-in link, or enter a pairing code from your REWIND
-          computer.
-        </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void connect('/api/pair', { code, remember });
-          }}
-        >
-          <label htmlFor="pairing-code">Pairing code</label>
-          <input
-            id="pairing-code"
-            className="pairing-code-input"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="0000 0000"
-            pattern="[0-9]{8}"
-            maxLength={9}
-            required
-            value={code}
-            disabled={connecting}
-            onChange={(e) => {
-              setCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 8));
-              setError('');
-            }}
-            aria-invalid={!!error}
-            aria-describedby={error ? 'login-error' : 'pairing-help'}
-          />
-          <label className="remember-browser">
-            <input
-              type="checkbox"
-              checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
-              disabled={connecting}
-            />
-            Keep me signed in for 30 days
-          </label>
-          {error && (
-            <p id="login-error" className="login-error" role="alert">
-              {error}
-            </p>
-          )}
-          <button
-            className="login-submit"
-            type="submit"
-            disabled={connecting || code.length !== 8}
-          >
-            {connecting ? (
-              <>
-                <LoaderCircle size={17} className="spin" /> Opening workspace…
-              </>
-            ) : (
-              <>
-                Connect to my memory <ArrowRight size={17} />
-              </>
-            )}
-          </button>
-        </form>
-        <div className="pairing-help" id="pairing-help">
-          <strong>Already connected somewhere?</strong>
+        <div className="login-story-copy">
+          <span className="login-eyebrow">A SECOND LOOK AT YOUR DAY</span>
+          <h1>
+            Life happens.
+            <br />
+            <em>Keep the moment.</em>
+          </h1>
           <p>
-            Open Device &amp; storage → Connect another browser to get a code.
-            It expires after 10 minutes.
+            Your recordings, conversations, and the little things you almost
+            forgot. Ready to recall.
           </p>
+          <div className="login-story-caption">
+            <span className="live-dot" /> YOUR PERSONAL MEMORY
+          </div>
         </div>
-        <details className="key-help">
-          <summary>First time connecting?</summary>
+        <p className="login-story-footer">
+          <ShieldCheck size={15} /> Original moments. Answers with evidence.
+        </p>
+      </section>
+      <div className="login-form-side">
+        <div className="login-mobile-brand">
+          <Brand />
+        </div>
+        <Card className="login-card pairing-login">
+          <div className="login-icon">
+            <Link2 size={23} />
+          </div>
+          <span className="login-eyebrow">WELCOME BACK</span>
+          <h2 id="login-title">Open your memory.</h2>
           <p>
-            On the computer running REWIND, run this from the project folder. It
-            opens a sign-in link and shows a pairing code.
+            Enter your eight-digit pairing code to connect to your REWIND
+            workspace.
           </p>
-          <code className="setup-command">
-            python scripts/open_workspace.py
-          </code>
-          <p>
-            Use the Python environment from setup. On a Mac, you can also
-            double-click <strong>Open REWIND.command</strong>.
-          </p>
-        </details>
-        <details className="key-help advanced-login">
-          <summary>Advanced: use an access key</summary>
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void connect('/api/login', { token: token.trim(), remember });
+              void connect('/api/pair', { code, remember });
             }}
           >
-            <label htmlFor="token">Workspace access key</label>
-            <div className="key-field">
-              <input
-                id="token"
-                type={showKey ? 'text' : 'password'}
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                required
-                placeholder="Workspace access key"
-                autoComplete="current-password"
-                disabled={connecting}
-              />
-              <button
-                type="button"
-                className="quiet icon-button"
-                aria-label={showKey ? 'Hide access key' : 'Show access key'}
-                onClick={() => setShowKey(!showKey)}
-              >
-                {showKey ? <EyeOff size={17} /> : <Eye size={17} />}
-              </button>
-            </div>
-            <button
-              type="submit"
-              className="login-submit quiet"
-              disabled={connecting || !token.trim()}
+            <label htmlFor="pairing-code">Pairing code</label>
+            <InputOTP
+              id="pairing-code"
+              maxLength={8}
+              pattern="[0-9]*"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              required
+              value={code}
+              disabled={connecting}
+              onChange={(value) => {
+                setCode(value.replace(/[^0-9]/g, '').slice(0, 8));
+                setError('');
+              }}
+              aria-invalid={!!error}
+              aria-describedby={error ? 'login-error' : 'pairing-help'}
+              containerClassName="pairing-slots"
             >
-              Open with access key
-            </button>
+              <InputOTPGroup>
+                {[0, 1, 2, 3].map((index) => (
+                  <InputOTPSlot key={index} index={index} />
+                ))}
+              </InputOTPGroup>
+              <InputOTPSeparator />
+              <InputOTPGroup>
+                {[4, 5, 6, 7].map((index) => (
+                  <InputOTPSlot key={index} index={index} />
+                ))}
+              </InputOTPGroup>
+            </InputOTP>
+            <label htmlFor="remember-browser" className="remember-browser">
+              <Checkbox
+                id="remember-browser"
+                checked={remember}
+                onCheckedChange={(value) => setRemember(value === true)}
+                disabled={connecting}
+              />{' '}
+              Keep me signed in for 30 days
+            </label>
+            {error && (
+              <p id="login-error" className="login-error" role="alert">
+                {error}
+              </p>
+            )}
+            <CatalogButton
+              className="login-submit"
+              type="submit"
+              disabled={connecting || code.length !== 8}
+            >
+              {connecting ? (
+                <>
+                  <LoaderCircle size={17} className="spin" /> Opening workspace…
+                </>
+              ) : (
+                <>
+                  Open workspace <ArrowRight size={17} />
+                </>
+              )}
+            </CatalogButton>
           </form>
-        </details>
-      </section>
-      <p className="login-footer">
-        <ShieldCheck size={14} />A private connection to your personal
-        workspace.
-      </p>
+          <p className="pairing-help" id="pairing-help">
+            Get a code from{' '}
+            <strong>Device &amp; storage → Connect another browser</strong> on
+            your connected workspace.
+          </p>
+          <Accordion className="login-help">
+            <AccordionItem value="setup">
+              <AccordionTrigger>First time connecting?</AccordionTrigger>
+              <AccordionContent>
+                <p>
+                  On the computer running REWIND, run this from the project
+                  folder to open a sign-in link:
+                </p>
+                <code className="setup-command">
+                  python scripts/open_workspace.py
+                </code>
+                <p>
+                  Use the Python environment from setup. On a Mac, you can also
+                  double-click <strong>Open REWIND.command</strong>.
+                </p>
+              </AccordionContent>
+            </AccordionItem>
+            <AccordionItem value="advanced">
+              <AccordionTrigger>Connect with an access key</AccordionTrigger>
+              <AccordionContent>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void connect('/api/login', {
+                      token: token.trim(),
+                      remember,
+                    });
+                  }}
+                >
+                  <label htmlFor="token">Workspace access key</label>
+                  <div className="key-field">
+                    <Input
+                      id="token"
+                      type={showKey ? 'text' : 'password'}
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      required
+                      placeholder="Workspace access key"
+                      autoComplete="current-password"
+                      disabled={connecting}
+                    />
+                    <CatalogButton
+                      type="button"
+                      className="quiet icon-button"
+                      aria-label={
+                        showKey ? 'Hide access key' : 'Show access key'
+                      }
+                      onClick={() => setShowKey(!showKey)}
+                    >
+                      {showKey ? <EyeOff size={17} /> : <Eye size={17} />}
+                    </CatalogButton>
+                  </div>
+                  <CatalogButton
+                    type="submit"
+                    className="login-submit quiet"
+                    disabled={connecting || !token.trim()}
+                  >
+                    Open with access key
+                  </CatalogButton>
+                </form>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </Card>
+        <p className="login-footer">
+          <ShieldCheck size={14} /> Connected to your personal workspace.
+        </p>
+      </div>
     </main>
   );
 }

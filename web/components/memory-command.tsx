@@ -1,4 +1,5 @@
 'use client';
+import { CatalogButton } from '@/components/catalog';
 
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -124,7 +125,7 @@ export function MemoryCommand({
   }
   return (
     <>
-      <button
+      <CatalogButton
         ref={trigger}
         type="button"
         className="command-trigger"
@@ -135,7 +136,7 @@ export function MemoryCommand({
         <Search size={17} />
         <span>Quick search</span>
         <kbd>⌘ K</kbd>
-      </button>
+      </CatalogButton>
       <Dialog open={open} onOpenChange={changeOpen}>
         <DialogContent
           className="memory-command"

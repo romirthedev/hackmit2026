@@ -604,7 +604,7 @@ Use the filmstrip beneath the camera preview to select a moment. In **Recent mem
 
 The voice control displays elapsed recording time. Questions stop at 30 seconds and conversations at 60 seconds; **Stop & save** ends recording sooner. Microphone permission and localhost/HTTPS are still required. Interface motion follows your system's reduced-motion setting.
 
-See [interface references and implementation notes](docs/UI-REFERENCES.md) for the nine patterns adapted from 21st.dev and ReactBits.
+The interface uses actual React Bits Aurora, Star Border, Spotlight Card, Animated List, and Count Up sources, together with the shadcn controls listed on 21st.dev. Use the sidebar toggle (or Command/Ctrl+B) to show or hide navigation. On small screens, navigation opens in a sheet. See [component sources, license notes, and implementation details](docs/UI-REFERENCES.md).
 
 ## Project layout
 

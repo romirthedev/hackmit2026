@@ -1,4 +1,6 @@
 'use client';
+import { Card } from '@/components/ui/card';
+import { FrameImage, CatalogButton } from '@/components/catalog';
 // Camera originals use authenticated same-origin URLs, without an image optimizer.
 /* oxlint-disable next/no-img-element */
 
@@ -121,7 +123,7 @@ export function MemoryLibrary({
             }}
           >
             {r.kind === 'frame' ? (
-              <img loading="lazy" src={r.media_url} alt="" />
+              <FrameImage loading="lazy" src={r.media_url} alt="" />
             ) : (
               <div className="audio-thumb">
                 <FileAudio size={24} />
@@ -153,7 +155,7 @@ export function MemoryLibrary({
         ))}
       </div>
       {!filtered.length && (
-        <div className="empty-line">
+        <Card className="empty-line">
           <Clock3 size={24} />
           <strong>
             {kind !== 'all'
@@ -170,15 +172,15 @@ export function MemoryLibrary({
                 : 'Your recordings will be collected here, ready to revisit.'}
           </span>
           {kind !== 'all' && (
-            <button
+            <CatalogButton
               type="button"
               className="text-button"
               onClick={() => setKind('all')}
             >
               Show all recordings
-            </button>
+            </CatalogButton>
           )}
-        </div>
+        </Card>
       )}
     </>
   );
