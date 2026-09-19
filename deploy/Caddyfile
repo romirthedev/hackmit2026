@@ -1,0 +1,6 @@
+# For HTTPS microphone capture on another computer/phone. Set a LAN hostname
+# resolving to this server and trust Caddy's local CA on the clients and ESP32.
+rewind.local {
+    tls internal
+    reverse_proxy 127.0.0.1:8000
+}

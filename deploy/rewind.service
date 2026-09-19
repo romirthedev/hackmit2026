@@ -1,0 +1,22 @@
+[Unit]
+Description=REWIND local memory server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Install the repo at /opt/rewind; create a non-root rewind user owning data/.
+User=rewind
+Group=rewind
+WorkingDirectory=/opt/rewind
+EnvironmentFile=/opt/rewind/.env
+ExecStart=/opt/rewind/.venv/bin/python -m uvicorn rewind.app:create_app --factory --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/rewind/data /home/rewind/.cache
+
+[Install]
+WantedBy=multi-user.target

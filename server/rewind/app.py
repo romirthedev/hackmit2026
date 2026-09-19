@@ -1,0 +1,476 @@
+import asyncio
+import hashlib
+import hmac
+import io
+import json
+import os
+import re
+import secrets
+import shutil
+import time
+import uuid
+import wave
+from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from PIL import Image, UnidentifiedImageError
+from pydantic import BaseModel, Field
+
+from .config import Settings
+from .db import Database, event_public
+from .memory import Memory
+from .models import AskRequest, RuleRequest
+from .providers import Provider
+from .worker import Worker
+
+
+class Login(BaseModel):
+    token: str
+
+
+class Pause(BaseModel):
+    paused: bool
+
+
+class Heartbeat(BaseModel):
+    boot: str = Field(max_length=64)
+    queued: int = Field(default=0, ge=0)
+    dropped: int = Field(default=0, ge=0)
+    uptime_ms: int = Field(default=0, ge=0)
+    free_sd_bytes: int = Field(default=0, ge=0)
+    rssi: int = 0
+    error: str = Field(default="", max_length=300)
+
+
+def create_app(settings=None, provider=None):
+    s = settings or Settings()
+    s.validate_secrets()
+    db = Database(s.data_dir)
+    media_dir = (s.data_dir / "media").resolve()
+    media_dir.mkdir(exist_ok=True)
+    p = provider or Provider(s)
+    memory = Memory(db, p, s)
+    worker = Worker(db, p, memory, s)
+    ingestion_lock = asyncio.Lock()
+
+    # Signed stateless session, with expiration; admin API key is never put in a cookie.
+    def session_token():
+        value = f"{int(time.time() + 86400)}.{secrets.token_hex(16)}"
+        return value + "." + hmac.new(s.admin_token.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+    def valid_session(token):
+        try:
+            expires, nonce, signature = token.split(".")
+            expected = hmac.new(
+                s.admin_token.encode(), f"{expires}.{nonce}".encode(), hashlib.sha256
+            ).hexdigest()
+            return float(expires) > time.time() and hmac.compare_digest(signature, expected)
+        except (ValueError, AttributeError):
+            return False
+
+    async def admin(req: Request):
+        bearer = req.headers.get("authorization", "").removeprefix("Bearer ")
+        if hmac.compare_digest(bearer, s.admin_token):
+            return
+        if not valid_session(req.cookies.get("rewind_session")):
+            raise HTTPException(401, "Workspace access key required")
+        if req.method not in ("GET", "HEAD"):
+            origin = req.headers.get("origin")
+            if origin and urlsplit(origin).netloc != req.headers.get("host"):
+                raise HTTPException(403, "Cross-origin writes rejected")
+
+    async def device(req: Request):
+        bearer = req.headers.get("authorization", "").removeprefix("Bearer ")
+        if not hmac.compare_digest(bearer, s.device_token):
+            raise HTTPException(401, "Device access key required")
+        if req.headers.get("x-device-id") != s.device_id:
+            raise HTTPException(403, "Device ID does not match provisioning")
+
+    async def ingest_auth(req: Request):
+        bearer = req.headers.get("authorization", "").removeprefix("Bearer ")
+        if hmac.compare_digest(bearer, s.device_token):
+            await device(req)
+            return s.device_id
+        await admin(req)
+        return "computer"
+
+    @asynccontextmanager
+    async def lifespan(app):
+        tasks = [asyncio.create_task(worker.run()) for _ in range(s.workers)]
+        tasks.append(asyncio.create_task(worker.elastic_sync()))
+        try:
+            yield
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await p.close()
+
+    app = FastAPI(
+        title="REWIND Memory",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+    app.state.db, app.state.worker, app.state.memory = db, worker, memory
+    app.state.settings = s
+
+    @app.middleware("http")
+    async def headers(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "DENY"
+        if request.url.path.startswith("/api"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/api/health")
+    async def health():
+        return {"status": "ok", "version": "0.1.0"}
+
+    @app.post("/api/login")
+    async def login(body: Login, response: Response):
+        if not hmac.compare_digest(body.token, s.admin_token):
+            await asyncio.sleep(0.5)
+            raise HTTPException(401, "Invalid workspace access key")
+        response.set_cookie(
+            "rewind_session",
+            session_token(),
+            httponly=True,
+            secure=s.cookie_secure,
+            samesite="strict",
+            max_age=86400,
+            path="/",
+        )
+        return {"ok": True}
+
+    @app.post("/api/logout", dependencies=[Depends(admin)])
+    async def logout(response: Response):
+        response.delete_cookie("rewind_session")
+        return {"ok": True}
+
+    @app.get("/api/status", dependencies=[Depends(admin)])
+    async def status():
+        totals = db.one("""SELECT COUNT(*) AS received,COALESCE(SUM(bytes),0) AS stored_bytes,
+            COALESCE(SUM(status='done'),0) AS analyzed,COALESCE(SUM(status='failed'),0) AS failed,
+            COALESCE(SUM(status IN ('queued','processing')),0) AS pending,AVG(analysis_ms) AS average_analysis_ms,
+            MIN(CASE WHEN status IN ('queued','processing') THEN captured_at END) AS oldest_pending_at,
+            MAX(captured_at) AS last_capture FROM media""")
+        totals["devices"] = [{**d, "state": json.loads(d["state"])} for d in db.all("SELECT * FROM devices")]
+        totals["provider"] = s.provider
+        totals["model"] = s.openai_model if s.provider == "openai" else s.vision_model
+        totals["timezone"] = s.timezone
+        totals["free_bytes"] = shutil.disk_usage(media_dir).free
+        totals["storage_limit_bytes"] = int(s.max_storage_gb * 1e9)
+        totals["embedding_failures"] = db.one(
+            "SELECT COUNT(*) n FROM events WHERE embedding_error IS NOT NULL"
+        )["n"]
+        totals["paused"] = db.setting("paused", False)
+        totals["elastic_pending"] = db.one("SELECT COUNT(*) n FROM outbox")["n"]
+        totals["observed_sequence_gaps"] = db.one("""SELECT COALESCE(SUM(span-n),0) n FROM
+            (SELECT MAX(seq)-MIN(seq)+1 span,COUNT(*) n FROM media GROUP BY device,boot,kind)""")["n"]
+        return totals
+
+    @app.get("/api/provider", dependencies=[Depends(admin)])
+    async def provider_status():
+        if s.provider == "ollama":
+            try:
+                r = await p.http.get(s.ollama_url + "/api/tags", timeout=5)
+                r.raise_for_status()
+                names = [m["name"] for m in r.json().get("models", [])]
+                return {
+                    "reachable": True,
+                    "models": names,
+                    "required": [s.vision_model, s.reasoning_model, s.embedding_model],
+                }
+            except Exception:
+                return {
+                    "reachable": False,
+                    "models": [],
+                    "required": [s.vision_model, s.reasoning_model, s.embedding_model],
+                }
+        return {
+            "reachable": s.provider == "openai" and bool(s.openai_api_key),
+            "models": [s.openai_model] if s.provider == "openai" else [],
+        }
+
+    @app.post("/api/device/heartbeat", dependencies=[Depends(device)])
+    async def heartbeat(body: Heartbeat):
+        db.execute(
+            "INSERT INTO devices(id,last_seen,state) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen,state=excluded.state",
+            (s.device_id, time.time(), body.model_dump_json()),
+        )
+        answer = db.one(
+            """SELECT a.* FROM answers a JOIN media m ON a.source_media=m.id WHERE m.device=? ORDER BY a.created_at DESC LIMIT 1""",
+            (s.device_id,),
+        )
+        return {
+            "server_time": time.time(),
+            "paused": db.setting("paused", False),
+            "answer": {k: answer[k] for k in ("id", "answer", "created_at")} if answer else None,
+        }
+
+    @app.post("/api/capture/pause", dependencies=[Depends(admin)])
+    async def pause(body: Pause):
+        db.set_setting("paused", body.paused)
+        return {"paused": body.paused}
+
+    @app.post("/api/ingest/{kind}", status_code=201)
+    async def ingest(kind: str, req: Request, owner: str = Depends(ingest_auth)):
+        if kind not in ("frame", "audio"):
+            raise HTTPException(400, "Kind must be frame or audio")
+        boot = req.headers.get("x-boot-id", "")
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", boot):
+            raise HTTPException(400, "X-Boot-ID required (1–64 alphanumeric characters)")
+        try:
+            seq = int(req.headers["x-sequence"])
+            timestamp = float(req.headers.get("x-captured-at", "0"))
+            if not 0 <= seq < 2**63 or not 0 <= timestamp <= time.time() + 300:
+                raise ValueError()
+        except (KeyError, ValueError, OverflowError):
+            raise HTTPException(400, "Invalid sequence or capture timestamp (Unix seconds)")
+        captured = timestamp or time.time()
+        clock_quality = "device" if timestamp else "received_only"
+        intent = req.headers.get("x-intent", "memory")
+        if intent not in ("memory", "question") or (intent == "question" and kind != "audio"):
+            raise HTTPException(400, "Invalid capture intent")
+        data = bytearray()
+        async for chunk in req.stream():
+            data.extend(chunk)
+            if len(data) > s.max_upload_bytes:
+                raise HTTPException(413, "Recording exceeds upload size limit")
+        if not data:
+            raise HTTPException(400, "Empty recording")
+        mime = "image/jpeg" if kind == "frame" else req.headers.get("content-type", "").split(";")[0]
+        duration = 0
+        if kind == "frame":
+            try:
+                with Image.open(io.BytesIO(data)) as im:
+                    if im.format != "JPEG" or im.width * im.height > 16_000_000:
+                        raise ValueError("Expected a JPEG <=16 megapixels")
+                    im.verify()
+            except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+                raise HTTPException(400, "Invalid JPEG frame")
+            suffix = ".jpg"
+        else:
+            if mime in ("audio/wav", "audio/x-wav"):
+                try:
+                    with wave.open(io.BytesIO(data)) as w:
+                        duration = w.getnframes() / w.getframerate()
+                        if duration > 120 or w.getnchannels() > 2 or w.getsampwidth() != 2:
+                            raise ValueError()
+                except (wave.Error, EOFError, ValueError, ZeroDivisionError):
+                    raise HTTPException(400, "Expected PCM16 WAV, at most 120 seconds")
+                suffix, mime = ".wav", "audio/wav"
+            elif mime in ("audio/webm", "audio/ogg", "audio/mp4"):
+                signatures = {
+                    "audio/webm": data[:4] == b"\x1aE\xdf\xa3",
+                    "audio/ogg": data[:4] == b"OggS",
+                    "audio/mp4": data[4:8] == b"ftyp",
+                }
+                if not signatures[mime]:
+                    raise HTTPException(400, "Invalid audio container")
+                suffix = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".mp4"}[mime]
+            else:
+                raise HTTPException(415, "Use WAV, WebM, Ogg or MP4 audio")
+        digest = hashlib.sha256(data).hexdigest()
+        async with ingestion_lock:
+            old = db.one(
+                "SELECT id,sha256,status FROM media WHERE device=? AND boot=? AND kind=? AND seq=?",
+                (owner, boot, kind, seq),
+            )
+            if old:
+                if not hmac.compare_digest(old["sha256"], digest):
+                    raise HTTPException(409, "Sequence already contains different recording bytes")
+                return {"id": old["id"], "duplicate": True, "status": old["status"]}
+            total = db.one("SELECT COALESCE(SUM(bytes),0) n FROM media")["n"]
+            if (
+                total + len(data) > s.max_storage_gb * 1e9
+                or shutil.disk_usage(media_dir).free - len(data) < s.min_free_gb * 1e9
+            ):
+                raise HTTPException(
+                    507, "Storage limit reached; recording remains on the device until space is available"
+                )
+            event_id = str(uuid.uuid4())
+            path = media_dir / (event_id + suffix)
+            tmp = path.with_suffix(".tmp")
+            try:
+                with open(tmp, "xb") as f:
+                    f.write(data)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+                directory_fd = os.open(media_dir, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+                db.execute(
+                    """INSERT INTO media(id,device,boot,seq,kind,captured_at,received_at,clock_quality,sha256,path,bytes,mime,duration,intent)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        event_id,
+                        owner,
+                        boot,
+                        seq,
+                        kind,
+                        captured,
+                        time.time(),
+                        clock_quality,
+                        digest,
+                        str(path),
+                        len(data),
+                        mime,
+                        duration,
+                        intent,
+                    ),
+                )
+            except BaseException:
+                path.unlink(missing_ok=True)
+                tmp.unlink(missing_ok=True)
+                raise
+        return {"id": event_id, "duplicate": False, "status": "queued"}
+
+    @app.get("/api/events", dependencies=[Depends(admin)])
+    async def events(q: str = "", after: float | None = None, before: float | None = None, limit: int = 50):
+        return await memory.search(q[:2000], after, before, max(1, min(limit, 100)))
+
+    @app.get("/api/recordings", dependencies=[Depends(admin)])
+    async def recordings(before: float | None = None, limit: int = 60):
+        return [
+            event_public(r)
+            for r in db.all(
+                """SELECT m.*,e.summary,e.transcript,e.objects,e.tags,e.confidence,e.segments FROM media m LEFT JOIN events e ON e.id=m.id
+            WHERE m.captured_at<=? ORDER BY m.captured_at DESC LIMIT ?""",
+                (before or time.time() + 300, max(1, min(limit, 200))),
+            )
+        ]
+
+    @app.get("/api/events/{event_id}", dependencies=[Depends(admin)])
+    async def event(event_id: str):
+        row = db.one(
+            "SELECT m.*,e.summary,e.transcript,e.objects,e.tags,e.segments,e.confidence FROM media m LEFT JOIN events e ON e.id=m.id WHERE m.id=?",
+            (event_id,),
+        )
+        if not row:
+            raise HTTPException(404, "Recording not found")
+        return event_public(row)
+
+    @app.get("/api/media/{event_id}", dependencies=[Depends(admin)])
+    async def media(event_id: str):
+        row = db.one("SELECT path,mime FROM media WHERE id=?", (event_id,))
+        if not row or not Path(row["path"]).is_file():
+            raise HTTPException(404, "Recording not found")
+        return FileResponse(row["path"], media_type=row["mime"])
+
+    @app.delete("/api/media/{event_id}", dependencies=[Depends(admin)])
+    async def delete_media(event_id: str):
+        async with ingestion_lock:
+            row = db.one("SELECT path,status FROM media WHERE id=?", (event_id,))
+            if not row:
+                raise HTTPException(404, "Recording not found")
+            if row["status"] == "processing":
+                raise HTTPException(409, "Wait for this recording to finish processing")
+            # Remove answer copies containing this evidence as well as original media/index rows.
+            db.execute(
+                "DELETE FROM answers WHERE source_media=? OR evidence LIKE ?",
+                (event_id, "%" + event_id + "%"),
+            )
+            if s.elastic_url:
+                headers = {"Authorization": "ApiKey " + s.elastic_api_key} if s.elastic_api_key else {}
+                r = await p.http.delete(
+                    s.elastic_url.rstrip("/") + "/rewind-events/_doc/" + event_id, headers=headers
+                )
+                if r.status_code not in (200, 404):
+                    raise HTTPException(503, "Elastic deletion failed; local recording retained for retry")
+            db.execute("DELETE FROM media WHERE id=?", (event_id,))
+            Path(row["path"]).unlink(missing_ok=True)
+            # A scene can contain geometry derived from this image; regenerate after deletion.
+            (s.data_dir / "scene.json").unlink(missing_ok=True)
+        return {"deleted": event_id}
+
+    @app.post("/api/retry", dependencies=[Depends(admin)])
+    async def retry():
+        n = db.execute(
+            "UPDATE media SET status='queued',attempts=0,retry_at=0,error=NULL WHERE status='failed'"
+        )
+        return {"retried": n}
+
+    @app.post("/api/ask", dependencies=[Depends(admin)])
+    async def ask(body: AskRequest):
+        return await memory.ask(body.question, body.after, body.before)
+
+    @app.get("/api/answers", dependencies=[Depends(admin)])
+    async def answers():
+        return [
+            {**r, "evidence": json.loads(r["evidence"])}
+            for r in db.all("SELECT * FROM answers ORDER BY created_at DESC LIMIT 30")
+        ]
+
+    @app.get("/api/rules", dependencies=[Depends(admin)])
+    async def rules():
+        return db.all("SELECT * FROM rules ORDER BY created_at DESC")
+
+    @app.post("/api/rules", dependencies=[Depends(admin)])
+    async def add_rule(body: RuleRequest):
+        if db.one("SELECT COUNT(*) n FROM rules")["n"] >= 8:
+            raise HTTPException(400, "Maximum 8 monitoring rules; delete an old rule first")
+        rule_id = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO rules VALUES(?,?,1,?,?)",
+            (rule_id, body.instruction, time.time(), body.cooldown_seconds),
+        )
+        return {"id": rule_id}
+
+    @app.delete("/api/rules/{rule_id}", dependencies=[Depends(admin)])
+    async def delete_rule(rule_id: str):
+        db.execute("DELETE FROM rules WHERE id=?", (rule_id,))
+        return {"ok": True}
+
+    @app.get("/api/alerts", dependencies=[Depends(admin)])
+    async def alerts():
+        return db.all("SELECT * FROM alerts ORDER BY created_at DESC LIMIT 50")
+
+    @app.post("/api/alerts/{alert_id}/seen", dependencies=[Depends(admin)])
+    async def seen(alert_id: str):
+        db.execute("UPDATE alerts SET seen=1 WHERE id=?", (alert_id,))
+        return {"ok": True}
+
+    @app.get("/api/objects", dependencies=[Depends(admin)])
+    async def objects(label: str, before: float | None = None):
+        # Exact label filter after FTS retrieval; no claim of persistent identity across similar objects.
+        hits = await memory.search(label, before=before, limit=100)
+        return sorted(
+            [r for r in hits if any(label.lower() in o["label"].lower() for o in r["objects"])],
+            key=lambda r: r["captured_at"],
+            reverse=True,
+        )
+
+    @app.get("/api/scene", dependencies=[Depends(admin)])
+    async def scene():
+        path = s.data_dir / "scene.json"
+        if not path.exists():
+            return {"available": False, "points": [], "cameras": [], "frames": []}
+        return json.loads(path.read_text())
+
+    @app.get("/api/export", dependencies=[Depends(admin)])
+    async def export():
+        # Metadata only. Media stays behind authenticated endpoints.
+        return {
+            "version": 1,
+            "exported_at": time.time(),
+            "events": [event_public(r) for r in db.all("SELECT * FROM events ORDER BY captured_at")],
+            "recordings": [event_public(r) for r in db.all("SELECT * FROM media ORDER BY captured_at")],
+        }
+
+    public = Path("web/dist/client")
+    if public.exists():
+        app.mount("/", StaticFiles(directory=public, html=True), name="dashboard")
+    return app

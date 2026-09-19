@@ -1,0 +1,23 @@
+services:
+  rewind:
+    build: .
+    env_file: .env
+    environment:
+      REWIND_DATA_DIR: /app/data
+      REWIND_OLLAMA_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - rewind-data:/app/data
+      - whisper-cache:/home/rewind/.cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+volumes:
+  rewind-data:
+  whisper-cache:
