@@ -584,6 +584,16 @@ pio run -d firmware
 
 Backend tests cover real HTTP routes and database/file storage with injected deterministic inference: auth boundaries, cookies/CSRF, idempotency, conflicts, persistence, failed jobs, stale leases, per-frame processing, malformed uploads, disk limits, citations, temporal filters, audio questions, wake phrases, alert cooldowns, deletion, sequence gaps, and reconstruction export. Both firmware variants are compilation targets. Hardware radio/power/audio quality, model accuracy, GPU latency, Docker startup, and 20-hour endurance still require the actual setup.
 
+## Dashboard controls
+
+Open **Quick search** or press **Command/Ctrl+K** to find a recording or jump to a workspace section. The command palette searches all time; the main search and question composer use the selected date range. Press **Command/Ctrl+Enter** to submit a typed question.
+
+Use the filmstrip beneath the camera preview to select a moment. In **Recent memories**, switch between grid and list layouts or filter the loaded recordings by Frames/Audio. In list view, Up/Down/Home/End move between recordings and Enter opens the original evidence. The processing strip shows actual saved, pending, and analyzed counts.
+
+The voice control displays elapsed recording time. Questions stop at 30 seconds and conversations at 60 seconds; **Stop & save** ends recording sooner. Microphone permission and localhost/HTTPS are still required. Interface motion follows your system's reduced-motion setting.
+
+See [interface references and implementation notes](docs/UI-REFERENCES.md) for the nine patterns adapted from 21st.dev and ReactBits.
+
 ## Project layout
 
 ```text

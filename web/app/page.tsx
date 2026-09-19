@@ -1,4 +1,6 @@
 'use client';
+// Serve authenticated originals directly; native audio has an adjacent transcript.
+/* oxlint-disable next/no-img-element, jsx-a11y/media-has-caption */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Aperture,
@@ -31,6 +33,14 @@ import {
 } from 'lucide-react';
 import Login from '@/components/login';
 import { Brand } from '@/components/brand';
+import { MemoryCommand } from '@/components/memory-command';
+import { MemoryComposer } from '@/components/memory-composer';
+import { MemoryLibrary } from '@/components/memory-library';
+import {
+  AnimatedNumber,
+  MemoryFilmstrip,
+  ProcessingJourney,
+} from '@/components/memory-details';
 import {
   Popover,
   PopoverContent,
@@ -90,7 +100,7 @@ export default function Home() {
     [rule, setRule] = useState(''),
     [selected, setSelected] = useState<Recording | null>(null),
     [deleting, setDeleting] = useState<Recording | null>(null),
-    [index, setIndex] = useState(0),
+    [replayId, setReplayId] = useState<string | null>(null),
     [playing, setPlaying] = useState(false),
     [tab, setTab] = useState('memory'),
     [from, setFrom] = useState(''),
@@ -106,6 +116,27 @@ export default function Home() {
   const fileRef = useRef<HTMLInputElement>(null);
   const initial = useRef(true);
   const signedOut = useRef(false);
+  const index = replayId
+    ? Math.max(
+        0,
+        records.findIndex((recording) => recording.id === replayId),
+      )
+    : 0;
+  const setIndex = useCallback(
+    (next: number | ((previous: number) => number)) => {
+      setReplayId((previous) => {
+        const before = previous
+          ? Math.max(
+              0,
+              records.findIndex((recording) => recording.id === previous),
+            )
+          : 0;
+        const target = typeof next === 'function' ? next(before) : next;
+        return target === 0 ? null : records[target]?.id || null;
+      });
+    },
+    [records],
+  );
   const load = useCallback(async () => {
     try {
       const [s, r, a, ru, al] = await Promise.all([
@@ -136,19 +167,21 @@ export default function Home() {
   }, []);
   useEffect(() => {
     if (auth === false) return;
-    load();
+    // oxlint-disable-next-line react/react-compiler -- Synchronize state with the external recording server.
+    void load();
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [load, auth]);
   useEffect(() => {
     if (!playing) return;
     if (index <= 0) {
+      // oxlint-disable-next-line react/react-compiler -- Stop the replay timer at its endpoint.
       setPlaying(false);
       return;
     }
     const t = setTimeout(() => setIndex((i) => Math.max(0, i - 1)), 1000);
     return () => clearTimeout(t);
-  }, [playing, index]);
+  }, [playing, index, setIndex]);
   const current = records[Math.min(index, Math.max(0, records.length - 1))];
   async function action(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -162,9 +195,9 @@ export default function Home() {
       setBusy(false);
     }
   }
-  async function ask(e: React.FormEvent) {
+  async function ask(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!question.trim()) return;
+    if (busy || !question.trim()) return;
     if (!validTimeRange()) return;
     setAsking(true);
     await action(async () => {
@@ -213,7 +246,7 @@ export default function Home() {
       setBusy(false);
     }
   }
-  async function doSearch(e: React.FormEvent) {
+  async function doSearch(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!validTimeRange()) return;
     await action(async () => {
@@ -303,6 +336,16 @@ export default function Home() {
       >
         <aside className="sidebar">
           <Brand />
+          <MemoryCommand
+            records={records}
+            timezone={status?.timezone}
+            busy={busy}
+            onSelect={setSelected}
+            onNavigate={(destination) => {
+              if (destination === 'import') fileRef.current?.click();
+              else setTab(destination);
+            }}
+          />
           <p className="sidebar-label">WORKSPACE</p>
           <TabsList className="workspace-nav" aria-label="Workspace navigation">
             <TabsTrigger value="memory">
@@ -397,7 +440,7 @@ export default function Home() {
                 aria-label="Import a recording"
                 accept="image/jpeg,audio/wav,audio/webm,audio/ogg,audio/mp4"
                 onChange={(e) => {
-                  if (e.target.files?.[0]) upload(e.target.files[0]);
+                  if (e.target.files?.[0]) void upload(e.target.files[0]);
                   e.target.value = '';
                 }}
               />
@@ -417,7 +460,7 @@ export default function Home() {
               </div>
             )}
             {notice && (
-              <div className="banner" role="status">
+              <output className="banner">
                 <CheckCircle2 size={18} />
                 <span>{notice}</span>
                 <button
@@ -427,7 +470,7 @@ export default function Home() {
                 >
                   <X size={16} />
                 </button>
-              </div>
+              </output>
             )}
             <TabsContent value="memory">
               <form className="search-row" onSubmit={doSearch}>
@@ -500,7 +543,9 @@ export default function Home() {
                   </span>
                   <span className="metric-copy">
                     <span>Recordings saved</span>
-                    <strong>{status?.received.toLocaleString()}</strong>
+                    <strong>
+                      <AnimatedNumber value={status?.received || 0} />
+                    </strong>
                   </span>
                 </div>
                 <div>
@@ -509,7 +554,9 @@ export default function Home() {
                   </span>
                   <span className="metric-copy">
                     <span>Ready to recall</span>
-                    <strong>{status?.analyzed.toLocaleString()}</strong>
+                    <strong>
+                      <AnimatedNumber value={status?.analyzed || 0} />
+                    </strong>
                   </span>
                 </div>
                 <div>
@@ -518,7 +565,9 @@ export default function Home() {
                   </span>
                   <span className="metric-copy">
                     <span>Processing</span>
-                    <strong>{status?.pending.toLocaleString()}</strong>
+                    <strong>
+                      <AnimatedNumber value={status?.pending || 0} />
+                    </strong>
                   </span>
                 </div>
                 <div>
@@ -527,11 +576,22 @@ export default function Home() {
                   </span>
                   <span className="metric-copy">
                     <span>Memory stored</span>
-                    <strong>{bytes(status?.stored_bytes || 0)}</strong>
+                    <strong>
+                      <AnimatedNumber
+                        value={status?.stored_bytes || 0}
+                        format={bytes}
+                      />
+                    </strong>
                   </span>
                 </div>
               </div>
 
+              {status && (
+                <ProcessingJourney
+                  status={status}
+                  onOpen={() => setTab('system')}
+                />
+              )}
               <div className="memory-grid">
                 <section className="visual-panel">
                   <div className="panel-top">
@@ -590,6 +650,15 @@ export default function Home() {
                       </span>
                     )}
                   </div>
+                  <MemoryFilmstrip
+                    records={records}
+                    currentId={current?.id}
+                    timezone={status?.timezone}
+                    onSelect={(next) => {
+                      setIndex(next);
+                      setPlaying(false);
+                    }}
+                  />
                   <div className="timeline-controls">
                     <button
                       className="quiet icon-button"
@@ -650,7 +719,7 @@ export default function Home() {
                       className="text-button"
                       disabled={busy}
                       onClick={() =>
-                        action(() =>
+                        void action(() =>
                           api('/capture/pause', {
                             method: 'POST',
                             body: JSON.stringify({ paused: !status?.paused }),
@@ -716,47 +785,23 @@ export default function Home() {
                   <p className="muted">
                     Find answers in your recordings, with evidence to revisit.
                   </p>
-                  <form className="question-composer" onSubmit={ask}>
-                    <label htmlFor="question" className="sr-only">
-                      Ask a question about your recordings
-                    </label>
-                    <textarea
-                      id="question"
-                      ref={questionRef}
-                      value={question}
-                      onChange={(e) => setQuestion(e.target.value)}
-                      placeholder="What would you like to remember?"
-                      rows={3}
-                      required
-                      maxLength={2000}
-                    />
-                    <div className="row">
-                      <AudioCapture
-                        question
-                        onUpdate={() => {
-                          load();
-                          setNotice(
-                            'Voice question saved. The answer will appear here after transcription.',
-                          );
-                        }}
-                        onError={setError}
-                      />
-                      <button
-                        type="submit"
-                        className="ask-button"
-                        disabled={busy || !question.trim()}
-                        aria-label="Ask memory"
-                      >
-                        {asking ? (
-                          'Thinking…'
-                        ) : (
-                          <>
-                            Ask <ArrowUpRight size={16} />
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
+                  <MemoryComposer
+                    question={question}
+                    onChange={setQuestion}
+                    onSubmit={ask}
+                    inputRef={questionRef}
+                    busy={busy}
+                    asking={asking}
+                    local={status?.provider === 'ollama'}
+                    model={status?.model}
+                    onVoiceUpdate={() => {
+                      void load();
+                      setNotice(
+                        'Voice question saved. The answer will appear here after transcription.',
+                      );
+                    }}
+                    onError={setError}
+                  />
                   {(from || to) && (
                     <p className="filter-note">
                       <CalendarDays size={13} /> Using your selected time range{' '}
@@ -772,12 +817,12 @@ export default function Home() {
                     </p>
                   )}
                   {asking && (
-                    <p className="thinking-note" role="status">
+                    <output className="thinking-note">
                       <span className="pulse">
                         <Sparkles size={15} />
                       </span>{' '}
                       Looking through your recordings…
-                    </p>
+                    </output>
                   )}
                   <div className="answers" aria-live="polite">
                     {answers.length === 0 ? (
@@ -800,7 +845,7 @@ export default function Home() {
                       </div>
                     ) : (
                       answers.slice(0, 6).map((a) => (
-                        <article className="answer" key={a.id}>
+                        <article className="answer memory-enter" key={a.id}>
                           <div className="row">
                             <span className="meta">
                               {clock(a.created_at, status?.timezone)}
@@ -870,62 +915,12 @@ export default function Home() {
                     )}
                   </div>
                 </div>
-                <div className="recording-grid">
-                  {(results ?? records).map((r) => (
-                    <button
-                      className="recording-card"
-                      key={r.id}
-                      onClick={() => setSelected(r)}
-                    >
-                      {r.kind === 'frame' ? (
-                        <img
-                          loading="lazy"
-                          src={r.media_url}
-                          alt={r.summary || 'Recorded camera frame'}
-                        />
-                      ) : (
-                        <div className="audio-thumb">
-                          <FileAudio size={24} />
-                          <span>Recorded audio</span>
-                        </div>
-                      )}
-                      <div>
-                        <span className="meta">
-                          {new Date(r.captured_at * 1000).toLocaleDateString(
-                            [],
-                            {
-                              month: 'short',
-                              day: 'numeric',
-                              timeZone: status?.timezone,
-                            },
-                          )}{' '}
-                          · {clock(r.captured_at, status?.timezone)}
-                        </span>
-                        <p>
-                          {r.summary ||
-                            (r.status === 'failed'
-                              ? 'Analysis needs attention'
-                              : 'Saved · waiting for analysis')}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-                {(results ?? records).length === 0 && (
-                  <div className="empty-line">
-                    <Clock3 size={24} />
-                    <strong>
-                      {results
-                        ? 'No matching memories'
-                        : 'Your timeline starts here'}
-                    </strong>
-                    <span>
-                      {results
-                        ? 'Try fewer words or a wider time range.'
-                        : 'Your recordings will be collected here, ready to revisit.'}
-                    </span>
-                  </div>
-                )}
+                <MemoryLibrary
+                  records={results ?? records}
+                  timezone={status?.timezone}
+                  searching={historyMode === 'search'}
+                  onSelect={setSelected}
+                />
                 {historyMode !== 'search' &&
                   hasEarlier &&
                   (results ?? records).length >= 60 && (
@@ -933,7 +928,7 @@ export default function Home() {
                       className="quiet load-earlier"
                       disabled={busy}
                       onClick={() =>
-                        action(async () => {
+                        void action(async () => {
                           const visible = results ?? records;
                           const older = await api<Recording[]>(
                             '/recordings?before=' +
@@ -962,7 +957,9 @@ export default function Home() {
                 <button
                   className="quiet"
                   onClick={() =>
-                    action(async () => setScene(await api<Scene>('/scene')))
+                    void action(async () =>
+                      setScene(await api<Scene>('/scene')),
+                    )
                   }
                 >
                   <RefreshCw size={16} /> Refresh scene
@@ -1013,7 +1010,7 @@ export default function Home() {
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
-                      action(async () => {
+                      void action(async () => {
                         await api('/rules', {
                           method: 'POST',
                           body: JSON.stringify({ instruction: rule }),
@@ -1044,7 +1041,7 @@ export default function Home() {
                           className="quiet icon-button"
                           aria-label="Remove monitoring rule"
                           onClick={() =>
-                            action(() =>
+                            void action(() =>
                               api('/rules/' + r.id, { method: 'DELETE' }),
                             )
                           }
@@ -1073,7 +1070,7 @@ export default function Home() {
                               );
                               if (r) setSelected(r);
                               else
-                                action(async () => {
+                                void action(async () => {
                                   setSelected(
                                     await api<Recording>(
                                       '/events/' + a.event_id,
@@ -1088,7 +1085,7 @@ export default function Home() {
                             <button
                               className="quiet"
                               onClick={() =>
-                                action(() =>
+                                void action(() =>
                                   api('/alerts/' + a.id + '/seen', {
                                     method: 'POST',
                                   }),
@@ -1186,7 +1183,7 @@ export default function Home() {
                       className="quiet"
                       disabled={busy || !status?.failed}
                       onClick={() =>
-                        action(() => api('/retry', { method: 'POST' }))
+                        void action(() => api('/retry', { method: 'POST' }))
                       }
                     >
                       <RefreshCw size={16} /> Retry failures
@@ -1279,7 +1276,7 @@ export default function Home() {
             <AlertDialogAction
               disabled={busy}
               onClick={() =>
-                action(async () => {
+                void action(async () => {
                   await api('/media/' + deleting!.id, { method: 'DELETE' });
                   setDeleting(null);
                   setSelected(null);

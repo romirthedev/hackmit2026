@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './memory-interactions.css';
 export const metadata: Metadata = {
   title: 'REWIND · Your physical memory',
   description:
