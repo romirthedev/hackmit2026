@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import httpx
+from rewind.inference import chat_request, chat_result
 from rewind.models import RecallAnswer
 from rewind.video import video_samples
 
@@ -34,6 +35,7 @@ def main():
     parser.add_argument("video", type=Path)
     parser.add_argument("plan", type=Path)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--api", choices=["ollama", "llamacpp"], default="ollama")
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--output", required=True, type=Path, help="New directory; never overwritten")
     parser.add_argument("--fps", type=float, default=1)
@@ -86,10 +88,12 @@ def main():
         "plan": plan,
         "frames": frames,
         "requested_model": args.model,
+        "api": args.api,
         "think": args.think,
         "context": args.context,
         "max_tokens": args.max_tokens,
         "fps": args.fps,
+        "image_transport": "one original frame per user message",
         "system_prompt": PROMPT,
         "schema": RecallAnswer.model_json_schema(),
         "started_at": time.time(),
@@ -108,51 +112,59 @@ def main():
         print(json.dumps({"frames": len(frames), "questions": len(questions), "report": str(output)}))
         return
     with httpx.Client(base_url=args.ollama_url.rstrip("/"), timeout=args.timeout) as client:
-        response = client.post("/api/show", json={"model": args.model})
-        response.raise_for_status()
-        model = response.json()
-        if "vision" not in model.get("capabilities", []):
-            raise RuntimeError("Selected runtime model does not advertise vision capability")
-        report["model_details"] = {k: model.get(k) for k in ("details", "capabilities", "model_info")}
-        report["runtime_version"] = client.get("/api/version").json()
-        report["models_before"] = client.get("/api/ps").json()
+        if args.api == "ollama":
+            response = client.post("/api/show", json={"model": args.model})
+            response.raise_for_status()
+            model = response.json()
+            if "vision" not in model.get("capabilities", []):
+                raise RuntimeError("Selected runtime model does not advertise vision capability")
+            report["model_details"] = {k: model.get(k) for k in ("details", "capabilities", "model_info")}
+            report["runtime_version"] = client.get("/api/version").json()
+        else:
+            response = client.get("/props")
+            response.raise_for_status()
+            report["runtime_version"] = response.json()
+            slots = client.get("/slots").json()
+            report["slots"] = slots
+            if not slots or min(slot["n_ctx"] for slot in slots) < args.context:
+                raise RuntimeError(
+                    "llama.cpp per-slot context is smaller than the requested diagnostic context"
+                )
+        models_path = "/v1/models" if args.api == "llamacpp" else "/api/ps"
+        report["models_before"] = client.get(models_path).json()
         for question in questions:
             started = time.monotonic()
             result = {"question": question}
             try:
-                response = client.post(
-                    "/api/chat",
-                    json={
-                        "model": args.model,
-                        "messages": [
-                            {"role": "system", "content": PROMPT},
-                            {
-                                "role": "user",
-                                "content": json.dumps({"question": question, "frames": frames}),
-                                "images": images,
-                            },
-                        ],
-                        "format": RecallAnswer.model_json_schema(),
-                        "stream": False,
-                        "think": args.think,
-                        "options": {
-                            "temperature": 0,
-                            "num_ctx": args.context,
-                            "num_predict": args.max_tokens,
-                        },
-                        "keep_alive": "30m",
-                    },
+                messages = (
+                    [{"role": "system", "content": PROMPT}]
+                    + [
+                        {"role": "user", "content": json.dumps(frame), "images": [encoded]}
+                        for frame, encoded in zip(frames, images, strict=True)
+                    ]
+                    + [{"role": "user", "content": json.dumps({"question": question, "frames": frames})}]
                 )
+                path, payload = chat_request(
+                    args.api,
+                    args.model,
+                    messages,
+                    RecallAnswer.model_json_schema(),
+                    think=args.think,
+                    context=args.context,
+                    max_tokens=args.max_tokens,
+                )
+                response = client.post(path, json=payload)
                 response.raise_for_status()
                 raw = response.json()
                 result["raw_response"] = raw
-                answer = RecallAnswer.model_validate_json(raw["message"]["content"])
+                text, complete = chat_result(args.api, raw)
+                answer = RecallAnswer.model_validate_json(text)
                 result["answer"] = answer.model_dump()
                 result["citations_valid"] = set(answer.evidence_ids) <= {f["id"] for f in frames} and (
                     bool(answer.evidence_ids) or answer.insufficient_evidence
                 )
-                result["complete"] = raw.get("done") is True and raw.get("done_reason") != "length"
-                result["models_after"] = client.get("/api/ps").json()
+                result["complete"] = complete
+                result["models_after"] = client.get(models_path).json()
             except (httpx.HTTPError, ValueError, KeyError) as error:
                 result["error"] = str(error)
             result["seconds"] = round(time.monotonic() - started, 3)

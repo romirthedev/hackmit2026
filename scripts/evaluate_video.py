@@ -7,6 +7,7 @@ The API child exits on completion/failure; originals and results remain in --out
 """
 
 import argparse
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -25,6 +26,25 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def code_identity():
+    """Preserve provenance for an uploaded source tree without a .git directory."""
+    try:
+        revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        revision, dirty = None, None
+    files = sorted([*ROOT.glob("server/rewind/*.py"), *ROOT.glob("scripts/*.py"), ROOT / "pyproject.toml"])
+    return {
+        "git_revision": revision,
+        "dirty_code": dirty,
+        "source_hashes": {
+            str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files
+        },
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("video", type=Path)
@@ -33,12 +53,20 @@ def main():
         "--output", type=Path, required=True, help="New output directory, preferably under ignored data/"
     )
     parser.add_argument("--model", required=True, help="Installed Ollama model for BOTH frames and recall")
+    parser.add_argument("--api", choices=["ollama", "llamacpp"], default="ollama")
+    parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    parser.add_argument("--embedding-url", help="Optional separate Ollama service for text embeddings")
+    parser.add_argument("--workers", type=int, default=1, choices=range(1, 9))
+    parser.add_argument("--context", type=int, default=16384)
+    parser.add_argument("--recall-images", type=int, default=3, choices=range(1, 17))
     parser.add_argument("--whisper-model", default="small.en")
     parser.add_argument("--fps", type=float, default=1)
     parser.add_argument("--visual-device", choices=["cpu", "mps", "cuda"], default="cpu")
     parser.add_argument("--text-only", action="store_true", help="Disable OpenCLIP for an ablation run")
     parser.add_argument("--timeout", type=float, default=3600, help="Maximum queue-drain seconds")
     args = parser.parse_args()
+    if not 2048 <= args.context <= 131072:
+        parser.error("context must be between 2048 and 131072")
     video, plan, output = args.video.resolve(), args.plan.resolve(), args.output.resolve()
     if output.exists():
         parser.error("--output must be a new directory; existing evaluations are never overwritten")
@@ -57,12 +85,22 @@ def main():
     env = dict(
         os.environ,
         REWIND_PROVIDER="ollama",
+        REWIND_LOCAL_INFERENCE_API=args.api,
+        REWIND_OLLAMA_URL=args.ollama_url,
+        REWIND_OLLAMA_EMBEDDING_URL=args.embedding_url or args.ollama_url,
+        REWIND_OLLAMA_RECALL_URL=args.ollama_url,
+        REWIND_OLLAMA_RECALL_MODEL=args.model,
+        REWIND_OLLAMA_RECALL_THINK="false",
+        REWIND_OLLAMA_RECALL_CONTEXT=str(args.context),
+        REWIND_RECALL_MAX_IMAGES=str(args.recall_images),
+        REWIND_OLLAMA_CONTEXT=str(args.context),
+        REWIND_OLLAMA_TIMEOUT="900",
         REWIND_ADMIN_TOKEN=secrets.token_urlsafe(32),
         REWIND_DEVICE_TOKEN=secrets.token_urlsafe(32),
         REWIND_DATA_DIR=str(output / "workspace"),
         REWIND_VISION_MODEL=args.model,
         REWIND_REASONING_MODEL=args.model,
-        REWIND_WORKERS="1",
+        REWIND_WORKERS=str(args.workers),
         REWIND_OLLAMA_THINK="false",
         REWIND_VISUAL_EMBEDDINGS=str(not args.text_only).lower(),
         REWIND_EMBEDDINGS="true",
@@ -82,6 +120,12 @@ def main():
                 "python": sys.version,
                 "platform": platform.platform(),
                 "model": args.model,
+                "api": args.api,
+                "ollama_url": args.ollama_url,
+                "embedding_url": args.embedding_url or args.ollama_url,
+                "workers": args.workers,
+                "context": args.context,
+                "recall_max_images": args.recall_images,
                 "fps": args.fps,
                 "visual_device": args.visual_device,
                 "visual_enabled": not args.text_only,
@@ -90,12 +134,7 @@ def main():
                 "packages": {
                     name: importlib.metadata.version(name) for name in ["av", "numpy", "faster-whisper"]
                 },
-                "git_revision": subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-                ).strip(),
-                "dirty_code": bool(
-                    subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()
-                ),
+                **code_identity(),
             },
             indent=2,
         )

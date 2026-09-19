@@ -573,3 +573,38 @@ def test_recall_rejects_source_ids_in_place_of_answer(context):
     r = c.post("/api/ask", headers=admin(), json={"question": "Where was my wallet?"}).json()
     assert r["mode"] == "evidence_only" and not r["grounded"]
     assert "not a verified answer" in r["answer"]
+
+
+async def test_active_slow_job_keeps_lease_and_is_not_claimed_twice(context, monkeypatch):
+    c, a, p = context
+    send(c)
+    worker = a.state.worker
+    monkeypatch.setattr(worker, "LEASE_SECONDS", 0.1)
+    monkeypatch.setattr(worker, "RENEW_SECONDS", 0.01)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = p.observe
+
+    async def slow_observe(path):
+        entered.set()
+        await release.wait()
+        return await original(path)
+
+    p.observe = slow_observe
+    item = worker.claim()
+    task = asyncio.create_task(worker.process(item))
+    try:
+        await entered.wait()
+        await asyncio.sleep(0.2)  # The initial lease has expired; renewal must protect it.
+        assert worker.claim() is None
+        release.set()
+        await task
+        assert a.state.db.one("SELECT status,attempts,lease_until FROM media WHERE id=?", (item["id"],)) == {
+            "status": "done",
+            "attempts": 1,
+            "lease_until": 0,
+        }
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

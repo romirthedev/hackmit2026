@@ -13,8 +13,11 @@ from rewind.video import Sample
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.mark.parametrize("api", ["ollama", "llamacpp"])
 @pytest.mark.parametrize("complete", [True, False])
-def test_vision_evaluation_withholds_answers_and_records_incomplete_output(tmp_path, monkeypatch, complete):
+def test_vision_evaluation_withholds_answers_and_records_incomplete_output(
+    tmp_path, monkeypatch, complete, api
+):
     spec = importlib.util.spec_from_file_location("evaluate_vision", ROOT / "scripts/evaluate_vision.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -38,20 +41,56 @@ def test_vision_evaluation_withholds_answers_and_records_incomplete_output(tmp_p
     monkeypatch.setattr(
         sys,
         "argv",
-        ["evaluate_vision", str(video), str(plan), "--model", "fixture-vlm", "--output", str(output)],
+        [
+            "evaluate_vision",
+            str(video),
+            str(plan),
+            "--model",
+            "fixture-vlm",
+            "--output",
+            str(output),
+            "--api",
+            api,
+        ],
     )
     requests = []
 
     def handler(request):
         if request.url.path == "/api/show":
             return httpx.Response(200, json={"capabilities": ["vision"]})
-        if request.url.path == "/api/chat":
+        if request.url.path == "/slots":
+            return httpx.Response(200, json=[{"id": 0, "n_ctx": 32768}])
+        if request.url.path in ("/api/chat", "/v1/chat/completions"):
             body = json.loads(request.content)
             requests.append(body)
             assert "WITHHELD" not in request.content.decode()
-            context = json.loads(body["messages"][1]["content"])
+            context = json.loads(body["messages"][-1]["content"])
             assert [r["offset_seconds"] for r in context["frames"]] == [0, 1.1, 2.4]
-            assert len(body["messages"][1]["images"]) == 3
+            if api == "ollama":
+                image_turns = [m for m in body["messages"] if "images" in m]
+                assert len(image_turns) == 3
+                assert all(len(m["images"]) == 1 for m in image_turns)
+            else:
+                assert len([m for m in body["messages"] if isinstance(m["content"], list)]) == 3
+                return httpx.Response(
+                    200,
+                    json={
+                        "choices": [
+                            {
+                                "finish_reason": "stop" if complete else "length",
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "answer": "Fixture claim.",
+                                            "evidence_ids": ["E3"],
+                                            "insufficient_evidence": False,
+                                        }
+                                    )
+                                },
+                            }
+                        ]
+                    },
+                )
             return httpx.Response(
                 200,
                 json={

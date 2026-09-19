@@ -1,0 +1,16 @@
+{
+  "original_plan": "daylife-pov-plan.json",
+  "source_sha256": "03b82f243750de109ca56856313f65ef109c4be8ee604caffb801bd92bdabfe5",
+  "timing": "Post-inference correction on 2026-09-19; prompted by disagreement from model outputs, then checked against original frames.",
+  "question": "What utensil did the person use to pick up food from the warmer?",
+  "original_criterion": "Identifies tongs and cites a frame showing their use.",
+  "corrected_observation": "A gloved hand grips the bacon directly. The sampled frames do not show tongs.",
+  "reviewed_source_offsets_seconds": [
+    27.027027027027028,
+    28.02802802802803,
+    29.02902902902903,
+    30.03003003003003
+  ],
+  "scoring": "Preserve the original plan and raw runs. Exclude this question from primary frozen-criterion scores. Any score using the corrected observation is explicitly post hoc.",
+  "impact": "The old pipeline tongs answer remains wrong. The earlier six-frame Qwen2.5-VL diagnostic gloved-hands answer is supported, so that diagnostic has two supported answers of three after correction; the invented shift time still fails."
+}

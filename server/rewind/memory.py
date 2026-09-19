@@ -126,6 +126,7 @@ Spatial descriptions such as "behind the person" or "in front of the fence" are 
 Do not invent dates or anchor actions. Return JSON.""",
                 question,
                 SearchPlan,
+                recall=True,
             )
             query = plan.terms or query
             if explicit_temporal and plan.relation != "none" and plan.anchor_terms:
@@ -181,8 +182,9 @@ Do not invent dates or anchor actions. Return JSON.""",
                     for old in chosen
                 ):
                     chosen.append(row)
-                if len(chosen) == 3:
+                if len(chosen) == self.s.recall_max_images:
                     break
+            chosen.sort(key=lambda row: (row["device"], row["boot"], row["captured_at"]))
             image_paths, attached_ids = [], []
             for row in chosen:
                 media = self.db.one("SELECT path FROM media WHERE id=?", (row["id"],))
@@ -234,6 +236,7 @@ If evidence cannot establish the answer, explicitly say so and set insufficient_
                     ),
                     RecallAnswer,
                     images=image_paths,
+                    recall=True,
                 )
                 valid = set(aliases)
                 cited = set(response.evidence_ids)

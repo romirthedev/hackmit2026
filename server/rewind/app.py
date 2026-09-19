@@ -224,6 +224,10 @@ def create_app(settings=None, provider=None):
         totals["devices"] = [{**d, "state": json.loads(d["state"])} for d in db.all("SELECT * FROM devices")]
         totals["provider"] = s.provider
         totals["model"] = s.openai_model if s.provider == "openai" else s.vision_model
+        totals["recall_model"] = (
+            s.openai_model if s.provider == "openai" else s.ollama_recall_model or s.vision_model
+        )
+        totals["workers"] = s.workers
         totals["timezone"] = s.timezone
         totals["visual_index"] = visual.status()
         totals["free_bytes"] = shutil.disk_usage(media_dir).free

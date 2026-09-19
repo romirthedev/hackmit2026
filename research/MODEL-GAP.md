@@ -1,6 +1,8 @@
-# Why the assistant outperformed the local video pipeline
+# Diagnosing model, evidence, runtime, and reviewer errors
 
 September 19, 2026. This diagnosis follows the [actual video evaluations](../docs/evaluations/OPEN-VIDEO-2026-09-19.md), rather than treating model size as the complete explanation.
+
+**Post-inference correction:** the original “tongs” criterion was wrong. Reinspection of the original late frames shows gloved fingers gripping bacon. The model was right to say hands. See the [audit erratum](../docs/evaluations/daylife-pov-erratum.json) and [GX10 follow-up](../docs/evaluations/GX10-VISION.md). The earlier claims below have been corrected; raw runs and the frozen question plan are preserved.
 
 ## What differs
 
@@ -14,7 +16,7 @@ September 19, 2026. This diagnosis follows the [actual video evaluations](../doc
 
 This was **not an equal-input, blind model comparison**. The assistant had privileged context and more opportunities to inspect evidence. It also corrected an initial mistaken expectation of egg portions after inspecting larger frames. Better review is not infallibility.
 
-The model likely contributes to the difference, but the available results cannot isolate model architecture, training, inference effort or quantization effects. In particular, there was no Q4-versus-higher-precision experiment. The same local model scored 5/5 on the simpler outdoor sample and 1/7 on the moving workday sample, showing substantial scene/task sensitivity.
+The model likely contributes to the difference, but the available results cannot isolate model architecture, training, inference effort or quantization effects. In particular, there was no Q4-versus-higher-precision experiment. The same local model scored 5/5 on the simpler outdoor sample and 1/6 under the remaining valid criteria on the moving workday sample, showing substantial scene/task sensitivity.
 
 ## Same-model evidence diagnostic
 
@@ -25,12 +27,12 @@ This is an **oracle-context diagnostic**, not an unbiased retrieval benchmark: t
 | Question | Original pipeline | Same model with selected chronological context | Seconds |
 |---|---|---|---:|
 | Bottle used before or after cheese? | Incorrectly said after | Correctly said before, citing the supplied frames | 50.680 |
-| Which utensil picked up food? | Correct word “tongs,” but unsupported frame citations | Said gloved hands; failed to identify the tongs visible in the later frames | 7.926 |
+| Which utensil picked up food? | Incorrectly said “tongs,” with unsupported frame citations | Said gloved hands, supported by the source frames after correcting the reviewer’s mistaken criterion | 7.926 |
 | When did the shift begin? | Invented 3 PM | Invented 10 AM | 8.139 |
 
-**One of these three probes now meets its criterion; the other two still fail.** The temporal improvement proves that at least one failure can be addressed without changing the model, although the combined intervention does not identify its individual cause. Giving more relevant images did not reliably fix object recognition or abstention and even changed the utensil answer adversely. All three responses reported sufficient evidence, including the invented shift time.
+**After the explicit post-inference correction, two of the three answers are supported; the invented shift start still fails.** The previously reported 1/3 was based on an incorrect “tongs” expectation. Excluding that invalid criterion leaves 1/2 supported answers under unchanged criteria. Better evidence improved action order and produced a correct hands answer; it did not fix abstention. All three responses reported sufficient evidence, including the invented shift time.
 
-Therefore both the evidence pipeline and model behavior need work. These calls reused a common image/prompt prefix and ran sequentially; their latency difference is not an independent model-speed comparison. They do not replace or rescore the original 1/7 end-to-end result.
+Therefore both the evidence pipeline and model behavior need work. These calls reused a common image/prompt prefix and ran sequentially; their latency difference is not an independent model-speed comparison. They do not replace the original full-pipeline run (historically reported as 1/7; 1/6 after excluding the invalid criterion).
 
 ## Can REWIND use the stronger model?
 
@@ -51,3 +53,15 @@ Codex/ChatGPT subscription sign-in and general API authentication are different.
 The clean comparison is a 2×2 study: local versus Astra model, each with the same original retrieval and with the same improved chronological context. Use identical source bytes, questions and grading rules, preserve failures, and keep criteria out of inference. That separates model effects from context effects better than comparing this assistant's informed review to a single local call.
 
 This document recommends the hybrid design; it does not claim that a cloud benchmark, hybrid routing or iterative retrieval has already been implemented or validated. A stronger model should be tested, not assumed to provide perfect recall.
+
+## GX10 follow-up
+
+The larger-model experiment exposed an additional runtime failure: Ollama dropped
+equal-sized images supplied together in one turn. Sending each original in a
+separate turn fixed the controlled color probe. The application now does this
+and orders attached recall frames chronologically within each device stream.
+The corrected 27B diagnostic abstained on keys and shift start and recovered
+action order, but still added unsupported food details. The detailed
+[GX10 evaluation](../docs/evaluations/GX10-VISION.md) separates those results from
+full-pipeline accuracy and records the mistaken human tongs criterion explicitly.
+This is evidence for checking pixels, transport and review quality alongside the model.

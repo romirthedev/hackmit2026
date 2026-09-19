@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,9 @@ log = logging.getLogger(__name__)
 
 
 class Worker:
+    LEASE_SECONDS = 900
+    RENEW_SECONDS = 60
+
     def __init__(self, db, provider, memory, settings):
         self.db, self.p, self.memory, self.s = db, provider, memory, settings
 
@@ -30,11 +34,28 @@ class Worker:
                 return None
             c.execute(
                 "UPDATE media SET status='processing',lease_until=?,attempts=attempts+1 WHERE id=?",
-                (now + 900, row["id"]),
+                (now + self.LEASE_SECONDS, row["id"]),
             )
             return dict(row)
 
+    async def renew_lease(self, media_id):
+        while True:
+            await asyncio.sleep(self.RENEW_SECONDS)
+            self.db.execute(
+                "UPDATE media SET lease_until=? WHERE id=? AND status='processing'",
+                (time.time() + self.LEASE_SECONDS, media_id),
+            )
+
     async def process(self, item):
+        renewal = asyncio.create_task(self.renew_lease(item["id"]))
+        try:
+            await self._process(item)
+        finally:
+            renewal.cancel()
+            with suppress(asyncio.CancelledError):
+                await renewal
+
+    async def _process(self, item):
         started = time.monotonic()
         try:
             existing = self.db.one("SELECT id FROM events WHERE id=?", (item["id"],))
