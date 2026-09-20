@@ -28,9 +28,6 @@ import {
   type ConversationState,
 } from '@/lib/api';
 import { PhoneCapture, type CaptureState } from '@/lib/phone-capture';
-import { ComputerPanel } from '@/components/computer-panel';
-import { ContextPanel } from '@/components/context-panel';
-import { PeoplePanel } from '@/components/people-panel';
 import { Orb, type OrbState } from '@/components/dashboard/orb';
 import { Card, Cell, hm } from '@/components/dashboard/primitives';
 import { SendLetter, type Send } from '@/components/dashboard/letter';
@@ -98,7 +95,13 @@ export default function Phone() {
       polling = true;
       try {
         const jobs = await api<
-          { boot: string; seq: number; status: string; error: string }[]
+          {
+            boot: string;
+            seq: number;
+            status: string;
+            error: string;
+            destinations: string[];
+          }[]
         >('/scans/jobs', { signal: request.signal });
         if (request.signal.aborted) return;
         const job = jobs.find(
@@ -106,12 +109,18 @@ export default function Phone() {
             item.boot === scanIdentity.boot && item.seq === scanIdentity.seq,
         );
         if (job?.status === 'done') {
-          setScanNotice('Demo mail filed in Calendar and Notes.');
+          const places = job.destinations?.length
+            ? job.destinations
+            : ['moments'];
+          setScanNotice(
+            `Added to ${places.map((place) => place.charAt(0).toUpperCase() + place.slice(1)).join(' and ')}.`,
+          );
           setScanIdentity(null);
         } else if (job?.status === 'failed') {
           setScanNotice(job.error);
           setScanIdentity(null);
-        } else if (job) setScanNotice('Photo saved. Reading your mail…');
+        } else if (job)
+          setScanNotice('Photo saved. Checking where it belongs…');
       } catch {
         /* The durable upload queue retries connection failures. */
       } finally {
@@ -152,7 +161,6 @@ export default function Phone() {
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
-  const [view, setView] = useState<'record' | 'context' | 'computer'>('record');
   const [sound, setSound] = useState(false);
   const soundRef = useRef(false);
   const authExpired = useRef(false);
@@ -504,15 +512,6 @@ export default function Phone() {
       void capture.current?.start();
     }
   }
-  function changeView(next: 'record' | 'context' | 'computer') {
-    if (next !== 'record') {
-      cancelScanner();
-      setSend(null);
-      setScanning(false);
-      if (!capture.current?.state.recording) capture.current?.stop();
-    }
-    setView(next);
-  }
   const pageHidden = () => document.visibilityState === 'hidden';
   async function scan() {
     const controller = capture.current;
@@ -609,7 +608,8 @@ export default function Phone() {
                 ? 'Voice unavailable · type below'
                 : 'Press Record, then speak naturally';
   const orb: OrbState =
-    state.voice === 'hearing'
+    state.voice === 'hearing' ||
+    (state.recording && !thinking && !state.speaking)
       ? 'listening'
       : thinking || asking || conversation.status === 'acting'
         ? 'thinking'
@@ -617,9 +617,6 @@ export default function Phone() {
           ? 'answer'
           : 'idle';
   const cameraOn = state.recording || state.previewing;
-  const hour = new Date().getHours();
-  const greet =
-    hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const zone = status?.timezone;
   if (auth === false) return <Login />;
   if (auth === null)
@@ -651,222 +648,21 @@ export default function Phone() {
           </span>
         </header>
         <main className="ph-page mode-rose">
-          <nav className="phone-tabs" aria-label="Phone workspace">
-            <button
-              type="button"
-              className={view === 'record' ? 'selected' : ''}
-              aria-pressed={view === 'record'}
-              onClick={() => changeView('record')}
-            >
-              Your day
-            </button>
-            <button
-              type="button"
-              className={view === 'context' ? 'selected' : ''}
-              aria-pressed={view === 'context'}
-              onClick={() => changeView('context')}
-            >
-              Your connections
-            </button>
-            <button
-              type="button"
-              className={view === 'computer' ? 'selected' : ''}
-              aria-pressed={view === 'computer'}
-              onClick={() => changeView('computer')}
-            >
-              Your computer
-            </button>
-          </nav>
           {(state.error || error || conversationError) && (
             <div className="rw-banner" role="alert">
               {state.error || error || conversationError}
             </div>
           )}
-          <section hidden={view !== 'record'}>
+          <section aria-label="Your day">
             <div className="greeting">
-              <h1>{greet}.</h1>
+              <h1>Your day</h1>
               <p>
                 {state.recording
                   ? `Recording your day${state.startedAt ? ` since ${hm(state.startedAt / 1000, zone)}` : ''}.`
-                  : 'Tap Record, clip your phone on, and leave this screen open.'}
+                  : 'Tap the orb to record. Keep this screen open.'}
               </p>
             </div>
-            {reminders
-              .filter((reminder) => !reminder.seen)
-              .map((reminder) => (
-                <Cell key={reminder.id} label="Up next" index={0}>
-                  <Card className="card-next">
-                    <div className="row">
-                      <strong className="big-time">
-                        {hm(reminder.starts_at, zone)}
-                      </strong>
-                      <button
-                        type="button"
-                        className="tbtn"
-                        aria-label="Dismiss reminder"
-                        onClick={() => {
-                          void api(
-                            '/context/reminders/' + reminder.id + '/seen',
-                            { method: 'POST' },
-                          )
-                            .then(() =>
-                              setReminders((rows) =>
-                                rows.filter((r) => r.id !== reminder.id),
-                              ),
-                            )
-                            .catch(() =>
-                              setError(
-                                'Could not dismiss this reminder. Try again.',
-                              ),
-                            );
-                        }}
-                      >
-                        <Check />
-                      </button>
-                    </div>
-                    <p className="next-text">{reminder.message}</p>
-                  </Card>
-                </Cell>
-              ))}
-            <Cell label="Your view" index={1}>
-              <Card
-                className={`card-media ${state.recording ? 'is-rec' : ''} ${cameraOn ? 'is-on' : ''} ${scanning ? 'is-scanning' : ''}`}
-              >
-                <div className="cam" ref={cam}>
-                  <video
-                    ref={video}
-                    muted
-                    playsInline
-                    aria-label="Live camera preview"
-                  />
-                  {!cameraOn && (
-                    <span className="ph-camera-placeholder">
-                      <Camera />
-                      <span>Your view, remembered.</span>
-                    </span>
-                  )}
-                  <span className="sweep" aria-hidden="true" />
-                </div>
-                <div className="media-foot">
-                  <span className="media-title">
-                    {state.recording
-                      ? 'Recording'
-                      : state.finalizing
-                        ? 'Saving last seconds…'
-                        : state.previewing
-                          ? 'Camera on'
-                          : 'Your view'}
-                    <small>
-                      {state.queued
-                        ? `${state.queued} waiting to upload`
-                        : state.saved
-                          ? `${state.saved} uploads complete`
-                          : 'Nothing uploaded this session'}
-                    </small>
-                  </span>
-                  <span className="media-ctl">
-                    {(state.previewing || state.requesting) &&
-                    !state.recording ? (
-                      <button
-                        type="button"
-                        className="gbtn gbtn-round"
-                        aria-label="Close camera"
-                        onClick={() => {
-                          ++scanGeneration.current;
-                          capture.current?.stop();
-                        }}
-                      >
-                        <X />
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="gbtn gbtn-round"
-                        aria-label="Open camera"
-                        disabled={state.recording || state.finalizing}
-                        onClick={() => void capture.current?.preview()}
-                      >
-                        <Camera />
-                      </button>
-                    )}
-                  </span>
-                </div>
-              </Card>
-              <button
-                type="button"
-                className={`btn phone-record-button ${state.recording ? 'active' : ''}`}
-                disabled={state.requesting || state.finalizing}
-                onClick={toggleRecording}
-              >
-                {state.recording ? <Square fill="currentColor" /> : <Radio />}
-                {state.requesting
-                  ? 'Opening camera…'
-                  : state.finalizing
-                    ? 'Saving last seconds…'
-                    : state.recording
-                      ? 'Stop recording'
-                      : 'Record'}
-              </button>
-              <button
-                type="button"
-                className="btn scan-btn"
-                disabled={
-                  scanning || !!send || state.requesting || state.finalizing
-                }
-                onClick={() => void scan()}
-              >
-                <ScanLine />
-                {scanning ? 'Scanning…' : 'Scan'}
-              </button>
-              {scanNotice && (
-                <output className="phone-fine ph-scan-notice">
-                  {scanNotice}
-                </output>
-              )}
-              <div className="phone-capture-details">
-                <span>
-                  {state.recording
-                    ? state.awake
-                      ? 'Screen stays awake'
-                      : 'Keep your screen awake'
-                    : state.previewing
-                      ? 'Preview only · tap Scan to save a photo'
-                      : 'Camera is off'}
-                </span>
-              </div>
-              <p className="phone-fine">
-                Record saves continuous video and audio while this page stays
-                open. Sampled images and speech are used for live analysis.{' '}
-                {status?.analysis_ready === false
-                  ? 'Analysis is waiting for the ASUS model; saved uploads will wait.'
-                  : status?.pending
-                    ? `${status.pending} items are waiting for analysis.`
-                    : 'Ask about your recordings and connected sources.'}
-              </p>
-              {originals.some((recording) => recording.original_url) && (
-                <details className="phone-fine ph-originals">
-                  <summary>Saved full recordings</summary>
-                  {originals
-                    .filter((recording) => recording.original_url)
-                    .map((recording) => (
-                      <p key={recording.id}>
-                        <a
-                          href={recording.original_url!}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open original from {hm(recording.started_at, zone)}
-                        </a>{' '}
-                        ({(recording.bytes / 1024 / 1024).toFixed(1)} MB)
-                        {recording.end_reason !== 'stopped'
-                          ? ' · interrupted recording'
-                          : ''}
-                      </p>
-                    ))}
-                </details>
-              )}
-            </Cell>
-            <Cell label="Talk to Rewind" index={2}>
+            <Cell label="Record your day" index={0}>
               <Card className="card-dark card-ask" data-state={orb}>
                 <div className="row">
                   <span className="card-title">Just talk to me.</span>
@@ -886,22 +682,50 @@ export default function Phone() {
                     {sound ? <Volume2 /> : <VolumeX />}
                   </button>
                 </div>
-                <div className="orb-stage" aria-hidden="true">
+                <button
+                  type="button"
+                  className="orb-stage"
+                  aria-label={
+                    state.recording
+                      ? 'Stop recording with orb'
+                      : state.requesting
+                        ? 'Cancel starting recording'
+                        : 'Start recording with orb'
+                  }
+                  aria-pressed={state.recording}
+                  disabled={state.finalizing}
+                  onClick={toggleRecording}
+                >
                   <Orb state={orb} size={150} />
                   <div className="waves">
                     {[3, 1, 4, 0, 2, 5, 3].map((n, i) => (
                       <i key={i} style={{ '--n': n } as React.CSSProperties} />
                     ))}
                   </div>
-                </div>
+                </button>
+                <button
+                  type="button"
+                  className={`btn phone-record-button ${state.recording ? 'active' : ''}`}
+                  disabled={state.finalizing}
+                  onClick={toggleRecording}
+                >
+                  {state.recording ? <Square fill="currentColor" /> : <Radio />}
+                  {state.requesting
+                    ? 'Cancel opening camera'
+                    : state.finalizing
+                      ? 'Saving last seconds…'
+                      : state.recording
+                        ? 'Stop recording'
+                        : 'Record'}
+                </button>
                 <output className="ph-voice-status" aria-live="polite">
                   <Mic />
                   {voiceLabel}
                 </output>
                 <div className="ask-body">
                   <p className="hint">
-                    Ask about your day or tell me what to do on your Mac. Pause
-                    when you’re done; no extra button is needed.
+                    Tap the orb or Record to begin. Ask questions naturally
+                    while recording, then tap again to stop.
                   </p>
                 </div>
                 <div className="ph-voice-controls">
@@ -923,7 +747,7 @@ export default function Phone() {
                   <label className={`ask-input ${question ? 'has-text' : ''}`}>
                     <input
                       aria-label="Type a question or request"
-                      placeholder="Or type a question or Mac request…"
+                      placeholder="Or type a question…"
                       value={question}
                       onChange={(event) => setQuestion(event.target.value)}
                       maxLength={2000}
@@ -1058,13 +882,166 @@ export default function Phone() {
                 </article>
               ))}
             </Cell>
-          </section>
-          <section hidden={view !== 'context'} className="ph-panels">
-            <ContextPanel />
-            <PeoplePanel />
-          </section>
-          <section hidden={view !== 'computer'} className="ph-panels">
-            <ComputerPanel visible={view === 'computer'} />
+            {reminders
+              .filter((reminder) => !reminder.seen)
+              .map((reminder) => (
+                <Cell key={reminder.id} label="Up next" index={0}>
+                  <Card className="card-next">
+                    <div className="row">
+                      <strong className="big-time">
+                        {hm(reminder.starts_at, zone)}
+                      </strong>
+                      <button
+                        type="button"
+                        className="tbtn"
+                        aria-label="Dismiss reminder"
+                        onClick={() => {
+                          void api(
+                            '/context/reminders/' + reminder.id + '/seen',
+                            { method: 'POST' },
+                          )
+                            .then(() =>
+                              setReminders((rows) =>
+                                rows.filter((r) => r.id !== reminder.id),
+                              ),
+                            )
+                            .catch(() =>
+                              setError(
+                                'Could not dismiss this reminder. Try again.',
+                              ),
+                            );
+                        }}
+                      >
+                        <Check />
+                      </button>
+                    </div>
+                    <p className="next-text">{reminder.message}</p>
+                  </Card>
+                </Cell>
+              ))}
+            <Cell label="Your view" index={1}>
+              <Card
+                className={`card-media ${state.recording ? 'is-rec' : ''} ${cameraOn ? 'is-on' : ''} ${scanning ? 'is-scanning' : ''}`}
+              >
+                <div className="cam" ref={cam}>
+                  <video
+                    ref={video}
+                    muted
+                    playsInline
+                    aria-label="Live camera preview"
+                  />
+                  {!cameraOn && (
+                    <span className="ph-camera-placeholder">
+                      <Camera />
+                      <span>Your view, remembered.</span>
+                    </span>
+                  )}
+                  <span className="sweep" aria-hidden="true" />
+                </div>
+                <div className="media-foot">
+                  <span className="media-title">
+                    {state.recording
+                      ? 'Recording'
+                      : state.finalizing
+                        ? 'Saving last seconds…'
+                        : state.previewing
+                          ? 'Camera on'
+                          : 'Your view'}
+                    <small>
+                      {state.queued
+                        ? `${state.queued} waiting to upload`
+                        : state.saved
+                          ? `${state.saved} uploads complete`
+                          : 'Nothing uploaded this session'}
+                    </small>
+                  </span>
+                  <span className="media-ctl">
+                    {(state.previewing || state.requesting) &&
+                    !state.recording ? (
+                      <button
+                        type="button"
+                        className="gbtn gbtn-round"
+                        aria-label="Close camera"
+                        onClick={() => {
+                          ++scanGeneration.current;
+                          capture.current?.stop();
+                        }}
+                      >
+                        <X />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="gbtn gbtn-round"
+                        aria-label="Open camera"
+                        disabled={state.recording || state.finalizing}
+                        onClick={() => void capture.current?.preview()}
+                      >
+                        <Camera />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              </Card>
+              <button
+                type="button"
+                className="btn scan-btn"
+                disabled={
+                  scanning || !!send || state.requesting || state.finalizing
+                }
+                onClick={() => void scan()}
+              >
+                <ScanLine />
+                {scanning ? 'Scanning…' : 'Scan'}
+              </button>
+              {scanNotice && (
+                <output className="phone-fine ph-scan-notice">
+                  {scanNotice}
+                </output>
+              )}
+              <div className="phone-capture-details">
+                <span>
+                  {state.recording
+                    ? state.awake
+                      ? 'Screen stays awake'
+                      : 'Keep your screen awake'
+                    : state.previewing
+                      ? 'Preview only · tap Scan to save a photo'
+                      : 'Camera is off'}
+                </span>
+              </div>
+              <p className="phone-fine">
+                Record saves continuous video and audio while this page stays
+                open. Sampled images and speech are used for live analysis.{' '}
+                {status?.analysis_ready === false
+                  ? 'Analysis is waiting for the ASUS model; saved uploads will wait.'
+                  : status?.pending
+                    ? `${status.pending} items are waiting for analysis.`
+                    : 'Ask about your recordings and connected sources.'}
+              </p>
+              {originals.some((recording) => recording.original_url) && (
+                <details className="phone-fine ph-originals">
+                  <summary>Saved full recordings</summary>
+                  {originals
+                    .filter((recording) => recording.original_url)
+                    .map((recording) => (
+                      <p key={recording.id}>
+                        <a
+                          href={recording.original_url!}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open original from {hm(recording.started_at, zone)}
+                        </a>{' '}
+                        ({(recording.bytes / 1024 / 1024).toFixed(1)} MB)
+                        {recording.end_reason !== 'stopped'
+                          ? ' · interrupted recording'
+                          : ''}
+                      </p>
+                    ))}
+                </details>
+              )}
+            </Cell>
           </section>
           <footer className="phone-footer">
             <a href="/">

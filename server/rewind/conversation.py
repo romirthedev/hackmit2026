@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .computer import ComputerCommand
+from .history import require_current_capture
 from .models import ConversationIntent
 from .storage import retained_bytes
 from .voice import Voice
@@ -666,6 +667,7 @@ def conversation_router(conversation, admin, ingestion_lock):
                 raise ValueError()
         except (KeyError, ValueError, OverflowError):
             raise HTTPException(422, "Speech identity and capture time are required.") from None
+        require_current_capture(conversation.db, captured)
         data = bytearray()
         async for piece in req.stream():
             data.extend(piece)

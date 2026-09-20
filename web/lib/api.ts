@@ -91,6 +91,7 @@ export type Device = {
 };
 export type Status = {
   browser_open_access?: boolean;
+  history_cleared_before?: number;
   received: number;
   analyzed: number;
   pending: number;

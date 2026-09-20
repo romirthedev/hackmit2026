@@ -25,10 +25,10 @@ reads the reviewed answer. The restored dashboard recall card has a microphone
 button, Test voice, and explicit Retry voice controls. Computer requests and
 contextual follow-ups retain the existing Notch conversation routing.
 
-**Files the fixed hackathon mail.** Scan saves the camera photo and immediately
-files the known demo postcard and doctor bill. The postcard flies into Notes;
-the bill flies to September 30 on the new calendar. This configured demo uses
-known print content (`source=template`), not general document recognition.
+**Recognizes mail before filing it.** Scan saves the camera photo in Moments.
+ASUS checks for a personal letter/postcard or medical bill; only detected mail
+uses the matching fixed demo details (`source=model+template`). The postcard
+flies into Notes and the bill into Calendar. Ordinary scans stay in Moments.
 
 **Two views of one home.** "My day" is for Grandma: big cards, a flippable
 postcard, a calendar you can tap through. "Caretaker" is for family: alerts,
@@ -92,16 +92,16 @@ browser's built-in voice reads the answers. Everything else is the same.
 5. Tap the postcard on the home screen to turn it over. Tap the 30th on the
    calendar to open the bill.
 
-`REWIND_SCAN_DEMO_TEMPLATE=true` is the selected hackathon mode. It files both
-known `/print` documents immediately and replays the animation on another scan.
-Set it to false only to use the optional model-reading path.
+`REWIND_SCAN_DEMO_TEMPLATE=true` uses the matching `/print` details only after
+recognition. A letter-only scan never adds a bill, and a bill-only scan never
+adds a letter. Set it to false to read document details from the image.
 
 ## How it fits together
 
 ```
 phone Record → durable conversation audio → Deepgram → memory / Notch routing
 memory → ASUS inference → Codex evidence review → Deepgram audio → phone
-phone Scan → saved JPEG + fixed demo mail → Notes and Calendar animations
+phone Scan → saved JPEG in Moments → recognize mail → matching Notes / Calendar animation
 ```
 
 Recall stays evidence-only: the model answers from retrieved frames,

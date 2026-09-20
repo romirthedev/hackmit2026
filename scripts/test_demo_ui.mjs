@@ -1,15 +1,16 @@
 // Isolated, code-free hackathon UI: true camera uploads, repeated deliveries, precise layout checks.
 import assert from 'node:assert/strict';
+import {scanFixtures,installScanCamera} from './scan_fixtures.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 const {chromium}=createRequire(import.meta.url)('playwright');
 const origin=process.env.REWIND_UI_TEST_URL;
-assert(origin && new URL(origin).hostname==='127.0.0.1' && process.env.REWIND_UI_TEST_TOKEN?.startsWith('ui-test-'));
+assert(origin && new URL(origin).hostname==='127.0.0.1' && process.env.REWIND_UI_TEST_TOKEN?.startsWith('live-test-'));
 const out=path.resolve('data/ui-integration/demo-'+Date.now());await fs.mkdir(out,{recursive:true});
 const report={cases:[],errors:[]};
 const api=async(url)=>{const r=await fetch(origin+'/api'+url);assert(r.ok);return r.json();};
-const initial=await api('/status');assert.equal(initial.browser_open_access,true);assert.equal(initial.received,0);assert.equal(initial.provider,'disabled');
+const initial=await api('/status');assert.equal(initial.browser_open_access,true);assert.equal(initial.received,0);assert.equal(initial.analysis_ready,true);
 const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
 const options={viewport:{width:1440,height:1000},permissions:['camera','microphone']};
 const desk=await browser.newContext(options),mobile=await browser.newContext({...options,viewport:{width:390,height:844}});
@@ -38,10 +39,13 @@ try{
  await dashboard.locator('.card-ask').screenshot({path:path.join(out,'ask-fixed.png')});
  await dashboard.getByRole('tab',{name:'Caretaker',exact:true}).click();await settled(dashboard);await fits(dashboard);
  await dashboard.getByRole('tab',{name:'Rose',exact:true}).click();await settled(dashboard);
+ const fixtures=await scanFixtures(desk,origin,out);await installScanCamera(phone,fixtures.both);
  await phone.goto(origin+'/phone/');await phone.getByRole('button',{name:'Record',exact:true}).waitFor();await settled(phone);
  assert.equal(await phone.locator('#pairing-code').count(),0);await fits(phone);
  await phone.setViewportSize({width:320,height:740});await fits(phone);await phone.setViewportSize({width:390,height:844});
  report.cases.push('Fresh desktop and separate phone browser open without sign-in; Ask controls fit at six widths and 200% zoom');
+ assert.equal(await phone.getByText('Your connections',{exact:true}).count(),0);assert.equal(await phone.getByText('Your computer',{exact:true}).count(),0);
+ const recordBounds=await phone.getByRole('button',{name:'Record',exact:true}).boundingBox();assert(recordBounds.y+recordBounds.height<844,'Record is visible without scrolling');
  // Each repeat must animate newly saved document IDs, then retain exactly two fixed documents.
  let previous=[];
  for(let run=0;run<2;run++){
@@ -62,7 +66,7 @@ try{
   assert.equal(await dashboard.locator('[data-day="2026-09-30"].has-bill').count(),1);
   assert.equal(await dashboard.locator('[data-card="calendar"] .cal-event').count(),1);
   assert(await dashboard.locator('[data-card="notes"] .postcard').evaluate(el=>getComputedStyle(el).opacity==='1'));
-  const scans=await api('/scans');assert.equal(scans.length,2);assert(scans.every(s=>s.source==='template' && !previous.includes(s.id)));previous=scans.map(s=>s.id);
+  const scans=await api('/scans');assert.equal(scans.length,2);assert(scans.every(s=>s.source==='model+template' && !previous.includes(s.id)));previous=scans.map(s=>s.id);
   await phone.locator('.letter-layer').waitFor({state:'detached',timeout:10000});
  }
  await dashboard.screenshot({path:path.join(out,'mail-filed.png'),fullPage:true});

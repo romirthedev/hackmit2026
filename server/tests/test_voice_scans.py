@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from PIL import Image
 from rewind.app import create_app
 from rewind.config import Settings
-from rewind.scans import DEMO_DOCUMENTS, DocumentScan, ScannedDocument, merge_with_template
+from rewind.scans import DEMO_DOCUMENTS, DocumentScan, ScanDetection, merge_with_template
 from rewind.voice import Voice, reviewed_spoken_text, spoken_text
 
 ADMIN = "a" * 32
@@ -57,40 +57,27 @@ def test_spoken_text_preview_is_short_but_reviewed_speech_keeps_qualifications()
     assert spoken_text("[E1] [E2]") == "I couldn't find that in your day."
 
 
-def test_template_is_ground_truth_and_keeps_order():
-    found = [
-        ScannedDocument(kind="bill", amount="$45", due_date="Sept 30", recipient="").model_dump(),
-        ScannedDocument(kind="letter", sender="Emma", message="Save me pie!").model_dump(),
-        ScannedDocument(kind="other", title="Grocery receipt", message="$12.40 at Shaw's").model_dump(),
-    ]
+@pytest.mark.parametrize("found,kinds", [
+    ([], []),
+    ([{"kind": "other", "title": "Shopping receipt"}], []),
+    ([{"kind": "letter"}], ["postcard"]),
+    ([{"kind": "bill"}], ["bill"]),
+    ([{"kind": "letter"}, {"kind": "bill"}], ["postcard", "bill"]),
+])
+def test_templates_require_the_corresponding_visible_document(found, kinds):
     merged = merge_with_template(found)
-    assert [d["kind"] for d in merged] == ["postcard", "bill", "other"]
-    postcard, bill, extra = merged
-    # The printed text wins over the model's paraphrase.
-    assert postcard["message"] == DEMO_DOCUMENTS[0]["message"]
-    assert postcard["date"] == DEMO_DOCUMENTS[0]["date"]
-    assert bill["amount"] == "$45.00" and bill["due_date"] == "2026-09-30"
-    assert {postcard["source"], bill["source"]} == {"model+template"}
-    assert extra["source"] == "model" and extra["title"] == "Grocery receipt"
-
-
-def test_model_fills_blank_template_fields_only_with_iso_dates():
-    template_blank = {**DEMO_DOCUMENTS[0], "date": ""}
-    found = [ScannedDocument(kind="postcard", date="September 14th").model_dump()]
-    from unittest.mock import patch
-
-    with patch("rewind.scans.DEMO_DOCUMENTS", [template_blank, DEMO_DOCUMENTS[1]]):
-        merged = merge_with_template(found)
-    assert merged[0]["date"] == ""
-    with patch("rewind.scans.DEMO_DOCUMENTS", [template_blank, DEMO_DOCUMENTS[1]]):
-        merged = merge_with_template([ScannedDocument(kind="postcard", date="2026-09-14").model_dump()])
-    assert merged[0]["date"] == "2026-09-14"
-
-
-def test_template_alone_when_model_found_nothing():
-    merged = merge_with_template([])
-    assert [d["source"] for d in merged] == ["template", "template"]
+    assert [d["kind"] for d in merged] == kinds
+    for document in merged:
+        assert document["source"] == "model+template"
+        template = next(d for d in DEMO_DOCUMENTS if d["kind"] == document["kind"])
+        assert document["message"] == template["message"]
     assert DocumentScan(documents=[]).documents == []
+
+
+def mock_detection(app, letter=True, bill=True):
+    from unittest.mock import AsyncMock
+    app.state.scans.s.provider = "ollama"
+    app.state.scans.p.structured = AsyncMock(return_value=ScanDetection(letter=letter, medical_bill=bill))
 
 
 def settings(tmp_path, **extra):
@@ -124,6 +111,7 @@ def wav(seconds=0.5):
 
 async def test_scan_upload_files_documents_and_calendar_entries(tmp_path):
     app = create_app(settings(tmp_path, scan_demo_template=True))
+    mock_detection(app)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -150,7 +138,7 @@ async def test_scan_upload_files_documents_and_calendar_entries(tmp_path):
             assert bill["media_id"] == media_id
             assert bill["image_url"] == f"/api/media/{media_id}"
             assert bill["due_date"] == "2026-09-30" and bill["due_at"] is not None
-            assert bill["source"] == "template"
+            assert bill["source"] == "model+template"
             # The scanned photo is also an ordinary saved moment.
             recordings = (await client.get("/api/recordings", headers=headers)).json()
             assert recordings[0]["intent"] == "scan"
@@ -416,32 +404,59 @@ async def test_long_reviewed_speech_is_not_silently_truncated(tmp_path):
         await voice.close()
 
 
-async def test_demo_scan_never_waits_for_vision_and_reports_completion(tmp_path):
+@pytest.mark.parametrize("letter,bill,destinations,kinds", [
+    (False, False, ["moments"], []),
+    (True, False, ["notes"], ["postcard"]),
+    (False, True, ["calendar"], ["bill"]),
+    (True, True, ["notes", "calendar"], ["bill", "postcard"]),
+])
+async def test_scan_routes_only_the_mail_actually_recognized(tmp_path, letter, bill, destinations, kinds):
     app = create_app(settings(tmp_path, scan_demo_template=True))
-    async def forbidden(*args, **kwargs):
-        raise AssertionError('Fixed demo mail must not invoke the vision model')
-    app.state.scans.read = forbidden
+    mock_detection(app, letter, bill)
     async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
-            headers = {'Authorization': 'Bearer ' + ADMIN}
-            result = await client.post('/api/ingest/frame', content=jpeg(), headers={
-                **headers, 'Content-Type':'image/jpeg', 'X-Boot-ID':'demo-test',
-                'X-Sequence':'1', 'X-Captured-At':str(time.time()), 'X-Intent':'scan',
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            headers = {"Authorization": "Bearer " + ADMIN}
+            result = await client.post("/api/ingest/frame", content=jpeg(), headers={
+                **headers, "Content-Type":"image/jpeg", "X-Boot-ID":"detected-test",
+                "X-Sequence":"1", "X-Captured-At":str(time.time()), "X-Intent":"scan",
             })
             assert result.status_code == 201
             await asyncio.gather(*app.state.scans.tasks)
-            jobs = (await client.get('/api/scans/jobs', headers=headers)).json()
-            assert jobs[0]['status'] == 'done'
-            assert jobs[0]['boot'] == 'demo-test'
-            scans = (await client.get('/api/scans', headers=headers)).json()
-            assert len(scans) == 2
-            assert all(d['source'] == 'template' for d in scans)
-            assert scans[0]['due_date'] == '2026-09-30'
-            assert scans[0]['amount'] == '$45.00'
-            source = await client.get('/api/context/documents/' + scans[0]['id'], headers=headers)
-            assert source.status_code == 200
-            assert source.json()['read_by'] == 'template'
-            assert '$45.00' in source.json()['text']
+            model = app.state.scans.p.structured
+            model.assert_awaited_once()
+            assert model.call_args.args[2] is ScanDetection
+            assert model.call_args.args[3].read_bytes() == jpeg()
+            jobs = (await client.get("/api/scans/jobs", headers=headers)).json()
+            assert jobs[0]["status"] == "done"
+            assert jobs[0]["destinations"] == destinations
+            documents = (await client.get("/api/scans", headers=headers)).json()
+            assert [d["kind"] for d in documents] == kinds
+            assert all(d["source"] == "model+template" for d in documents)
+            assert len((await client.get("/api/recordings", headers=headers)).json()) == 1
+            for document in documents:
+                source = await client.get("/api/context/documents/" + document["id"], headers=headers)
+                assert source.status_code == 200
+                assert source.json()["read_by"] == "model+template"
+
+
+async def test_failed_detection_never_falls_back_to_demo_mail(tmp_path):
+    from unittest.mock import AsyncMock
+    app = create_app(settings(tmp_path, scan_demo_template=True))
+    mock_detection(app)
+    app.state.scans.p.structured = AsyncMock(side_effect=TimeoutError())
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            headers = {"Authorization": "Bearer " + ADMIN}
+            result = await client.post("/api/ingest/frame", content=jpeg(), headers={
+                **headers, "X-Boot-ID":"timeout", "X-Sequence":"0", "X-Intent":"scan",
+            })
+            assert result.status_code == 201
+            await asyncio.gather(*app.state.scans.tasks)
+            assert (await client.get("/api/scans", headers=headers)).json() == []
+            job = (await client.get("/api/scans/jobs", headers=headers)).json()[0]
+            assert job["status"] == "failed" and job["destinations"] == ["moments"]
+            assert "Saved to Moments" in job["error"]
+            assert (await client.get("/api/media/" + result.json()["id"], headers=headers)).content == jpeg()
 
 
 async def test_non_demo_scan_failure_is_visible_without_inventing_documents(tmp_path):
@@ -457,4 +472,4 @@ async def test_non_demo_scan_failure_is_visible_without_inventing_documents(tmp_
             await asyncio.gather(*app.state.scans.tasks)
             assert (await client.get('/api/scans', headers=headers)).json() == []
             job = (await client.get('/api/scans/jobs', headers=headers)).json()[0]
-            assert job['status'] == 'failed' and 'original photo is saved' in job['error']
+            assert job['status'] == 'failed' and 'Saved to Moments' in job['error']

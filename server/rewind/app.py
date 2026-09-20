@@ -27,6 +27,7 @@ from .config import Settings
 from .context import ContextScopes, NotchContext
 from .conversation import Conversation, conversation_router
 from .db import Database, event_public
+from .history import require_current_capture
 from .memory import Memory
 from .models import AskRequest, RuleRequest, VideoProvenance
 from .pairing import BrowserPairing
@@ -310,6 +311,7 @@ def create_app(settings=None, provider=None):
         totals["stored_bytes"] = retained_bytes(db)
         totals["provider"] = s.provider
         totals["browser_open_access"] = s.browser_open_access
+        totals["history_cleared_before"] = db.setting("history_cleared_before", 0)
         totals["processing_host"] = "ASUS via Tailscale" if s.processing_url else "server"
         totals["analysis_ready"] = s.provider != "disabled" and (await p.ready() if s.processing_url else True)
         totals["verification_enabled"] = s.codex_verify
@@ -452,6 +454,7 @@ def create_app(settings=None, provider=None):
         except (KeyError, ValueError, OverflowError):
             raise HTTPException(400, "Invalid sequence or capture timestamp (Unix seconds)")
         captured = timestamp or time.time()
+        require_current_capture(db, captured)
         clock_quality = "device" if timestamp else "received_only"
         provenance = "{}"
         if "x-video-provenance" in req.headers:

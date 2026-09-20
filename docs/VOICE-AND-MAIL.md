@@ -17,9 +17,10 @@ record is [UI voice restoration](evaluations/UI-VOICE-RESTORE-2026-09-20.md).
    Clear personal questions also work without the wake word. Contextual
    follow-ups and computer requests retain the existing conversation router.
 3. Scan uses the phone camera and saves the image. With
-   `REWIND_SCAN_DEMO_TEMPLATE=true`, it immediately files the two fixed print
-   documents. The postcard flies to Notes and the bill to September 30 on the
-   new calendar, without waiting for a vision service. Re-scanning replays it.
+   `REWIND_SCAN_DEMO_TEMPLATE=true`, ASUS first checks which mail types are visible.
+   A recognized letter uses the postcard template and flies to Notes. A recognized
+   medical bill uses the bill template and flies to September 30 on Calendar.
+   Ordinary photos stay in Moments. Re-scanning recognized mail replays its arrival.
 4. The original dashboard recall card also accepts a spoken question through
    its original dark orb or microphone button. Test voice and Retry voice remain available.
 
@@ -34,15 +35,25 @@ an explicit retry. With no key, local Whisper and browser speech remain availabl
 Deepgram receives the audio submitted for transcription and response text for
 speech synthesis. Wake-word checking happens after transcription.
 
-## Fixed scan behavior
+## Recognize first, then file
 
-The user selected fixed mail for this hackathon demo. Template rows retain
-`source=template`; no vision recognition is claimed. Originals are still saved.
-The configured demo always files the known Emma postcard and $45 medical bill.
-The calendar is within this workspace; this does not create an external calendar
-event or write to an external notes account. Turning template mode off selects
-the existing model-reading path, which reports failures instead of inserting
-sample mail. General scanner accuracy is outside this demo's acceptance scope.
+Hackathon mode recognizes a personal letter/postcard or a medical bill before
+using its matching fixed details (`source=model+template`). It never adds an
+unseen second document. Ordinary objects, scenes, blank pages and shopping
+receipts stay in Moments. Recognition failure preserves the original in Moments
+and shows a retry message; it never falls back to sample mail.
+The calendar and notes belong to this workspace, not an external account.
+General document reading is available by disabling template mode.
+
+## Mobile and cleared history
+
+Your day is the only mobile view. The first card exposes a tappable recording
+orb and a Record/Stop button; camera scanning follows it. The Computer and
+Connections panels remain in the desktop workspace. Existing conversation
+routing remains available, but mobile no longer shows those extra tabs.
+A history-reset cutoff rejects stale frame, speech and original-video uploads
+with HTTP 410. The phone removes these deliberately cleared items from its
+local retry queue instead of restoring deleted history.
 
 ## Run checks
 
@@ -58,6 +69,8 @@ Use `--asus --env-file data/phone-demo.env` to require the live ASUS model throu
 Tailscale, without a local inference fallback.
 
 For the direct-access layout and repeated animated deliveries, run
-`scripts/run_ui_integration.py --open-workspace --script scripts/test_demo_ui.mjs`.
+`scripts/run_voice_mail_live.py --asus --env-file data/phone-demo.env --script scripts/test_demo_ui.mjs`.
 It checks six screen widths, 200% zoom, independent browser contexts, two scans,
 postcard flip/original viewing, persistence, and the reusable phone QR.
+Use `--script scripts/test_scan_routing_live.mjs` with the same live runner for
+separate ordinary-scene, letter, bill, combined-mail, receipt, and blank-page scans.

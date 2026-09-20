@@ -1,6 +1,7 @@
 // Explicit live E2E: real Deepgram STT/TTS, real local model and Codex evidence review.
 // Only run against the isolated live-test API. Camera is synthetic; mail is the authorized fixed demo.
 import assert from 'node:assert/strict';
+import {scanFixtures,installScanCamera} from './scan_fixtures.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createRequire} from 'node:module';
@@ -62,7 +63,8 @@ try{
  await dashboard.getByRole('heading',{name:'Rose’s day',exact:true}).waitFor();
  await dashboard.screenshot({path:path.join(out,'restored-caretaker.png'),fullPage:true});
  await dashboard.getByRole('tab',{name:'Rose',exact:true}).click();
- phone=await context.newPage();await phone.setViewportSize({width:390,height:844});
+ const fixtures=await scanFixtures(context,origin,out);
+ phone=await context.newPage();await installScanCamera(phone,fixtures.both);await phone.setViewportSize({width:390,height:844});
  phone.on('pageerror',e=>report.errors.push(e.message));
  await phone.goto(origin+'/phone');await phone.getByRole('button',{name:'Record',exact:true}).waitFor();
  await until(async()=>await phone.locator('.cell').first().evaluate(el=>Number(getComputedStyle(el).opacity)===1),'phone widgets visible',5000);
@@ -80,7 +82,7 @@ try{
  await until(async()=>await dashboard.locator('[data-card="calendar"] .is-landing').count()>0,'bill flies to calendar',20000);
  await dashboard.screenshot({path:path.join(out,'bill-arriving.png')});
  await until(async()=>await dashboard.locator('.letter-layer').count()===0,'both animations complete',20000);
- const scans=await api('/scans');assert.equal(scans.length,2);assert(scans.every(d=>d.source==='template'));
+ const scans=await api('/scans');assert.equal(scans.length,2);assert(scans.every(d=>d.source==='model+template'));
  assert.equal(scans.find(d=>d.kind==='bill').due_date,'2026-09-30');
  assert.match(await dashboard.locator('[data-card="notes"]').innerText(),/Emma/);
  assert.equal(await dashboard.locator('[data-day="2026-09-30"].has-bill').count(),1);
@@ -117,7 +119,7 @@ try{
  await dashboard.screenshot({path:path.join(out,'postcard-answer.png'),fullPage:true});
  // Hands-free path uses the durable conversation endpoint and the same reviewed answer UI.
  await phone.bringToFront();
- await phone.getByRole('button',{name:'Record',exact:true}).click();
+ await phone.getByRole('button',{name:'Start recording with orb',exact:true}).click();
  await until(async()=> (await api('/conversation/state')).turns.some(t=>t.transcript),'phone microphone transcribed');
  await phone.getByRole('button',{name:'Stop recording',exact:true}).click();
  await until(async()=> (await api('/conversation/state')).turns.some(t=>t.status==='completed'&&t.answer_id),'phone reviewed conversation completed');

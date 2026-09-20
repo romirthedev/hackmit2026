@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--env-file", type=Path, default=root / ".env")
     parser.add_argument("--node", default=shutil.which("node"))
     parser.add_argument("--model", default="qwen2.5vl:3b")
+    parser.add_argument("--script", type=Path, default=root / "scripts/test_voice_mail_live.mjs")
     parser.add_argument(
         "--asus", action="store_true", help="Use the configured ASUS processing service; fail if unavailable"
     )
@@ -149,7 +150,7 @@ def main():
             )
             print("Testing real voice against an isolated workspace; artifacts:", site, flush=True)
             return subprocess.run(
-                [args.node, str(root / "scripts/test_voice_mail_live.mjs")], cwd=root, env=env
+                [args.node, str(args.script.resolve())], cwd=root, env=env
             ).returncode
         finally:
             server.terminate()

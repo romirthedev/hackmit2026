@@ -211,7 +211,7 @@ try {
   });
   await test("record/stop retains real original video and automatic voice upload", async () => {
     const page = await newPage("capture"); await pair(page);
-    await page.getByRole("button", { name: "Record", exact: true }).click();
+    await page.getByRole("button", { name: "Start recording with orb", exact: true }).click();
     await page.getByRole("button", { name: "Stop recording", exact: true }).waitFor();
     await page.waitForFunction(() => window.__uiQA.audio.length > 0);
     await page.waitForTimeout(1200); await page.evaluate(() => window.__uiQA.tone());
@@ -227,9 +227,8 @@ try {
     const media = await admin("/recordings?limit=60");
     source = media.find((r) => r.kind === "frame"); assert(source, "Lightweight frames accompany continuous original");
     await noOverflow(page); await page.screenshot({ path: path.join(artifacts, "recording-stopped.png"), fullPage: true });
-    for (const [name, filename] of [["Your connections", "phone-connections"], ["Your computer", "phone-computer"]]) {
-      await page.getByRole("button", { name, exact: true }).click();
-      await noOverflow(page); await page.screenshot({ path: path.join(artifacts, `${filename}.png`), fullPage: true });
+    for (const name of ["Your connections", "Your computer"]) {
+      assert.equal(await page.getByRole("button", {name, exact:true}).count(),0);
     }
     await page.close();
     return { bytes: recording.bytes, chunks: recording.received_chunks, speechUpload: true };
@@ -251,8 +250,22 @@ try {
     if (await close.count()) await close.click();
     await page.close();
   });
-  await test("late camera permission after hiding or leaving record tab cannot begin capture", async () => {
-    for (const cancellation of ["hidden", "connections-tab"]) {
+  await test("cleared offline uploads are discarded and cannot return after reload", async () => {
+    const page = await newPage("cleared-queue"); await pair(page);
+    await page.route("**/api/ingest/frame", r => respond(r, 503, {detail:"Test offline"}));
+    await page.getByRole("button", {name:"Scan",exact:true}).click();
+    await until(async()=> (await queue(page)).length>0, "Offline scan is durable");
+    await page.getByRole("button", {name:"Close camera",exact:true}).click();
+    await page.unroute("**/api/ingest/frame");
+    await page.route("**/api/ingest/frame", r => respond(r, 410, {detail:"This recording was cleared from history."}));
+    await until(async()=> (await queue(page)).length===0, "Cleared items drain without counting as saved", 25000);
+    await page.reload();
+    await page.getByRole("button", {name:"Record",exact:true}).waitFor();
+    assert.equal((await queue(page)).length,0);
+    await page.close();
+  });
+  await test("late camera permission after hiding or cancelling cannot begin capture", async () => {
+    for (const cancellation of ["hidden", "cancel"]) {
       const label = `late-permission-${cancellation}`;
       const page = await newPage(label); await pair(page);
       await page.evaluate(() => { window.__uiQA.delayMedia = true; });
@@ -264,7 +277,7 @@ try {
           document.dispatchEvent(new Event("visibilitychange"));
         });
       } else {
-        await page.getByRole("button", { name: "Your connections", exact: true }).click();
+        await page.getByRole("button", { name: "Cancel opening camera", exact: true }).click();
       }
       await page.evaluate(() => window.__uiQA.releaseMedia());
       await page.waitForFunction(() => window.__uiQA.streams.length > 0 && window.__uiQA.streams.every((s) => s.getTracks().every((t) => t.readyState === "ended")));
@@ -381,7 +394,7 @@ try {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
   report.finished_at = new Date().toISOString();
-  report.unexpected_console_errors = report.console_errors.filter((item) => !/^Failed to load resource: the server responded with a status of (401|404|429|503)\b/.test(item.text));
+  report.unexpected_console_errors = report.console_errors.filter((item) => !/^Failed to load resource: the server responded with a status of (401|404|429|503)\b/.test(item.text) && !(item.label === "cleared-queue" && /^Failed to load resource: the server responded with a status of 410\b/.test(item.text)));
   report.passed = report.cases.every((item) => item.passed) && report.javascript_errors.length === 0 && report.unexpected_console_errors.length === 0;
   await fs.writeFile(path.join(artifacts, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ passed: report.passed, cases: report.cases.length, artifacts, javascript_errors: report.javascript_errors }));

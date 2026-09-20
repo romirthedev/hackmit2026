@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from .history import require_current_capture
 from .recording_integrity import fingerprint, fragments_status, verified_fragment
 from .storage import retained_bytes
 
@@ -134,6 +135,7 @@ def recording_router(db, settings, admin, ingestion_lock=None):
                 raise ValueError
         except (KeyError, ValueError):
             raise HTTPException(422, "Recording timestamps are required") from None
+        require_current_capture(db, started)
         data = bytearray()
         async for piece in req.stream():
             data.extend(piece)
@@ -197,6 +199,7 @@ def recording_router(db, settings, admin, ingestion_lock=None):
 
     @router.post("/{recording_id}/finish")
     async def finish(recording_id: UUID, body: RecordingEnd):
+        require_current_capture(db, body.started_at)
         identifier, mime = str(recording_id), mime_type(body.mime)
         if body.ended_at < body.started_at:
             raise HTTPException(422, "Recording ends before it starts")

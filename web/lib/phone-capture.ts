@@ -906,6 +906,12 @@ export class PhoneCapture {
               body: item.blob,
               signal: AbortSignal.timeout(20000),
             });
+            if (response.status === 410) {
+              // A deliberate history reset also clears stale offline uploads.
+              await write(item.id, recording ? item.boot : undefined);
+              this.update({ queued: Math.max(0, this.state.queued - 1) });
+              return;
+            }
             if (response.status === 401)
               window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
             if (!response.ok)

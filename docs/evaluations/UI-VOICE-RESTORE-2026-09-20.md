@@ -1,5 +1,9 @@
 # Restore the working UI and add voice and demo mail
 
+This records the initial restoration. The later mobile/history and conditional
+scan corrections are documented in [Mobile capture and scan validation](MOBILE-CAPTURE-SCAN-2026-09-20.md).
+Those changes supersede the unconditional template-scanning behavior below.
+
 The dashboard is restored directly from **RaghavOjha's `e21b9bf`** on
 `origin/ui-mobile` (the `4448454` card grid plus phone/letter hand-off). This is
 before the integration merge rewrote its widgets, not the journal or that merge's

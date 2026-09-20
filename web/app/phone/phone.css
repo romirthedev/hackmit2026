@@ -826,3 +826,16 @@
   font-size: 12px;
   line-height: 1.6;
 }
+
+.rw.ph .card-ask .phone-record-button {
+  margin: 4px 0 18px;
+  background: #f0f4fb;
+  color: #182333;
+}
+.rw.ph .card-ask .phone-record-button.active {
+  background: #fbe7e4;
+  color: #933b36;
+}
+.rw.ph .card-ask .orb-stage[aria-pressed="true"] {
+  filter: drop-shadow(0 0 12px #7ba9dc35);
+}
