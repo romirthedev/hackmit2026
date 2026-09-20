@@ -717,5 +717,12 @@ def create_app(settings=None, provider=None):
         async def print_page():
             return FileResponse(public / "print.html", media_type="text/html")
 
+        @app.get("/print/{piece}", include_in_schema=False)
+        @app.get("/print/{piece}/", include_in_schema=False)
+        async def print_piece(piece: str):
+            if piece not in ("postcard", "bill"):
+                raise HTTPException(404, "Not found")
+            return FileResponse(public / "print" / f"{piece}.html", media_type="text/html")
+
         app.mount("/", StaticFiles(directory=public, html=True), name="dashboard")
     return app
