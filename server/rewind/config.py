@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     usage_input_per_million_usd: float = Field(0.40, ge=0)
     usage_cached_input_per_million_usd: float = Field(0.10, ge=0)
     usage_output_per_million_usd: float = Field(1.60, ge=0)
+    # Spoken questions and answers (Deepgram). Empty key: whisper + browser voice.
+    deepgram_api_key: str = ""
+    deepgram_tts_model: str = "aura-2-thalia-en"
+    deepgram_stt_model: str = "nova-3"
+    # Scanned mail: wait this long for the vision model, then fall back to the printed demo template.
+    scan_model_deadline_s: float = Field(8, gt=0, le=120)
+    scan_demo_template: bool = True
     codex_verify: bool = False
     codex_binary: str = "/Applications/ChatGPT.app/Contents/Resources/codex"
     codex_verify_timeout: float = Field(120, ge=10, le=600)

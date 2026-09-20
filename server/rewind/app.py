@@ -33,10 +33,12 @@ from .pairing import BrowserPairing
 from .people import PeopleMemory, people_router
 from .providers import Provider
 from .recordings import recording_bytes, recording_router
+from .scans import Scans, scans_router
 from .storage import retained_bytes
 from .usage import UsageLedger
 from .verification import Verifier
 from .visual import VisualIndex
+from .voice import Voice, voice_router
 from .worker import Worker
 
 
@@ -76,13 +78,21 @@ def create_app(settings=None, provider=None):
     visual = VisualIndex(db, s, remote=p)
     context = NotchContext(db, s)
     verifier = Verifier(db, s) if s.codex_verify else None
+    scans = Scans(db, p, s)
     memory = Memory(
-        db, p, s, visual=visual if s.visual_embeddings else None, context=context, verifier=verifier
+        db,
+        p,
+        s,
+        visual=visual if s.visual_embeddings else None,
+        context=context,
+        verifier=verifier,
+        scans=scans,
     )
     worker = Worker(db, p, memory, s)
     computer = Computer(db, s)
     conversation = Conversation(db, p, memory, computer, s)
     people = PeopleMemory(db, s)
+    voice = Voice(s, p, memory)
     ingestion_lock = asyncio.Lock()
     pairing = BrowserPairing(db, s.admin_token)
 
@@ -172,13 +182,18 @@ def create_app(settings=None, provider=None):
         tasks.append(asyncio.create_task(computer.monitor()))
         tasks.append(asyncio.create_task(people.run()))
         tasks.append(asyncio.create_task(conversation.run()))
+        tasks.append(asyncio.create_task(voice.warm()))
         try:
             yield
         finally:
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            for t in list(scans.tasks):
+                t.cancel()
+            await asyncio.gather(*scans.tasks, return_exceptions=True)
             await p.close()
+            await voice.close()
             await computer.http.aclose()
 
     app = FastAPI(
@@ -198,7 +213,10 @@ def create_app(settings=None, provider=None):
     app.state.people = people
     app.state.usage = usage
     app.state.conversation = conversation
+    app.state.voice, app.state.scans = voice, scans
     app.include_router(conversation_router(conversation, admin, ingestion_lock))
+    app.include_router(voice_router(voice, admin, s.max_upload_bytes))
+    app.include_router(scans_router(scans, admin))
     app.include_router(recording_router(db, s, admin, ingestion_lock))
     app.include_router(people_router(people, admin))
 
@@ -434,7 +452,11 @@ def create_app(settings=None, provider=None):
             except ValueError:
                 raise HTTPException(400, "Invalid video provenance or missing capture timestamp")
         intent = req.headers.get("x-intent", "memory")
-        if intent not in ("memory", "question") or (intent == "question" and kind != "audio"):
+        if (
+            intent not in ("memory", "question", "scan")
+            or (intent == "question" and kind != "audio")
+            or (intent == "scan" and kind != "frame")
+        ):
             raise HTTPException(400, "Invalid capture intent")
         data = bytearray()
         async for chunk in req.stream():
@@ -534,6 +556,8 @@ def create_app(settings=None, provider=None):
                 path.unlink(missing_ok=True)
                 tmp.unlink(missing_ok=True)
                 raise
+        if intent == "scan":
+            scans.schedule(event_id, path)
         return {"id": event_id, "duplicate": False, "status": "queued"}
 
     @app.get("/api/events", dependencies=[Depends(admin)])
@@ -687,6 +711,11 @@ def create_app(settings=None, provider=None):
         @app.get("/workspace/", include_in_schema=False)
         async def workspace_page():
             return FileResponse(public / "workspace.html", media_type="text/html")
+
+        @app.get("/print", include_in_schema=False)
+        @app.get("/print/", include_in_schema=False)
+        async def print_page():
+            return FileResponse(public / "print.html", media_type="text/html")
 
         app.mount("/", StaticFiles(directory=public, html=True), name="dashboard")
     return app

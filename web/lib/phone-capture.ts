@@ -32,8 +32,14 @@ type Chunk = {
   kind: 'frame' | 'audio' | 'video' | 'recording_end' | 'conversation_audio';
   at: number;
   blob: Blob;
-  intent: 'memory' | 'question';
+  intent: 'memory' | 'question' | 'scan';
   recordingStartedAt?: number;
+};
+export type CaptureOptions = {
+  // Receives each spoken utterance while recording. When set, speech is
+  // handled by the caller (the wake-word voice flow) instead of the
+  // server-side conversation queue.
+  onUtterance?: (blob: Blob, at: number) => void;
 };
 type EndReason =
   | 'stopped'
@@ -195,6 +201,7 @@ export class PhoneCapture {
   constructor(
     private video: HTMLVideoElement,
     private changed: (state: CaptureState) => void,
+    private options: CaptureOptions = {},
   ) {
     this.uploadTimer = setInterval(() => void this.upload(), 3000);
     document.addEventListener('visibilitychange', this.visibility);
@@ -262,10 +269,12 @@ export class PhoneCapture {
       try {
         this.voice = new VoiceActivityCapture(
           (blob, at) =>
-            this.enqueue('conversation_audio', blob, at, 'question', {
-              boot: this.boot,
-              seq: this.seq.audio++,
-            }),
+            this.options.onUtterance
+              ? this.options.onUtterance(blob, at)
+              : this.enqueue('conversation_audio', blob, at, 'question', {
+                  boot: this.boot,
+                  seq: this.seq.audio++,
+                }),
           (voice) => {
             this.update({ voice });
             if (
@@ -535,7 +544,7 @@ export class PhoneCapture {
         pageHidden()
       )
         return null;
-      const saved = await this.enqueue('frame', blob, at, 'memory', identity);
+      const saved = await this.enqueue('frame', blob, at, 'scan', identity);
       if (!saved || this.disposed || generation !== this.mediaGeneration)
         return null;
       return {
@@ -689,6 +698,11 @@ export class PhoneCapture {
       });
       throw error;
     }
+  }
+  // Pause hands-free listening while a spoken answer plays, so the answer is
+  // not heard as a new question.
+  suppressListening(value: boolean) {
+    this.voice?.suppress(value);
   }
   toggleQuestion() {
     if (!this.state.recording) return;

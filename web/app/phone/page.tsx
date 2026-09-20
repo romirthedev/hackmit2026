@@ -1,13 +1,16 @@
 'use client';
 /* oxlint-disable next/no-html-link-for-pages -- Static FastAPI export serves full documents and has no RSC prefetch endpoint. */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
 import { useReducedMotion } from 'motion/react';
 import {
+  Aperture,
   ArrowLeft,
   ArrowUp,
   Camera,
   Check,
+  Cloud,
+  Mic,
+  Radio,
   ScanLine,
   Square,
   Volume2,
@@ -21,15 +24,17 @@ import {
   isAuthenticationError,
   type Answer,
   type Status,
-  type ConversationState,
 } from '@/lib/api';
 import { PhoneCapture, type CaptureState } from '@/lib/phone-capture';
+import { VoiceClient, type Exchange, type VoiceState } from '@/lib/voice';
 import { ComputerPanel } from '@/components/computer-panel';
 import { ContextPanel } from '@/components/context-panel';
 import { PeoplePanel } from '@/components/people-panel';
+import { Orb, type OrbState } from '@/components/dashboard/orb';
 import { Card, Cell, hm } from '@/components/dashboard/primitives';
 import { SendLetter, type Send } from '@/components/dashboard/letter';
 import '@/app/dashboard.css';
+import '@/app/mail.css';
 import './phone.css';
 import { FrameImage } from '@/components/catalog';
 
@@ -45,12 +50,6 @@ type OriginalRecording = {
   end_reason: string | null;
   original_url: string | null;
   bytes: number;
-};
-type VoicePlayback = {
-  key: string;
-  text: string;
-  onPlayed: () => void;
-  answer?: { id: string; text: string };
 };
 const INITIAL: CaptureState = {
   recording: false,
@@ -69,9 +68,12 @@ const INITIAL: CaptureState = {
   speechRetryAvailable: false,
   previewing: false,
 };
+const clean = (text: string) => text.replace(/\[[0-9a-f-]{36}\]/gi, '').trim();
+
 export default function Phone() {
   const video = useRef<HTMLVideoElement>(null);
   const capture = useRef<PhoneCapture | null>(null);
+  const voice = useRef<VoiceClient | null>(null);
   const cam = useRef<HTMLDivElement>(null);
   const scanGeneration = useRef(0);
   const scanPending = useRef(false);
@@ -88,80 +90,18 @@ export default function Phone() {
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [originals, setOriginals] = useState<OriginalRecording[]>([]);
-  const [conversation, setConversation] = useState<ConversationState>({
-    status: 'listening',
-    turns: [],
-  });
-  const [conversationError, setConversationError] = useState('');
-  const spokenTurns = useRef(new Set<string>());
-  const ignoredTurns = useRef(new Set<string>());
-  const pendingSpeech = useRef(new Set<string>());
-  const pendingAnswerSpeech = useRef(new Set<string>());
-  const deliveredAnswerText = useRef(new Map<string, string>());
-  const failedSpeech = useRef(new Set<string>());
-  const lastFailedPlayback = useRef<
-    (VoicePlayback & { attempt: Promise<boolean> }) | null
-  >(null);
-  const answerFetchVersion = useRef(0);
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const [deepgram, setDeepgram] = useState<boolean | null>(null);
+  const [exchange, setExchange] = useState<Exchange | null>(null);
+  const [history, setHistory] = useState<Exchange[]>([]);
+  const [lastHeard, setLastHeard] = useState('');
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
   const [view, setView] = useState<'record' | 'context' | 'computer'>('record');
-  const [sound, setSound] = useState(false);
-  const soundRef = useRef(false);
+  const [sound, setSound] = useState(true);
+  const soundRef = useRef(true);
   const authExpired = useRef(false);
-  const trackPlayback = useCallback(
-    (
-      entry: VoicePlayback,
-      controller: PhoneCapture,
-      result: Promise<boolean>,
-    ) => {
-      pendingSpeech.current.add(entry.key);
-      if (entry.answer) pendingAnswerSpeech.current.add(entry.answer.id);
-      void result.then((played) => {
-        pendingSpeech.current.delete(entry.key);
-        if (entry.answer) pendingAnswerSpeech.current.delete(entry.answer.id);
-        if (authExpired.current || capture.current !== controller) return;
-        if (played) {
-          failedSpeech.current.delete(entry.key);
-          if (entry.answer)
-            deliveredAnswerText.current.set(entry.answer.id, entry.answer.text);
-          entry.onPlayed();
-          if (lastFailedPlayback.current?.key === entry.key)
-            lastFailedPlayback.current = null;
-        } else if (controller.isFailedSpeech(result)) {
-          failedSpeech.current.add(entry.key);
-          lastFailedPlayback.current = { ...entry, attempt: result };
-        }
-      });
-    },
-    [],
-  );
-  const queueSpeech = useCallback(
-    (entry: VoicePlayback, fromGesture = false) => {
-      const controller = capture.current;
-      if (
-        !controller ||
-        authExpired.current ||
-        pendingSpeech.current.has(entry.key) ||
-        (entry.answer && pendingAnswerSpeech.current.has(entry.answer.id))
-      )
-        return;
-      if (
-        !fromGesture &&
-        (failedSpeech.current.has(entry.key) || controller.state.speechError)
-      )
-        return;
-      trackPlayback(
-        entry,
-        controller,
-        fromGesture
-          ? controller.speakFromGesture(entry.text)
-          : controller.speak(entry.text),
-      );
-    },
-    [trackPlayback],
-  );
   const cancelScanner = useCallback(() => {
     ++scanGeneration.current;
     if (sendRef.current) URL.revokeObjectURL(sendRef.current.photo);
@@ -188,13 +128,12 @@ export default function Phone() {
   }, [auth]);
   useEffect(() => {
     soundRef.current = sound;
+    voice.current?.setMuted(!sound);
   }, [sound]);
   useEffect(() => {
     const requireAuthentication = () => {
       // A stale successful request must never reopen the recorder after a 401.
-      // Login reloads the page after a successful pairing, resetting this latch.
       authExpired.current = true;
-      ++answerFetchVersion.current;
       setAuth(false);
     };
     window.addEventListener(AUTH_REQUIRED_EVENT, requireAuthentication);
@@ -215,7 +154,6 @@ export default function Phone() {
       if (polling || !alive || authExpired.current) return;
       polling = true;
       try {
-        const answerVersion = ++answerFetchVersion.current;
         const [next, recent, due, recorded] = await Promise.all([
           api<Status>('/status', { signal: requests.signal }),
           api<Answer[]>('/answers', { signal: requests.signal }),
@@ -227,19 +165,20 @@ export default function Phone() {
         if (!alive || authExpired.current) return;
         setAuth(true);
         setStatus(next);
-        if (answerVersion === answerFetchVersion.current) setAnswers(recent);
+        setAnswers(recent);
         setReminders(due);
         setOriginals(recorded);
         setError('');
         for (const reminder of due)
-          if (!reminder.seen && !announced.current.has(reminder.id)) {
-            if (soundRef.current && !capture.current?.state.question) {
-              queueSpeech({
-                key: `reminder:${reminder.id}`,
-                text: reminder.message,
-                onPlayed: () => announced.current.add(reminder.id),
-              });
-            }
+          if (
+            !reminder.seen &&
+            !announced.current.has(reminder.id) &&
+            soundRef.current &&
+            voice.current &&
+            voice.current.state === 'idle'
+          ) {
+            announced.current.add(reminder.id);
+            void voice.current.say(reminder.message);
           }
       } catch (problem) {
         if (alive && isAuthenticationError(problem)) {
@@ -258,191 +197,61 @@ export default function Phone() {
       clearInterval(timer);
       requests.abort();
     };
-  }, [auth, queueSpeech]);
+  }, [auth]);
   useEffect(() => {
     if (auth !== true || !video.current) return;
-    const controller = new PhoneCapture(video.current, setState);
+    const agent = new VoiceClient();
+    voice.current = agent;
+    const unsubscribe = agent.subscribe((next, current) => {
+      setVoiceState(next);
+      if (agent.status) setDeepgram(agent.status.deepgram);
+      setExchange(current);
+      if (current && next === 'idle' && current.spoken)
+        setHistory((previous) =>
+          previous[0]?.id === current.id
+            ? previous
+            : [current, ...previous].slice(0, 6),
+        );
+    });
+    const controller = new PhoneCapture(video.current, setState, {
+      onUtterance: (blob) => {
+        if (agent.state !== 'idle') return;
+        void agent
+          .hear(blob, true)
+          .then((heard) => {
+            if (heard.transcript) setLastHeard(heard.transcript);
+            if (heard.directed)
+              return agent.ask(heard.question, heard.transcript);
+          })
+          .catch((problem) =>
+            setError(
+              problem instanceof Error ? problem.message : String(problem),
+            ),
+          );
+      },
+    });
+    agent.onSpeaking = (speaking) => controller.suppressListening(speaking);
     capture.current = controller;
     return () => {
       cancelScanner();
+      unsubscribe();
+      agent.dispose();
       controller.dispose();
       capture.current = null;
+      voice.current = null;
     };
   }, [auth, cancelScanner]);
-  useEffect(() => {
-    if (auth !== true) return;
-    let alive = true;
-    let polling = false;
-    let first = true;
-    const requests = new AbortController();
-    const poll = async () => {
-      if (polling || !alive || authExpired.current) return;
-      polling = true;
-      try {
-        const next = await api<ConversationState>('/conversation/state', {
-          signal: requests.signal,
-        });
-        if (!alive || authExpired.current) return;
-        setConversation(next);
-        setConversationError('');
-        const newCompletedRecall =
-          !first &&
-          next.turns.some(
-            (turn) =>
-              turn.status === 'completed' &&
-              turn.answer_id &&
-              !pendingAnswerSpeech.current.has(turn.answer_id) &&
-              !spokenTurns.current.has(
-                `${turn.id}:${turn.response_revision}`,
-              ) &&
-              !ignoredTurns.current.has(
-                `${turn.id}:${turn.response_revision}`,
-              ) &&
-              !pendingSpeech.current.has(
-                `${turn.id}:${turn.response_revision}`,
-              ) &&
-              !failedSpeech.current.has(`${turn.id}:${turn.response_revision}`),
-          );
-        let refreshedAnswers: Answer[] = [];
-        if (newCompletedRecall) {
-          ++answerFetchVersion.current;
-          refreshedAnswers = await api<Answer[]>('/answers', {
-            signal: requests.signal,
-          });
-          if (!alive || authExpired.current) return;
-          // Invalidate slower dashboard polls so a draft cannot replace the
-          // checked card while its completed response is being spoken.
-          ++answerFetchVersion.current;
-          // Commit the checked label before handing the response to speech.
-          flushSync(() => setAnswers(refreshedAnswers));
-        }
-        for (const turn of [...next.turns].sort(
-          (a, b) => a.created_at - b.created_at,
-        )) {
-          if (
-            turn.transcript &&
-            ['thinking', 'checking'].includes(turn.status)
-          ) {
-            const acknowledgement = `${turn.id}:ack`;
-            if (first || !soundRef.current)
-              ignoredTurns.current.add(acknowledgement);
-            else if (
-              !spokenTurns.current.has(acknowledgement) &&
-              !ignoredTurns.current.has(acknowledgement)
-            )
-              queueSpeech({
-                key: acknowledgement,
-                text: 'Let me check that.',
-                onPlayed: () => spokenTurns.current.add(acknowledgement),
-              });
-          }
-          if (
-            !turn.response ||
-            ![
-              'completed',
-              'clarification',
-              'awaiting_permission',
-              'error',
-            ].includes(turn.status)
-          )
-            continue;
-          const key = `${turn.id}:${turn.response_revision}`;
-          if (first || !soundRef.current) {
-            ignoredTurns.current.add(key);
-            continue;
-          }
-          if (
-            spokenTurns.current.has(key) ||
-            ignoredTurns.current.has(key) ||
-            pendingSpeech.current.has(key) ||
-            failedSpeech.current.has(key)
-          )
-            continue;
-          if (turn.answer_id && pendingAnswerSpeech.current.has(turn.answer_id))
-            continue;
-          let checkedAnswer: Answer | undefined;
-          if (
-            !first &&
-            turn.status === 'completed' &&
-            turn.answer_id &&
-            !spokenTurns.current.has(key)
-          ) {
-            checkedAnswer = refreshedAnswers.find(
-              (answer) => answer.id === turn.answer_id,
-            );
-            if (
-              !checkedAnswer?.verification?.receipt.claims_reviewed ||
-              !['verified', 'insufficient'].includes(checkedAnswer.mode)
-            )
-              continue;
-            // A manual read and this conversation response share one checked
-            // answer. Count a completed manual playback, never replay it on poll.
-            if (
-              deliveredAnswerText.current.get(checkedAnswer.id) ===
-              checkedAnswer.answer
-            ) {
-              spokenTurns.current.add(key);
-              continue;
-            }
-          }
-          queueSpeech({
-            key,
-            text: turn.response,
-            answer: checkedAnswer
-              ? { id: checkedAnswer.id, text: checkedAnswer.answer }
-              : undefined,
-            onPlayed: () => spokenTurns.current.add(key),
-          });
-        }
-        first = false;
-      } catch (problem) {
-        if (alive && isAuthenticationError(problem)) {
-          authExpired.current = true;
-          setAuth(false);
-        } else if (alive && !requests.signal.aborted && !authExpired.current)
-          setConversationError(
-            'Voice requests are reconnecting. Saved speech will retry.',
-          );
-      } finally {
-        polling = false;
-      }
-    };
-    void poll();
-    const timer = setInterval(() => void poll(), 1250);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-      requests.abort();
-    };
-  }, [auth, queueSpeech]);
-  function testVoice() {
-    soundRef.current = true;
-    setSound(true);
-    void capture.current?.testVoice();
-  }
-  function retryVoice() {
-    const controller = capture.current;
-    if (!controller || authExpired.current) return;
-    soundRef.current = true;
-    setSound(true);
-    const entry = lastFailedPlayback.current;
-    const retryMatches = entry && controller.isFailedSpeech(entry.attempt);
-    const result = controller.retrySpeech();
-    if (entry && retryMatches) trackPlayback(entry, controller, result);
-  }
   async function ask(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!question.trim() || asking) return;
+    const text = question.trim();
+    if (!text || asking || !voice.current) return;
     setAsking(true);
     setError('');
+    voice.current.unlock();
     try {
-      await api('/conversation/text', {
-        method: 'POST',
-        body: JSON.stringify({ id: crypto.randomUUID(), text: question }),
-      });
       setQuestion('');
-    } catch (problem) {
-      setError(String(problem));
+      const result = await voice.current.ask(text);
+      if (result.error) setError(result.error);
     } finally {
       setAsking(false);
     }
@@ -452,9 +261,9 @@ export default function Phone() {
       ++scanGeneration.current;
       capture.current?.stop();
     } else {
+      voice.current?.unlock();
       soundRef.current = true;
       setSound(true);
-      void capture.current?.testVoice();
       void capture.current?.start();
     }
   }
@@ -506,9 +315,7 @@ export default function Phone() {
         URL.revokeObjectURL(shot.url);
         return;
       }
-      setScanNotice(
-        'Photo queued on this phone. It will upload when connected.',
-      );
+      setScanNotice('Reading your mail… it will appear on the home screen.');
       const from = cam.current?.getBoundingClientRect();
       if (!from) {
         URL.revokeObjectURL(shot.url);
@@ -539,45 +346,42 @@ export default function Phone() {
     sendRef.current = null;
     setSend(null);
   }
-  const thinking = [
-    'queued',
-    'transcribing',
-    'routing',
-    'thinking',
-    'checking',
-  ].includes(conversation.status);
-  const voiceLabel = state.speaking
-    ? 'Speaking · listening resumes afterward'
-    : state.voice === 'hearing'
-      ? 'I’m listening…'
-      : conversation.status === 'awaiting_permission'
-        ? 'Waiting for your reply'
-        : thinking
-          ? 'Thinking about your request…'
-          : conversation.status === 'acting'
-            ? 'Working on your Mac…'
+  const voiceLabel =
+    voiceState === 'speaking'
+      ? 'Speaking…'
+      : voiceState === 'thinking'
+        ? 'Looking through your day…'
+        : voiceState === 'hearing'
+          ? 'Heard you, one moment…'
+          : state.voice === 'hearing'
+            ? 'I’m listening…'
             : state.recording && state.voice === 'listening'
-              ? 'Listening for questions and requests'
+              ? 'Say “Rewind” and then your question'
               : state.voice === 'unavailable'
                 ? 'Voice unavailable · type below'
-                : 'Press Record, then speak naturally';
-  const voiceState =
-    state.voice === 'hearing'
-      ? 'listening'
-      : thinking || asking || conversation.status === 'acting'
+                : 'Press Record, then say “Rewind, …”';
+  const orb: OrbState =
+    voiceState === 'speaking'
+      ? 'answer'
+      : voiceState === 'thinking' || voiceState === 'hearing' || asking
         ? 'thinking'
-        : state.speaking
-          ? 'answer'
+        : state.voice === 'hearing'
+          ? 'listening'
           : 'idle';
   const cameraOn = state.recording || state.previewing;
+  const hour = new Date().getHours();
+  const greet =
+    hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const zone = status?.timezone;
   if (auth === false) return <Login />;
   if (auth === null)
     return (
       <div className="rw ph">
         <main className="ph-page ph-wait">
-          <span className="ph-wordmark">rewind</span>
-          <p>{error || 'Connecting…'}</p>
+          <span className="rw-brand-mark ph-wait-mark">
+            <Aperture />
+          </span>
+          <p>{error || 'Connecting to your memory…'}</p>
         </main>
       </div>
     );
@@ -586,15 +390,19 @@ export default function Phone() {
       <div className="ph-sheet">
         <header className="ph-top">
           <a href="/" className="rw-brand" aria-label="Open workspace">
-            rewind
-            <span className="ph-header-time">{clock}</span>
+            <span className="rw-brand-mark">
+              <Aperture />
+            </span>
+            rewind<span className="rw-brand-period">.</span>
+            <span className="rw-brand-time">{clock}</span>
           </a>
           <span className="ph-memory" title="Items saved on the server">
+            <Cloud />
             <b className="tabular">{status?.received ?? 0}</b>
-            <span>saved items</span>
+            <span className="sr-only"> saved items</span>
           </span>
         </header>
-        <main className="ph-page">
+        <main className="ph-page mode-rose">
           <nav className="phone-tabs" aria-label="Phone workspace">
             <button
               type="button"
@@ -621,18 +429,18 @@ export default function Phone() {
               Your computer
             </button>
           </nav>
-          {(state.error || error || conversationError) && (
+          {(state.error || error) && (
             <div className="rw-banner" role="alert">
-              {state.error || error || conversationError}
+              {state.error || error}
             </div>
           )}
           <section hidden={view !== 'record'}>
             <div className="greeting">
-              <h1>Recorder</h1>
+              <h1>{greet}.</h1>
               <p>
                 {state.recording
-                  ? `Recording${state.startedAt ? ` since ${hm(state.startedAt / 1000, zone)}` : ''}. Keep this page open.`
-                  : 'Keep this page open while recording.'}
+                  ? `Recording your day${state.startedAt ? ` since ${hm(state.startedAt / 1000, zone)}` : ''}.`
+                  : 'Tap Record, clip your phone on, and leave this screen open.'}
               </p>
             </div>
             {reminders
@@ -672,7 +480,7 @@ export default function Phone() {
                   </Card>
                 </Cell>
               ))}
-            <Cell label="Camera" index={1}>
+            <Cell label="Your view" index={1}>
               <Card
                 className={`card-media ${state.recording ? 'is-rec' : ''} ${cameraOn ? 'is-on' : ''} ${scanning ? 'is-scanning' : ''}`}
               >
@@ -686,9 +494,10 @@ export default function Phone() {
                   {!cameraOn && (
                     <span className="ph-camera-placeholder">
                       <Camera />
-                      <span>Camera preview</span>
+                      <span>Your view, remembered.</span>
                     </span>
                   )}
+                  <span className="sweep" aria-hidden="true" />
                 </div>
                 <div className="media-foot">
                   <span className="media-title">
@@ -698,7 +507,7 @@ export default function Phone() {
                         ? 'Saving last seconds…'
                         : state.previewing
                           ? 'Camera on'
-                          : 'Ready to record'}
+                          : 'Your view'}
                     <small>
                       {state.queued
                         ? `${state.queued} waiting to upload`
@@ -741,11 +550,7 @@ export default function Phone() {
                 disabled={state.requesting || state.finalizing}
                 onClick={toggleRecording}
               >
-                {state.recording ? (
-                  <Square fill="currentColor" />
-                ) : (
-                  <span className="ph-record-dot" aria-hidden="true" />
-                )}
+                {state.recording ? <Square fill="currentColor" /> : <Radio />}
                 {state.requesting
                   ? 'Opening camera…'
                   : state.finalizing
@@ -763,7 +568,7 @@ export default function Phone() {
                 onClick={() => void scan()}
               >
                 <ScanLine />
-                {scanning ? 'Scanning…' : 'Scan'}
+                {scanning ? 'Scanning…' : 'Scan mail'}
               </button>
               {scanNotice && (
                 <output className="phone-fine ph-scan-notice">
@@ -777,18 +582,17 @@ export default function Phone() {
                       ? 'Screen stays awake'
                       : 'Keep your screen awake'
                     : state.previewing
-                      ? 'Preview only · tap Scan to save a photo'
+                      ? 'Hold a letter or bill in view, then tap Scan mail'
                       : 'Camera is off'}
                 </span>
               </div>
               <p className="phone-fine">
-                Record saves full video and audio. Answers use sampled images
-                and speech.{' '}
+                Record saves full video and audio while this page stays open.{' '}
                 {status?.analysis_ready === false
                   ? 'Analysis is waiting for the ASUS model; saved uploads will wait.'
                   : status?.pending
-                    ? `${status.pending} items are waiting for analysis.`
-                    : ''}
+                    ? `${status.pending} moments are waiting to be looked at.`
+                    : 'Scan a postcard or a bill and it files itself at home.'}
               </p>
               {originals.some((recording) => recording.original_url) && (
                 <details className="phone-fine ph-originals">
@@ -813,54 +617,57 @@ export default function Phone() {
                 </details>
               )}
             </Cell>
-            <Cell label="Conversation" index={2}>
-              <Card className="card-ask" data-state={voiceState}>
+            <Cell label="Talk to Rewind" index={2}>
+              <Card className="card-dark card-ask" data-state={orb}>
                 <div className="row">
-                  <output className="ph-voice-status" aria-live="polite">
-                    <span className="ph-status-dot" aria-hidden="true" />
-                    {voiceLabel}
-                  </output>
+                  <span className="card-title">Just say “Rewind”.</span>
                   <button
                     type="button"
                     className={`dim ask-sound ${sound ? 'is-on' : ''}`}
                     aria-pressed={sound}
                     aria-label="Spoken answers and reminders"
                     onClick={() => {
-                      if (sound) {
-                        capture.current?.silenceSpeech();
-                        soundRef.current = false;
-                        setSound(false);
-                      } else testVoice();
+                      if (!sound) voice.current?.unlock();
+                      setSound(!sound);
                     }}
                   >
                     {sound ? <Volume2 /> : <VolumeX />}
                   </button>
                 </div>
-                <div className="ask-body">
-                  <p className="hint">
-                    Ask about a recording or request an action on your Mac.
-                  </p>
+                <div className="orb-stage" aria-hidden="true">
+                  <Orb state={orb} size={150} />
+                  <div className="waves">
+                    {[3, 1, 4, 0, 2, 5, 3].map((n, i) => (
+                      <i key={i} style={{ '--n': n } as React.CSSProperties} />
+                    ))}
+                  </div>
                 </div>
-                <div className="ph-voice-controls">
-                  <button type="button" onClick={testVoice}>
-                    Test voice
-                  </button>
-                  {state.speechRetryAvailable && (
-                    <button type="button" onClick={retryVoice}>
-                      Retry voice
-                    </button>
+                <output className="ph-voice-status" aria-live="polite">
+                  <Mic />
+                  {voiceLabel}
+                </output>
+                <div className="ask-body">
+                  {exchange ? (
+                    <div className="ph-exchange">
+                      <p className="ph-heard">“{exchange.heard}”</p>
+                      <p className="ph-spoken">
+                        {exchange.spoken ||
+                          (voiceState === 'thinking' ? 'Let me look…' : '')}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="hint">
+                      {lastHeard
+                        ? `Heard “${lastHeard}”. Start with “Rewind” when you want an answer.`
+                        : 'Try: “Rewind, where did I leave my glasses?” or “Rewind, when is my doctor’s bill due?”'}
+                    </p>
                   )}
                 </div>
-                {state.speechError && (
-                  <p className="ph-speech-error" role="alert">
-                    {state.speechError}
-                  </p>
-                )}
                 <form className="ask-bar" autoComplete="off" onSubmit={ask}>
                   <label className={`ask-input ${question ? 'has-text' : ''}`}>
                     <input
-                      aria-label="Type a question or request"
-                      placeholder="Or type here…"
+                      aria-label="Type a question"
+                      placeholder="Or type a question…"
                       value={question}
                       onChange={(event) => setQuestion(event.target.value)}
                       maxLength={2000}
@@ -875,89 +682,21 @@ export default function Phone() {
                     </button>
                   </label>
                 </form>
-                {asking && <output>Sending your request…</output>}
+                {deepgram === false && (
+                  <p className="phone-fine ph-voice-note">
+                    Voice replies use this phone’s built-in voice until a
+                    Deepgram key is added on the server.
+                  </p>
+                )}
               </Card>
-              {conversation.turns
-                .filter(
-                  (turn) =>
-                    turn.status !== 'ignored' &&
-                    (!turn.answer_id ||
-                      !answers.some((answer) => answer.id === turn.answer_id)),
-                )
-                .slice(-3)
-                .reverse()
-                .map((turn) => (
-                  <article className="phone-answer" key={turn.id}>
-                    <h3>{turn.transcript || 'Hearing your words…'}</h3>
-                    <p>
-                      {turn.response ||
-                        (turn.status === 'acting'
-                          ? 'Notch is working on your Mac…'
-                          : 'Working on your request…')}
-                    </p>
-                  </article>
-                ))}
-              {answers.slice(0, 3).map((answer) => (
-                <article className="phone-answer" key={answer.id}>
-                  <h3>{answer.question}</h3>
-                  {answer.mode === 'checking' && (
-                    <strong>Draft · checking the original evidence…</strong>
-                  )}
-                  <p>{answer.answer.replace(/\[[0-9a-f-]{36}\]/g, '')}</p>
-                  <div>
-                    <small>
-                      {answer.mode === 'checking'
-                        ? 'Waiting for Codex review'
-                        : answer.mode === 'legacy_unverified'
-                          ? 'Earlier answer · not checked'
-                          : answer.mode === 'verified' &&
-                              answer.verification?.receipt.claims_reviewed
-                            ? 'Checked against sources by ' +
-                              (answer.verification?.receipt.reviews
-                                ?.map((r) => r.model)
-                                .join(' → ') || 'Codex')
-                            : answer.mode === 'insufficient' &&
-                                answer.verification?.receipt.claims_reviewed
-                              ? 'Sources checked · evidence is incomplete'
-                              : answer.grounded
-                                ? `${answer.evidence.length} sources cited`
-                                : 'Evidence incomplete'}
-                    </small>
-                    <button
-                      aria-label="Read answer aloud"
-                      disabled={
-                        !(
-                          ['verified', 'insufficient'].includes(answer.mode) &&
-                          answer.verification?.receipt.claims_reviewed
-                        )
-                      }
-                      onClick={() =>
-                        queueSpeech(
-                          {
-                            key: `answer:${answer.id}`,
-                            text: answer.answer,
-                            answer: { id: answer.id, text: answer.answer },
-                            onPlayed: () => {},
-                          },
-                          true,
-                        )
-                      }
-                    >
-                      <Volume2 size={18} />
-                    </button>
-                  </div>
-                  {answer.verification?.receipt.reviews?.map((review) => (
-                    <details key={review.model}>
-                      <summary>
-                        {review.model} · {review.seconds.toFixed(1)}s
-                      </summary>
-                      <p>{review.result.reason}</p>
-                    </details>
-                  ))}
-                  {answer.evidence.map((source) => (
+              {history.map((item) => (
+                <article className="phone-answer" key={item.id}>
+                  <h3>{item.heard}</h3>
+                  <p>{item.spoken}</p>
+                  {item.answer?.evidence.slice(0, 2).map((source) => (
                     <details key={source.id}>
                       <summary>
-                        {source.title || source.summary || source.kind}
+                        {source.title || source.summary || 'What I saw'}
                       </summary>
                       {source.source === 'notch' ? (
                         <p>{source.text}</p>
@@ -971,29 +710,54 @@ export default function Phone() {
                           <track kind="captions" />
                         </audio>
                       )}
-                      {source.original_recording?.original_url && (
-                        <p className="phone-fine">
-                          <a
-                            href={source.original_recording.original_url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Play original recording
-                          </a>
-                          {!source.original_recording
-                            .continuous_video_inspected && (
-                            <>
-                              {' '}
-                              · This answer used sampled evidence; the full
-                              video has not been checked.
-                            </>
-                          )}
-                        </p>
-                      )}
                     </details>
                   ))}
+                  <div>
+                    <small>
+                      {item.error
+                        ? item.error
+                        : item.answer
+                          ? `${item.answer.evidence.length} moments`
+                          : ''}
+                    </small>
+                    <button
+                      aria-label="Read answer aloud"
+                      disabled={!item.spoken}
+                      onClick={() => {
+                        voice.current?.unlock();
+                        void voice.current?.say(item.spoken);
+                      }}
+                    >
+                      <Volume2 size={18} />
+                    </button>
+                  </div>
                 </article>
               ))}
+              {!history.length &&
+                answers.slice(0, 2).map((answer) => (
+                  <article className="phone-answer" key={answer.id}>
+                    <h3>{answer.question}</h3>
+                    <p>{clean(answer.answer).split('\n\n')[0]}</p>
+                    <div>
+                      <small>
+                        {answer.grounded
+                          ? `${answer.evidence.length} moments`
+                          : 'Not enough to be sure'}
+                      </small>
+                      <button
+                        aria-label="Read answer aloud"
+                        onClick={() => {
+                          voice.current?.unlock();
+                          void voice.current?.say(
+                            clean(answer.answer).split('\n\n')[0],
+                          );
+                        }}
+                      >
+                        <Volume2 size={18} />
+                      </button>
+                    </div>
+                  </article>
+                ))}
             </Cell>
           </section>
           <section hidden={view !== 'context'} className="ph-panels">
@@ -1007,6 +771,9 @@ export default function Phone() {
             <a href="/">
               <ArrowLeft size={14} />
               Open your workspace
+            </a>
+            <a href="/print" target="_blank" rel="noreferrer">
+              Print the demo mail
             </a>
           </footer>
         </main>

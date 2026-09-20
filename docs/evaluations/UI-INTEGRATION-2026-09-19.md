@@ -1,5 +1,10 @@
 # UI and current backend integration — September 19, 2026
 
+> Historical. The journal layout, the review-gated conversation speech, and the
+> Playwright scripts described here were replaced the same night by the card
+> dashboard with wake-word voice and scanned mail. See
+> [VOICE-AND-MAIL.md](../VOICE-AND-MAIL.md).
+
 The `ui-mobile` design (`e21b9bf`, including the desktop card-grid dashboard)
 is merged onto the tested backend at `b01a204`. The new home and phone screens
 use the existing authenticated APIs. The complete workspace remains available

@@ -2311,8 +2311,6 @@ html.rw-light body {
   position: absolute;
   left: 0;
   top: 0;
-  width: 128px;
-  height: 86px;
 }
 .rw .letter-env {
   position: absolute;
@@ -2352,7 +2350,6 @@ html.rw-light body {
 }
 .rw .env-inner {
   position: absolute;
-  object-fit: cover;
   border-radius: 6px;
   background: #eee;
   box-shadow:

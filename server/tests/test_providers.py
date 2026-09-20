@@ -214,3 +214,26 @@ async def test_image_source_label_mismatch_fails_before_inference(tmp_path):
             "Inspect.", json.dumps({"attached_images_in_order": ["E1", "E2"]}), Observation, images=[image]
         )
     await provider.close()
+
+
+def test_local_schema_drops_string_length_limits_only():
+    from rewind.inference import chat_request, grammar_safe
+    from rewind.models import Observation, RecallAnswer
+
+    schema = RecallAnswer.model_json_schema()
+    assert schema["properties"]["answer"]["maxLength"] == 8000
+    safe = grammar_safe(schema)
+    assert "maxLength" not in safe["properties"]["answer"]
+    assert safe["properties"]["evidence_ids"]["maxItems"] == 20
+    assert safe["required"] == schema["required"]
+    nested = grammar_safe(Observation.model_json_schema())
+    assert "maxLength" not in nested["$defs"]["ObjectObservation"]["properties"]["label"]
+    assert nested["$defs"]["ObjectObservation"]["properties"]["confidence"]["maximum"] == 1
+    _, payload = chat_request("ollama", "m", [], schema)
+    assert "maxLength" not in payload["format"]["properties"]["answer"]
+    # The validated model still enforces the limit.
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        RecallAnswer(answer="x" * 8001, evidence_ids=[], insufficient_evidence=True)

@@ -32,7 +32,7 @@ Content-Type: image/jpeg
 
 - Timestamps are Unix **seconds**, not milliseconds. `0` explicitly means capture wall time is unknown; server receive time is used and labeled.
 - Sequence numbers are independent per `device + boot + kind`. The same tuple with identical bytes is an acknowledged duplicate. Different bytes receive 409. Change boot ID after reset.
-- Intent defaults to `memory`; `question` is permitted only for audio.
+- Intent defaults to `memory`; `question` is permitted only for audio; `scan` is permitted only for frames and asks the server to read the documents in the photo (see Scanned mail below).
 - Maximum body: 20 MiB. JPEG limit: 16 megapixels. WAV: PCM16, at most 120 seconds, one/two channels.
 - Successful response: HTTP 201 with `{id, duplicate, status}`. Delete local packet only after 200/201.
 - Retry transient/network errors. On 507 retain the packet until storage is available. On 401/403 fix provisioning. On 400/409 inspect the packet rather than discarding evidence silently.
@@ -91,3 +91,27 @@ An optional `visual_similarity` field is a ranking score, not calibrated confide
 `/status.visual_index` reports `enabled`, `model`, `total`, `indexed`, `pending`,
 `failed`, and `average_ms`. `/retry` also returns `visual_retried`. Deleting an
 original removes its vectors through the database foreign key.
+
+## Spoken questions
+
+All routes need the workspace session. Details in [VOICE-AND-MAIL.md](VOICE-AND-MAIL.md).
+
+| Route | Body | Returns |
+|---|---|---|
+| `GET /api/voice/status` | | `{deepgram, tts_model, stt_model, wake_word}` |
+| `POST /api/voice/hear?wake=true` | raw audio (`audio/wav`, `audio/webm`, `audio/ogg`, `audio/mp4`, `audio/mpeg`) | `{transcript, directed, question, confidence, seconds}`. With `wake=true` the sentence must start with "Rewind"; the question is the rest. |
+| `POST /api/voice/ask` | `{question, after?, before?}` | `{answer, spoken, speech_url}`. `answer` is the same record `/api/ask` returns; `spoken` is its first paragraph without citations; `speech_url` is null when no Deepgram key is configured. |
+| `GET /api/voice/speech/{answer_id}` | | `audio/mpeg` of the spoken answer (cached). |
+| `GET /api/voice/filler` | | `audio/mpeg`, one of the "let me look" lines. |
+| `POST /api/voice/speak` | `{text}` (max 1500 chars) | `audio/mpeg`. 503 without a Deepgram key. |
+
+## Scanned mail
+
+| Route | Returns |
+|---|---|
+| `GET /api/scans?limit=20` | Documents newest first: `{id, media_id, image_url, created_at, seq, kind, source, due_at, seen, title, sender, recipient, date, due_date, amount, place, message}`. `kind` is `postcard`, `letter`, `bill`, `appointment` or `other`; `source` is `model`, `template` or `model+template`. |
+| `POST /api/scans/demo` | Files the two printed demo documents without a photo. |
+| `POST /api/scans/{id}/seen` | Marks a document seen. |
+| `DELETE /api/scans/{id}` | Removes a document (the photo stays in recordings). |
+
+Scanned documents also appear in `/api/ask` evidence as `kind: "context"`, `source: "scan"`.

@@ -8,6 +8,7 @@ import {
   type Answer,
   type Recording,
   type Rule,
+  type ScanDocument,
   type Status,
 } from '@/lib/api';
 
@@ -51,6 +52,7 @@ type Snapshot = {
   graph: ContextGraph;
   reminders: Reminder[];
   people: ConfirmedPerson[];
+  scans: ScanDocument[];
 };
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -61,7 +63,7 @@ export function useRewind() {
   const [error, setError] = useState('');
   const [now, setNow] = useState(0);
   const [lastSync, setLastSync] = useState<number | null>(null);
-  const [arrivals, setArrivals] = useState<Recording[]>([]);
+  const [arrivals, setArrivals] = useState<ScanDocument[]>([]);
   const alive = useRef(false);
   const blocked = useRef(false);
   const epoch = useRef(0);
@@ -105,6 +107,7 @@ export function useRewind() {
           graph,
           reminders,
           persons,
+          scans,
         ] = await Promise.all([
           api<Status>('/status', init),
           api<Recording[]>('/recordings?limit=24', init),
@@ -114,6 +117,7 @@ export function useRewind() {
           api<ContextGraph>('/context/graph', init),
           api<Reminder[]>('/context/reminders', init),
           api<{ people: ConfirmedPerson[] }>('/people', init),
+          api<ScanDocument[]>('/scans?limit=20', init),
         ]);
         if (
           !alive.current ||
@@ -132,25 +136,25 @@ export function useRewind() {
           graph,
           reminders,
           people: persons.people,
+          scans,
         });
         setNow(timestamp);
         setLastSync(timestamp);
         setConnection('live');
         setError('');
+        // Mail scanned on the phone arrives as a letter: oldest first, so a
+        // postcard and a bill from one photo land one after the other.
         if (seen.current) {
           const known = seen.current;
-          const fresh = records.filter(
-            (record) =>
-              !known.has(record.id) &&
-              record.kind === 'frame' &&
-              record.media_url,
-          );
+          const fresh = scans
+            .filter((document) => !known.has(document.id))
+            .sort((a, b) => a.created_at - b.created_at || a.seq - b.seq);
           if (fresh.length)
             setArrivals((previous) =>
-              [...previous, ...fresh.slice(0, 3)].slice(-4),
+              [...previous, ...fresh.slice(0, 4)].slice(-6),
             );
         }
-        seen.current = new Set(records.map((record) => record.id));
+        seen.current = new Set(scans.map((document) => document.id));
       } catch (problem) {
         if (isAuthenticationError(problem)) lock();
         else if (
@@ -277,6 +281,7 @@ export function useRewind() {
     graph: snapshot?.graph ?? null,
     reminders: snapshot?.reminders ?? [],
     people: snapshot?.people ?? [],
+    scans: snapshot?.scans ?? [],
     online:
       connection === 'live' &&
       !!snapshot?.status.devices.some((device) => now - device.last_seen < 30),
@@ -303,6 +308,11 @@ export function useRewind() {
       action('/alerts/' + encodeURIComponent(id) + '/seen'),
     reminderSeen: (id: string) =>
       action('/context/reminders/' + encodeURIComponent(id) + '/seen'),
+    scanSeen: (id: string) =>
+      action('/scans/' + encodeURIComponent(id) + '/seen'),
+    removeScan: (id: string) =>
+      action('/scans/' + encodeURIComponent(id), { method: 'DELETE' }),
+    demoScan: () => action('/scans/demo'),
     setPaused: (paused: boolean) =>
       action('/capture/pause', {
         method: 'POST',

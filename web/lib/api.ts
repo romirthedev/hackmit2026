@@ -137,6 +137,44 @@ export type Scene = {
     captured_at: number;
   }[];
 };
+// A document read from one Scan photo: a postcard, letter, bill or appointment card.
+export type ScanDocument = {
+  id: string;
+  media_id: string | null;
+  image_url: string | null;
+  created_at: number;
+  seq: number;
+  kind: 'postcard' | 'letter' | 'bill' | 'appointment' | 'other';
+  source: 'model' | 'template' | 'model+template';
+  due_at: number | null;
+  seen: number;
+  title: string;
+  sender: string;
+  recipient: string;
+  date: string;
+  due_date: string;
+  amount: string;
+  place?: string;
+  message: string;
+};
+export type VoiceStatus = {
+  deepgram: boolean;
+  tts_model: string | null;
+  stt_model: string;
+  wake_word: string;
+};
+export type Heard = {
+  transcript: string;
+  directed: boolean;
+  question: string;
+  confidence: number;
+  seconds: number;
+};
+export type VoiceReply = {
+  answer: Answer | null;
+  spoken: string;
+  speech_url: string | null;
+};
 export const AUTH_REQUIRED_EVENT = 'rewind:authentication-required';
 
 export class ApiError extends Error {

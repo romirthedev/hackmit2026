@@ -1,5 +1,9 @@
 # Record once, then talk
 
+> Update: the phone now answers spoken questions through the wake-word path
+> (`/api/voice/*`, Deepgram in and out) described in [VOICE-AND-MAIL.md](VOICE-AND-MAIL.md).
+> The conversation queue below still serves typed requests and Mac commands.
+
 The phone's Record gesture starts continuous camera/audio capture, sampled JPEGs,
 microphone speech detection, and spoken responses. A directed question or request
 requires no separate Ask button or switch to computer mode. The text field and

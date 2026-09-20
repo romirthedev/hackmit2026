@@ -1,9 +1,25 @@
 """Local inference wire formats; images remain in their supplied order."""
 
 
+def grammar_safe(schema):
+    """JSON schema for local constrained decoding.
+
+    llama.cpp turns string maxLength into a repetition rule; long limits such
+    as 4000 or 8000 fail with "failed to parse grammar" on current Ollama.
+    Pydantic still enforces every limit when the reply is validated, so the
+    limits are dropped from what the sampler sees.
+    """
+    if isinstance(schema, dict):
+        return {key: grammar_safe(value) for key, value in schema.items() if key != "maxLength"}
+    if isinstance(schema, list):
+        return [grammar_safe(value) for value in schema]
+    return schema
+
+
 def chat_request(
     api, model, messages, schema, *, think=False, context=16384, max_tokens=2048, cache_prompt=False
 ):
+    schema = grammar_safe(schema)
     if api == "ollama":
         return "/api/chat", {
             "model": model,

@@ -1,12 +1,12 @@
 'use client';
 /* oxlint-disable next/no-img-element -- photos are local blob URLs or served by the local server */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 
-// A small letter carries a scanned photo from the phone up into a cloud, and
-// on the home dashboard the same letter drops out of the cloud and opens
-// into the Moments card. While the letter travels the page behind it goes
-// soft, so the eye follows the letter.
+// A small letter carries a scanned photo from the phone up into a cloud. On
+// the home dashboard a letter drops out of the cloud, opens, and the document
+// inside (a postcard, a bill) slides out and settles into its card. While the
+// letter travels the page behind it goes soft, so the eye follows the letter.
 
 export const ENV_W = 128;
 export const ENV_H = 86;
@@ -14,8 +14,20 @@ const PHOTO_W = 100;
 const PHOTO_H = 68;
 const REST_Y = 31; // photo's resting y inside the envelope
 const CLIP_UP = 320; // the clip only trims the photo below the envelope
+// Receiving side: a bigger envelope so the document is legible as it emerges.
+export const DOC_W = 168;
+export const DOC_H = 112;
+const RENV_W = 200;
+const RENV_H = 134;
+const RREST_Y = 40;
 const soft = { type: 'spring' as const, stiffness: 170, damping: 22 };
 const gentle = { type: 'spring' as const, stiffness: 120, damping: 16 };
+const drop = {
+  type: 'spring' as const,
+  stiffness: 150,
+  damping: 15,
+  mass: 1.1,
+};
 
 function Backdrop({ show }: { show: boolean }) {
   return (
@@ -49,10 +61,17 @@ export function CloudPuff({
       initial={{ opacity: 0, scale: 0.7, y: -16 }}
       animate={
         show
-          ? { opacity: 1, scale: 1, y: 0 }
+          ? { opacity: 1, scale: 1, y: [0, -3, 0] }
           : { opacity: 0, scale: 0.8, y: -20 }
       }
-      transition={gentle}
+      transition={
+        show
+          ? {
+              ...gentle,
+              y: { duration: 2.6, repeat: Infinity, ease: 'easeInOut' },
+            }
+          : gentle
+      }
       aria-hidden="true"
     >
       <defs>
@@ -79,41 +98,54 @@ export function CloudPuff({
   );
 }
 
-// The envelope. `inner` is the photo copy that lives inside the body and is
-// clipped by it; it slides in from above (phone) or out of the top (desktop).
+// The envelope. `inner` lives inside the body and is clipped by it; it slides
+// in from above (phone) or out of the top (desktop).
 function Envelope({
   open,
-  photo,
+  inner,
   innerY,
   innerVisible,
+  width,
+  height,
+  innerWidth,
+  innerHeight,
+  sealed = false,
 }: {
   open: boolean;
-  photo: string;
+  inner: ReactNode;
   innerY: number;
   innerVisible: boolean;
+  width: number;
+  height: number;
+  innerWidth: number;
+  innerHeight: number;
+  sealed?: boolean;
 }) {
   return (
-    <div className="env" style={{ width: ENV_W, height: ENV_H }}>
+    <div
+      className={`env ${sealed ? 'is-sealed' : ''}`}
+      style={{ width, height }}
+    >
       <span className="env-body" />
       <div
         className="env-clip"
-        style={{ top: -CLIP_UP, height: CLIP_UP + ENV_H }}
+        style={{ top: -CLIP_UP, height: CLIP_UP + height }}
       >
-        <motion.img
+        <motion.div
           className="env-inner"
-          src={photo}
-          alt=""
           style={{
-            width: PHOTO_W,
-            height: PHOTO_H,
-            left: (ENV_W - PHOTO_W) / 2,
+            width: innerWidth,
+            height: innerHeight,
+            left: (width - innerWidth) / 2,
             top: CLIP_UP,
             opacity: innerVisible ? 1 : 0,
           }}
           initial={false}
           animate={{ y: innerY }}
-          transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-        />
+          transition={{ duration: 0.55, ease: [0.4, 0, 0.2, 1] }}
+        >
+          {inner}
+        </motion.div>
       </div>
       <span className="env-pocket" />
       <motion.span
@@ -186,6 +218,7 @@ export function SendLetter({
       />
       <motion.div
         className="letter-group"
+        style={{ width: ENV_W, height: ENV_H }}
         initial={{ x: gx, y: gy, scale: 1, opacity: 1, rotate: 0 }}
         animate={
           step >= 5
@@ -224,9 +257,13 @@ export function SendLetter({
         >
           <Envelope
             open={step < 3}
-            photo={photo}
+            inner={<img className="env-photo" src={photo} alt="" />}
             innerY={step >= 2 ? REST_Y : hover.y}
             innerVisible={step >= 2}
+            width={ENV_W}
+            height={ENV_H}
+            innerWidth={PHOTO_W}
+            innerHeight={PHOTO_H}
           />
         </motion.div>
         {/* free copy: full camera card -> small photo hovering above the letter */}
@@ -259,17 +296,20 @@ export function SendLetter({
 
 export type Receive = {
   id: string;
-  photo: string;
+  kind: 'postcard' | 'bill';
+  // The document as it looks inside the envelope and while it flies.
+  render: ReactNode;
   to: DOMRect | null;
   cloud?: { x: number; y: number };
 };
 
 // Dashboard. Steps:
 // 1 page goes soft; cloud appears above the card
-// 2 letter drops out of the cloud onto the card
+// 2 letter drops out of the cloud and lands over the card
 // 3 flap opens
-// 4 photo rises out of the letter
-// 5 photo settles into its slot; letter fades
+// 4 the document rises out of the letter
+// 5 the document glides into its slot; letter fades
+// 6 done, the card shows the real thing
 export function ReceiveLetter({
   item,
   onLanded,
@@ -293,15 +333,15 @@ export function ReceiveLetter({
     setStep(1);
     const f = reduce ? 0.05 : 1;
     const ts = [
-      setTimeout(() => setStep(2), 550 * f),
-      setTimeout(() => setStep(3), 1900 * f),
-      setTimeout(() => setStep(4), 2400 * f),
-      setTimeout(() => setStep(5), 2950 * f),
+      setTimeout(() => setStep(2), 600 * f),
+      setTimeout(() => setStep(3), 2000 * f),
+      setTimeout(() => setStep(4), 2500 * f),
+      setTimeout(() => setStep(5), 3250 * f),
       setTimeout(() => {
         setStep(6);
         landed.current();
-      }, 3550 * f),
-      setTimeout(() => done.current(item.id), 4000 * f),
+      }, 4100 * f),
+      setTimeout(() => done.current(item.id), 4600 * f),
     ];
     return () => ts.forEach(clearTimeout);
   }, [item, reduce]);
@@ -309,82 +349,93 @@ export function ReceiveLetter({
   const vw = window.innerWidth;
   const cloud = item.cloud ?? { x: vw / 2, y: 64 };
   const to =
-    item.to ?? new DOMRect(vw / 2 - 60, window.innerHeight * 0.55, 120, 90);
-  const gx = to.left + to.width / 2 - ENV_W / 2;
-  const gy = to.top + to.height / 2 - ENV_H / 2 + 22;
-  const risen = { x: (ENV_W - PHOTO_W) / 2, y: -PHOTO_H - 10 };
+    item.to ??
+    new DOMRect(vw / 2 - DOC_W / 2, window.innerHeight * 0.55, DOC_W, DOC_H);
+  // The letter lands centred over the destination slot.
+  const gx = to.left + to.width / 2 - RENV_W / 2;
+  const gy = Math.min(
+    window.innerHeight - RENV_H - 24,
+    to.top + to.height / 2 - RENV_H / 2 + 30,
+  );
+  const risen = { x: (RENV_W - DOC_W) / 2, y: -DOC_H - 18 };
+  const targetScale = Math.min(to.width / DOC_W, to.height / DOC_H);
   return (
     <div className="letter-layer" aria-hidden="true">
-      <Backdrop show={step >= 1 && step < 4} />
+      <Backdrop show={step >= 1 && step < 5} />
       <CloudPuff x={cloud.x} y={cloud.y} show={step >= 1 && step < 4} />
       <motion.div
         className="letter-group"
+        style={{ width: RENV_W, height: RENV_H }}
         initial={{
-          x: cloud.x - ENV_W / 2,
-          y: cloud.y - ENV_H / 2 + 8,
+          x: cloud.x - RENV_W / 2,
+          y: cloud.y - RENV_H / 2 + 8,
           scale: 0.3,
           opacity: 0,
           rotate: 0,
         }}
         animate={
           step >= 2
-            ? { x: gx, y: gy, scale: 1, opacity: 1, rotate: [6, -3, 0] }
+            ? { x: gx, y: gy, scale: 1, opacity: 1, rotate: [8, -4, 1, 0] }
             : {
-                x: cloud.x - ENV_W / 2,
-                y: cloud.y - ENV_H / 2 + 8,
+                x: cloud.x - RENV_W / 2,
+                y: cloud.y - RENV_H / 2 + 8,
                 scale: 0.3,
                 opacity: 0,
                 rotate: 0,
               }
         }
         transition={{
-          ...gentle,
+          ...drop,
           opacity: { duration: 0.3 },
-          rotate: { duration: 1.2, ease: 'easeOut' },
+          rotate: { duration: 1.4, ease: 'easeOut' },
         }}
       >
         <motion.div
           className="letter-env"
           animate={
             step >= 5
-              ? { opacity: 0, y: 10, scale: 0.94 }
+              ? { opacity: 0, y: 14, scale: 0.94 }
               : { opacity: 1, y: 0, scale: 1 }
           }
-          transition={{ duration: 0.4, delay: step >= 5 ? 0.15 : 0 }}
+          transition={{ duration: 0.45, delay: step >= 5 ? 0.2 : 0 }}
         >
           <Envelope
             open={step >= 3}
-            photo={item.photo}
-            innerY={step >= 4 ? risen.y : REST_Y}
+            inner={item.render}
+            innerY={step >= 4 ? risen.y : RREST_Y}
             innerVisible={step < 5}
+            width={RENV_W}
+            height={RENV_H}
+            innerWidth={DOC_W}
+            innerHeight={DOC_H}
+            sealed={item.kind === 'bill'}
           />
         </motion.div>
-        {/* free copy: appears where the photo rose to, then grows into the slot */}
+        {/* free copy: appears where the document rose to, then glides into the slot */}
         <AnimatePresence>
           {step >= 5 && step < 6 && (
-            <motion.img
-              className="letter-photo"
-              src={item.photo}
-              alt=""
+            <motion.div
+              className={`letter-doc kind-${item.kind}`}
+              style={{ width: DOC_W, height: DOC_H, transformOrigin: '0 0' }}
               initial={{
                 x: risen.x,
                 y: risen.y,
-                width: PHOTO_W,
-                height: PHOTO_H,
-                borderRadius: 8,
+                scale: 1,
                 opacity: 1,
+                rotate: 0,
               }}
               animate={{
-                x: to.left - gx,
-                y: to.top - gy,
-                width: to.width,
-                height: to.height,
-                borderRadius: 12,
+                x: to.left - gx + (to.width - DOC_W * targetScale) / 2,
+                y: to.top - gy + (to.height - DOC_H * targetScale) / 2,
+                scale: targetScale,
                 opacity: 1,
+                rotate: item.kind === 'bill' ? [0, -6, 0] : [0, 3, 0],
               }}
-              exit={{ opacity: 0, transition: { duration: 0.15 } }}
-              transition={soft}
-            />
+              exit={{ opacity: 0, transition: { duration: 0.18 } }}
+              transition={{ ...soft, rotate: { duration: 0.8 } }}
+            >
+              {item.render}
+            </motion.div>
           )}
         </AnimatePresence>
       </motion.div>
