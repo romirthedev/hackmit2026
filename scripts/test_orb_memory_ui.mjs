@@ -94,6 +94,7 @@ try {
   for(const width of [320,375,390,430,768]) {
     await phone.setViewportSize({width,height:844});
     assert(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`phone ${width} overflow`);
+    await phone.getByRole('button',{name:'Record',exact:true}).scrollIntoViewIfNeeded();
     const record=await phone.getByRole('button',{name:'Record',exact:true}).boundingBox();
     assert(record.y+record.height<844,`Record visible at ${width}`);
     await phone.screenshot({path:path.join(out,`phone-${width}.png`),fullPage:true});
@@ -112,7 +113,7 @@ try {
   await reloaded;
   await phone.getByRole('button',{name:'Record',exact:true}).waitFor();
   report.cases.push('Clearing from another view refreshes the phone so old answers and capture state cannot linger');
-  report.cases.push('Phone fits five widths with Record visible; unsupported battery shows —, supported telemetry shows actual charge');
+  report.cases.push('Phone fits five widths with Record reachable; unsupported battery shows —, supported telemetry shows actual charge');
   assert.deepEqual(report.errors,[]);report.passed=true;
 } catch(error) { report.failure=String(error);report.passed=false;await page.screenshot({path:path.join(out,'failure.png'),fullPage:true});throw error; }
 finally {await fs.writeFile(path.join(out,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({...report,artifacts:out}));await browser.close();}

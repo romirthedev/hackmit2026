@@ -18,6 +18,7 @@ from .faces import FaceEncoder
 from .models import (
     CompactObservation,
     ConversationIntent,
+    ConversationReply,
     DenseObservation,
     Observation,
     RecallAnswer,
@@ -33,6 +34,7 @@ SCHEMAS = {
     for c in (
         CompactObservation,
         ConversationIntent,
+        ConversationReply,
         DenseObservation,
         DocumentScan,
         ScanDetection,

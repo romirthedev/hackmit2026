@@ -7,7 +7,8 @@ camera, the postcard lands in her Notes and the bill lands on her calendar,
 on the big screen at home.
 
 Vision and memory inference run on the ASUS with its 35B model. Deepgram handles
-hearing and speaking; signed-in Codex reviews answer evidence before speech.
+hearing and speaking; signed-in Codex reviews personal-memory evidence before speech.
+Ordinary conversation does not require a photo or an evidence review.
 
 <p align="center">
   <img src="docs/screenshots/home.png" alt="Restored widget dashboard with voice, calendar and Notes" width="900">
@@ -19,13 +20,14 @@ hearing and speaking; signed-in Codex reviews answer evidence before speech.
 screen awake, saves full video and audio, and sends one small photo per second
 to the server for analysis. Uploads queue on the phone when the network drops.
 
-**Answers questions, spoken and grounded.** Record enables hands-free questions.
-Deepgram Nova-3 transcribes utterances, memory retrieves evidence, and Aura-2
-reads the reviewed answer. The restored dashboard recall card has a microphone
+**Talks with you and answers memory questions.** Tap the orb for a microphone-only
+conversation. Record separately enables video capture and hands-free questions.
+Deepgram Nova-3 transcribes utterances; general conversation answers directly,
+while personal-memory questions retrieve evidence for review before being read aloud. The restored dashboard recall card has a microphone
 button, Test voice, and explicit Retry voice controls. Computer requests and
 contextual follow-ups retain the existing Notch conversation routing.
 
-**Recognizes mail before filing it.** Scan saves the camera photo in Moments.
+**Recognizes mail before filing it.** Camera saves a still photo in Moments.
 ASUS checks for a personal letter/postcard or medical bill; only detected mail
 uses the matching fixed demo details (`source=model+template`). The postcard
 flies into Notes and the bill into Calendar. Ordinary scans stay in Moments.
@@ -39,7 +41,7 @@ what she scanned, what she asked, device health.
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/phone.png" alt="Phone: Record, Scan mail, and the voice card" width="260">
+  <img src="docs/screenshots/phone.png" alt="Phone: conversational orb with separate Camera and Record controls" width="260">
   &nbsp;&nbsp;
   <img src="docs/screenshots/print.png" alt="Printable demo mail: a postcard from Emma and a doctor's statement" width="560">
 </p>
@@ -84,8 +86,11 @@ browser's built-in voice reads the answers. Everything else is the same.
 
 ## Demo script
 
+For the protected walkthrough branch, use [the demo guide](docs/DEMO.md). Its
+private reviewed answers and prepared voice survive resetting the live demo.
+
 1. Open `/` on the big screen and `/phone` on the phone. Tap Record.
-2. Hold the printed postcard and bill in front of the camera. Tap Scan.
+2. Hold the printed postcard and bill in front of the camera. Tap Camera.
    Watch the home screen: postcard first, then the bill onto September 30.
 3. Say: "Rewind, when is my doctor's bill due?" The phone checks the evidence and reads back the due date.
 4. Say: "Rewind, what did Emma write to me?"
@@ -99,10 +104,19 @@ adds a letter. Set it to false to read document details from the image.
 ## How it fits together
 
 ```
-phone Record → durable conversation audio → Deepgram → memory / Notch routing
-memory → ASUS inference → Codex evidence review → Deepgram audio → phone
-phone Scan → saved JPEG in Moments → recognize mail → matching Notes / Calendar animation
+phone orb → microphone question → Deepgram → conversation / memory / Notch routing
+phone Record → retained video + durable hands-free audio → same routing
+conversation → natural response → shared speech player → phone
+memory → ASUS inference → Codex evidence review → shared speech player → phone
+phone Camera → saved JPEG in Moments → recognize mail → Notes / Calendar
 ```
+
+The phone's explicit questions are owned by `web/lib/use-phone-question.ts`;
+`phone-capture.ts` owns capture and uploads; `phone-storage.ts` preserves the
+original bytes and recording sessions for offline retry. `server-speech.ts` owns
+browser playback for both phone and desktop. Server `conversation.py` routes
+requests; `chat.py` handles ordinary conversation; `memory.py` retrieves personal
+sources. Keep these boundaries shared instead of adding a second voice client.
 
 Recall stays evidence-only: the model answers from retrieved frames,
 transcripts, connected Notch documents, and scanned mail, and must cite them.
@@ -111,9 +125,13 @@ The prompt asks for one or two friendly sentences in everyday words.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q          # 291 server tests, fake providers, no model downloads
+.venv/bin/python -m pytest -q          # Isolated server tests; no model downloads
 cd web && pnpm exec tsc --noEmit -p . && pnpm exec oxlint app components lib
 ```
+
+For repeated phone conversation, camera/recording, permission recovery and mobile
+layouts in Chromium and WebKit, follow [Phone testing](docs/PHONE-TESTING.md).
+It distinguishes controlled fixtures, actual speech/model integration and physical-device checks.
 
 Run `scripts/run_voice_mail_live.py --env-file data/phone-demo.env --asus --node /path/to/node`
 for real Deepgram, ASUS inference, evidence review and browser playback against

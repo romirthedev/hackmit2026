@@ -122,6 +122,7 @@ def test_static_entry_routes_share_backend_without_bypassing_auth(tmp_path, monk
             response = client.get(route)
             assert response.status_code == 200
             assert response.text == f"<html>{expected} integration fixture</html>"
+            assert response.headers["cache-control"] == "no-cache"
         assert client.get("/api/status").status_code == 401
         assert client.get("/api/status", headers={"Authorization": "Bearer " + ADMIN}).status_code == 200
 
@@ -683,3 +684,18 @@ def test_open_browser_demo_requires_explicit_setting_and_keeps_origin_checks(con
     assert c.post("/api/device/heartbeat", json={"boot": "x"}).status_code == 401
     app.state.settings.browser_open_access = False
     assert c.get("/api/status").status_code == 401
+
+
+def test_name_question_is_conversation_in_desktop_and_voice_apis(context):
+    client, app, provider = context
+    headers = {"Authorization": "Bearer " + ADMIN}
+    for endpoint in ("/api/ask", "/api/voice/ask"):
+        response = client.post(endpoint, headers=headers, json={"question": "What is your name?"})
+        assert response.status_code == 200
+        result = response.json()
+        answer = result if endpoint == "/api/ask" else result["answer"]
+        assert answer["mode"] == "conversation"
+        assert "I'm Rewind" in answer["answer"]
+        assert answer["evidence"] == [] and answer["grounded"] is False
+        if endpoint == "/api/voice/ask":
+            assert result["spoken"] == answer["answer"]

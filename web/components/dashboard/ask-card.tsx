@@ -1,12 +1,14 @@
 'use client';
 /* oxlint-disable next/no-html-link-for-pages -- open the recording page with a full navigation */
 import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ArrowUp, Mic, Square, Volume2, VolumeX } from 'lucide-react';
 import { Orb } from './orb';
 import { Card, Cell } from './primitives';
-import { AnswerDetail, isReviewedAnswer } from './answer-detail';
+import { AnswerDetail, canSpeakAnswer } from './answer-detail';
 import { api, type Answer, type Recording, type Heard } from '@/lib/api';
 import { recordUtterance } from '@/lib/voice';
+import { voiceTapFeedback } from '@/lib/voice-feedback';
 import { useSpeechPlayback } from '@/lib/use-speech-playback';
 
 export function AskCard({
@@ -30,7 +32,9 @@ export function AskCard({
 }) {
   const [submitted, setSubmitted] = useState<Answer | null>(null);
   const [text, setText] = useState('');
+  const [starting, setStarting] = useState(false);
   const [listening, setListening] = useState(false);
+  const recordingReady = useRef(false);
   const microphone = useRef<AbortController | null>(null);
   const finishRecording = useRef<AbortController | null>(null);
   const [hearing, setHearing] = useState(false);
@@ -54,7 +58,7 @@ export function AskCard({
   useEffect(() => {
     if (
       !answer ||
-      (!isReviewedAnswer(answer) && answer.mode !== 'no_evidence') ||
+      (!canSpeakAnswer(answer) && answer.mode !== 'no_evidence') ||
       attempted.current.has(answer.id) ||
       document.hidden
     )
@@ -62,12 +66,7 @@ export function AskCard({
     // A rejected playback stays available for an explicit retry, rather than
     // being attempted again on every answer poll.
     attempted.current.add(answer.id);
-    if (sound && !disabled)
-      void speak(
-        answer.mode === 'no_evidence'
-          ? "I couldn't find recorded evidence to answer that. Try recording a moment first."
-          : answer.answer,
-      );
+    if (sound && !disabled) void speak(answer.answer);
   }, [answer, sound, disabled, speak, visibilityEpoch]);
   useEffect(() => {
     if (disabled) {
@@ -75,19 +74,22 @@ export function AskCard({
       microphone.current?.abort();
     }
   }, [disabled, cancel]);
-  const state = listening
-    ? 'listening'
-    : busy || hearing || answer?.mode === 'checking'
-      ? 'thinking'
-      : answer
-        ? 'answer'
-        : 'idle';
+  const state = starting
+    ? 'starting'
+    : listening
+      ? 'listening'
+      : busy || hearing || answer?.mode === 'checking'
+        ? 'thinking'
+        : answer
+          ? 'answer'
+          : 'idle';
   async function go(question = text.trim()) {
-    if (!question || pending.current || disabled || listening) return;
+    if (!question || pending.current || disabled || starting || listening)
+      return;
     pending.current = true;
     setBusy(true);
     setError('');
-    if (sound) void speak("I'll check that.");
+    cancel();
     try {
       setSubmitted(await ask(question));
       setText('');
@@ -99,17 +101,26 @@ export function AskCard({
     }
   }
   async function listen() {
-    if (listening) {
-      finishRecording.current?.abort();
+    if (microphone.current) {
+      if (finishRecording.current && !finishRecording.current.signal.aborted) {
+        voiceTapFeedback();
+        if (!recordingReady.current) microphone.current.abort();
+        finishRecording.current.abort();
+      }
       return;
     }
-    if (pending.current || microphone.current || disabled) return;
+    if (pending.current || disabled) return;
     const controller = new AbortController();
     microphone.current = controller;
     const finish = new AbortController();
     finishRecording.current = finish;
-    setListening(true);
-    setError('');
+    recordingReady.current = false;
+    // Commit feedback while the tap still owns microphone/audio activation.
+    flushSync(() => {
+      setStarting(true);
+      setError('');
+    });
+    voiceTapFeedback();
     try {
       voice.cancel();
       voice.unlock();
@@ -117,6 +128,13 @@ export function AskCard({
         undefined,
         controller.signal,
         finish.signal,
+        undefined,
+        () => {
+          if (controller.signal.aborted || finish.signal.aborted) return;
+          recordingReady.current = true;
+          setStarting(false);
+          setListening(true);
+        },
       );
       setListening(false);
       if (controller.signal.aborted) return;
@@ -143,6 +161,8 @@ export function AskCard({
     } finally {
       microphone.current = null;
       finishRecording.current = null;
+      recordingReady.current = false;
+      setStarting(false);
       setHearing(false);
       setListening(false);
     }
@@ -154,24 +174,32 @@ export function AskCard({
           <h2 className="card-title">{title}</h2>
           <span className="dim">
             <span className="live" />
-            {listening
-              ? 'Listening… tap to send'
-              : hearing
-                ? 'Transcribing…'
-                : busy
-                  ? 'Finding evidence'
-                  : answer?.mode === 'checking'
-                    ? 'Checking evidence'
-                    : disabled
-                      ? 'Reconnect to ask'
-                      : 'Ready'}
+            {starting
+              ? 'Opening microphone… tap to cancel'
+              : listening
+                ? 'Listening… tap to send'
+                : hearing
+                  ? 'Transcribing…'
+                  : busy
+                    ? 'Thinking…'
+                    : answer?.mode === 'checking'
+                      ? 'Checking evidence'
+                      : disabled
+                        ? 'Reconnect to ask'
+                        : 'Ready'}
           </span>
         </div>
         <button
           type="button"
           className="orb-stage"
-          aria-label={listening ? 'Finish and send question' : 'Ask by voice'}
-          aria-pressed={listening}
+          aria-label={
+            starting
+              ? 'Cancel opening microphone'
+              : listening
+                ? 'Finish and send question'
+                : 'Ask by voice'
+          }
+          aria-pressed={starting || listening}
           disabled={busy || hearing || disabled}
           onClick={() => void listen()}
         >
@@ -205,14 +233,18 @@ export function AskCard({
         >
           <button
             type="button"
-            className={`gbtn gbtn-round ${listening ? 'is-live' : ''}`}
+            className={`gbtn gbtn-round ${starting || listening ? 'is-live' : ''}`}
             aria-label={
-              listening ? 'Finish and send question' : 'Record a question'
+              starting
+                ? 'Cancel opening microphone'
+                : listening
+                  ? 'Finish and send question'
+                  : 'Record a question'
             }
             disabled={busy || hearing || disabled}
             onClick={() => void listen()}
           >
-            {listening ? <Square fill="currentColor" /> : <Mic />}
+            {starting || listening ? <Square fill="currentColor" /> : <Mic />}
           </button>
           <label className={`ask-input ${text ? 'has-text' : ''}`}>
             <input
@@ -220,7 +252,7 @@ export function AskCard({
               onChange={(event) => setText(event.target.value)}
               placeholder={placeholder}
               aria-label="Ask about your recordings"
-              disabled={busy || hearing || listening || disabled}
+              disabled={busy || hearing || starting || listening || disabled}
               maxLength={2000}
             />
             <button
@@ -228,7 +260,12 @@ export function AskCard({
               className="send"
               aria-label="Send question"
               disabled={
-                busy || hearing || listening || disabled || !text.trim()
+                busy ||
+                hearing ||
+                starting ||
+                listening ||
+                disabled ||
+                !text.trim()
               }
             >
               <ArrowUp />

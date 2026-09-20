@@ -1,0 +1,83 @@
+// Built UI regression. A synthetic receipt tests demo presentation and speech;
+// API retention is tested separately by the backend suite. No personal data.
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+const {chromium}=createRequire(import.meta.url)('playwright');
+const origin=process.env.REWIND_UI_TEST_URL, token=process.env.REWIND_UI_TEST_TOKEN;
+assert(origin && new URL(origin).hostname==='127.0.0.1' && token?.startsWith('ui-test-'));
+const out=path.resolve('data/ui-integration/demo-branch-'+Date.now());
+await fs.mkdir(out,{recursive:true});
+const report={scope:'Synthetic UI receipts and WAV speech only; separate backend retention test required.',cases:[],errors:[]};
+const browser=await chromium.launch({executablePath:process.env.REWIND_TEST_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
+const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce',permissions:['camera','microphone']});
+const respond=(route,body)=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});
+const api=async(endpoint,init={})=>{const response=await fetch(origin+'/api'+endpoint,{...init,headers:{Authorization:'Bearer '+token,...init.headers}});assert(response.ok);return response.json();};
+async function until(fn,label,ms=16000){const end=Date.now()+ms;while(Date.now()<end){if(await fn())return;await new Promise(r=>setTimeout(r,75));}throw Error(label);}
+function wave(){const samples=4800,b=Buffer.alloc(44+samples*2);b.write('RIFF',0);b.writeUInt32LE(b.length-8,4);b.write('WAVEfmt ',8);b.writeUInt32LE(16,16);b.writeUInt16LE(1,20);b.writeUInt16LE(1,22);b.writeUInt32LE(16000,24);b.writeUInt32LE(32000,28);b.writeUInt16LE(2,32);b.writeUInt16LE(16,34);b.write('data',36);b.writeUInt32LE(samples*2,40);return b;}
+let ready=true, cleared=0, resets=0, answers=[],turns=[];
+const spoken=[];
+const baseline=await api('/status');assert.equal(baseline.provider,'disabled');
+const cached={id:'88888888-8888-4888-8888-888888888888',question:'Where is my medicine?',answer:'It is beside the paper towels.',evidence:[],created_at:Date.now()/1000,grounded:true,mode:'demo_cached',verification:{status:'complete',receipt:{cached:true,claims_reviewed:true,method:'original-evidence-review',reviewer:'synthetic test'}}};
+await context.route('**/api/status',r=>respond(r,{...baseline,history_cleared_before:cleared,demo:{enabled:true,ready,entry_count:4,protected_media_count:8,protected_recording_count:1,error:ready?'':'Not ready'}}));
+await context.route('**/api/answers',r=>respond(r,answers));
+await context.route('**/api/voice/status',r=>respond(r,{deepgram:true,tts_model:'synthetic-wave',stt_model:'fixture'}));
+await context.route('**/api/voice/speak',r=>{spoken.push(r.request().postDataJSON().text);return r.fulfill({status:200,contentType:'audio/wav',body:wave()});});
+await context.route('**/api/ask',r=>{answers=[cached];return respond(r,cached);});
+await context.route('**/api/conversation/state',r=>respond(r,{status:'listening',turns}));
+await context.route('**/api/conversation/text',r=>{const q=r.request().postDataJSON();answers=[cached];turns=[{id:q.id,transcript:q.text,response:cached.answer,response_revision:1,status:'completed',kind:'recall',answer_id:cached.id,created_at:Date.now()/1000}];return respond(r,{accepted:true,id:q.id});});
+await context.route('**/api/memory',r=>{assert.equal(r.request().method(),'DELETE');assert.equal(r.request().postDataJSON().confirm,true);resets++;answers=[];turns=[];cleared=Date.now()/1000;return respond(r,{cleared:true});});
+const page=await context.newPage();page.on('pageerror',e=>report.errors.push(e.message));
+try{
+ const invite=await api('/pairing',{method:'POST'});
+ await page.goto(origin+'/#connect='+invite.ticket);
+ await page.getByRole('button',{name:'Ask by voice',exact:true}).waitFor();
+ await page.getByRole('textbox',{name:'Ask about your recordings'}).fill(cached.question);
+ await page.getByRole('button',{name:'Send question',exact:true}).click();
+ await page.getByText('Saved walkthrough · source reviewed',{exact:true}).waitFor();
+ await until(()=>spoken.includes(cached.answer),'Reviewed cached answer starts desktop voice');
+ assert(await page.getByRole('button',{name:'Read answer aloud',exact:true}).isEnabled());
+ assert.equal(await page.getByText('Verified answer',{exact:true}).count(),0);
+ report.cases.push('Desktop speaks a reviewed cached answer and identifies its saved walkthrough source');
+ await page.getByRole('button',{name:'Reset live demo memories',exact:true}).click();
+ await page.getByRole('alertdialog',{name:'Reset live demo memories?'}).waitFor();
+ await page.getByText('The saved dorm walkthrough and its answers stay ready for the next demo.',{exact:false}).waitFor();
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(resets,0);
+ await page.getByRole('button',{name:'Reset live demo memories',exact:true}).click();
+ await page.getByRole('button',{name:'Reset demo',exact:true}).click();
+ await until(()=>resets===1,'Reset submits once');
+ await page.getByRole('button',{name:'Ask by voice',exact:true}).waitFor();
+ assert.equal(await page.locator('.answer-copy').count(),0);
+ report.cases.push('Reset names only live memories, Cancel preserves them, confirmation clears visible answers');
+ ready=false;await page.reload();
+ await page.getByRole('button',{name:'Reset live demo memories',exact:true}).click();
+ await page.getByText('Walkthrough protection is not ready. Reset is unavailable until it is restored.',{exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Reset demo',exact:true}).isDisabled());
+ assert.equal(resets,1);
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();ready=true;
+ report.cases.push('Missing protection disables reset instead of exposing a destructive fallback');
+ const phone=await context.newPage();phone.on('pageerror',e=>report.errors.push(e.message));
+ await phone.setViewportSize({width:390,height:844});
+ await phone.goto(origin+'/phone/');await phone.getByRole('button',{name:'Record',exact:true}).waitFor();
+ const before=spoken.filter(x=>x===cached.answer).length;
+ await phone.getByRole('textbox',{name:'Type a question or request'}).fill(cached.question);
+ await phone.getByRole('button',{name:'Send question',exact:true}).click();
+ await phone.getByText('Saved walkthrough · source reviewed',{exact:true}).waitFor();
+ await until(()=>spoken.filter(x=>x===cached.answer).length>before,'Phone automatically speaks cached conversation answer');
+ assert(await phone.getByRole('button',{name:'Read answer aloud',exact:true}).isEnabled());
+ await phone.getByRole('button',{name:'Reset live demo memories',exact:true}).click();
+ await phone.getByRole('button',{name:'Cancel',exact:true}).click();
+ await phone.screenshot({path:path.join(out,'phone-reviewed.png'),fullPage:true});
+ report.cases.push('Phone conversation shows and speaks the same cached receipt; demo reset copy is present');
+ // A mode string on its own must never turn an unreviewed draft into speech.
+ answers=[{...cached,id:'99999999-9999-4999-8999-999999999999',verification:{status:'pending',receipt:{cached:true,claims_reviewed:false}}}];
+ turns=[];
+ await phone.reload();
+ await phone.getByRole('button',{name:'Read answer aloud',exact:true}).waitFor();
+ assert(await phone.getByRole('button',{name:'Read answer aloud',exact:true}).isDisabled());
+ assert.equal(await phone.getByText('Saved walkthrough · source reviewed',{exact:true}).count(),0);
+ report.cases.push('Unreviewed cache-like answers remain unspoken and never show reviewed provenance');
+ assert.deepEqual(report.errors,[]);report.passed=true;
+}catch(error){report.passed=false;report.failure=String(error);await page.screenshot({path:path.join(out,'failure.png'),fullPage:true});throw error;}
+finally{await fs.writeFile(path.join(out,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({...report,artifacts:out}));await browser.close();}

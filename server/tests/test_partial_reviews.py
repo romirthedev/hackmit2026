@@ -187,6 +187,7 @@ async def test_uncited_abstention_remains_deterministic_and_does_not_run_models(
         before=2000,
     )
     assert result["answer"] == "The available recordings do not establish an answer to that question."
+    assert result["mode"] == "no_evidence"
     assert not result["grounded"] and not result["evidence"]
     assert verifier.claim() is None and not runner.calls
 

@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS gate_decisions (
 CREATE INDEX IF NOT EXISTS idx_gate_media ON gate_decisions(media_id,stage);
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(id UNINDEXED,summary,transcript,tags);
 CREATE TRIGGER IF NOT EXISTS events_insert AFTER INSERT ON events BEGIN
- INSERT INTO events_fts(id,summary,transcript,tags) VALUES(new.id,new.summary,new.transcript,new.tags);
+ INSERT INTO events_fts(id,summary,transcript,tags) VALUES(new.id,new.summary,new.transcript,new.tags || ' ' || new.objects);
 END;
 CREATE TRIGGER IF NOT EXISTS events_delete AFTER DELETE ON events BEGIN
  DELETE FROM events_fts WHERE id=old.id;
@@ -93,6 +93,28 @@ class Database:
             ):
                 if name not in event_columns:
                     c.execute(f"ALTER TABLE events ADD COLUMN {name} {definition}")
+            # Search indexes are derived metadata. Extend them in place so old
+            # object descriptions become searchable without touching originals,
+            # event IDs, labels, recordings, or existing answers.
+            if not c.execute(
+                "SELECT 1 FROM settings WHERE key='events_fts_objects_v1'"
+            ).fetchone():
+                c.execute("DROP TRIGGER IF EXISTS events_insert")
+                c.execute("""CREATE TRIGGER events_insert AFTER INSERT ON events BEGIN
+                    INSERT INTO events_fts(id,summary,transcript,tags)
+                    VALUES(new.id,new.summary,new.transcript,new.tags || ' ' || new.objects);
+                END""")
+                c.execute("""UPDATE events_fts SET
+                    summary=(SELECT summary FROM events WHERE events.id=events_fts.id),
+                    transcript=(SELECT transcript FROM events WHERE events.id=events_fts.id),
+                    tags=(SELECT tags || ' ' || objects FROM events WHERE events.id=events_fts.id)
+                    WHERE EXISTS(SELECT 1 FROM events WHERE events.id=events_fts.id)""")
+                c.execute("INSERT INTO settings(key,value) VALUES('events_fts_objects_v1','true')")
+            c.execute("""CREATE TRIGGER IF NOT EXISTS events_update
+                AFTER UPDATE OF summary,transcript,tags,objects ON events BEGIN
+                    UPDATE events_fts SET summary=new.summary,transcript=new.transcript,
+                    tags=new.tags || ' ' || new.objects WHERE id=new.id;
+                END""")
             c.execute("PRAGMA user_version=3")
 
     @contextmanager

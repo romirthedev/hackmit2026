@@ -1,6 +1,6 @@
 'use client';
 import { useRef, useState, type ReactNode } from 'react';
-import { api } from '@/lib/api';
+import { api, type Status } from '@/lib/api';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -14,17 +14,22 @@ export function MemoryReset({
   children = 'Memory',
   className = '',
   beforeClear,
+  demo,
 }: {
   children?: ReactNode;
   className?: string;
   beforeClear?: () => Promise<unknown> | void;
+  demo?: Status['demo'];
 }) {
   const [open, setOpen] = useState(false);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const demoMode = demo?.enabled === true;
+  const protectedWalkthrough = demo?.ready === true && demo.protected_media_count > 0;
+  const protectionUnavailable = demoMode && !protectedWalkthrough;
   async function clear() {
-    if (busy) return;
+    if (busy || protectionUnavailable) return;
     setBusy(true);
     setError('');
     try {
@@ -49,7 +54,7 @@ export function MemoryReset({
       <button
         type="button"
         className={`memory-link ${className}`}
-        aria-label="Clear all memory"
+        aria-label={demoMode ? 'Reset live demo memories' : 'Clear all memory'}
         onClick={() => {
           setError('');
           setOpen(true);
@@ -61,14 +66,25 @@ export function MemoryReset({
         className="memory-confirm"
         initialFocus={cancelButton}
       >
-        <AlertDialogTitle>Clear all memory?</AlertDialogTitle>
+        <AlertDialogTitle>
+          {demoMode ? 'Reset live demo memories?' : 'Clear all memory?'}
+        </AlertDialogTitle>
         <AlertDialogDescription>
-          This permanently clears saved recordings, scans, answers, people and
-          conversation history from Rewind. Connected memory is cleared and sync
-          is turned off. Original mail, calendars and notes in connected apps
-          stay there.
+          {demoMode
+            ? 'Clear the letter, medical bill, new recordings and conversation history. The saved dorm walkthrough and its answers stay ready for the next demo.'
+            : 'This permanently clears saved recordings, scans, answers, people and conversation history from Rewind. Connected memory is cleared and sync is turned off. Original mail, calendars and notes in connected apps stay there.'}
         </AlertDialogDescription>
-        <p>Stop recording on other devices first. This cannot be undone.</p>
+        {protectionUnavailable ? (
+          <p className="memory-reset-error" role="alert">
+            Walkthrough protection is not ready. Reset is unavailable until it is restored.
+          </p>
+        ) : (
+          <p>
+            {demoMode
+              ? 'Stop recording on other devices first. New demo memories cannot be recovered after reset.'
+              : 'Stop recording on other devices first. This cannot be undone.'}
+          </p>
+        )}
         {error && (
           <p className="memory-reset-error" role="alert">
             {error}
@@ -81,10 +97,10 @@ export function MemoryReset({
           <AlertDialogAction
             type="button"
             className="memory-confirm-ok"
-            disabled={busy}
+            disabled={busy || protectionUnavailable}
             onClick={() => void clear()}
           >
-            {busy ? 'Clearing…' : 'OK'}
+            {busy ? 'Clearing…' : demoMode ? 'Reset demo' : 'OK'}
           </AlertDialogAction>
         </div>
       </AlertDialogContent>

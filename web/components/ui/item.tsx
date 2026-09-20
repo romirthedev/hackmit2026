@@ -6,17 +6,24 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 
-function ItemGroup({ className, ...props }: React.ComponentProps<'div'>) {
+function ItemGroup({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<'ul'>) {
   return (
-    <div
-      role="list"
+    <ul
       data-slot="item-group"
       className={cn(
-        'gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2 group/item-group flex w-full flex-col',
+        'm-0 list-none p-0 gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2 group/item-group flex w-full flex-col',
         className,
       )}
       {...props}
-    />
+    >
+      {React.Children.map(children, (child) =>
+        child == null ? null : <li className="min-w-0">{child}</li>,
+      )}
+    </ul>
   );
 }
 

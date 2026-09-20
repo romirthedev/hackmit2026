@@ -51,6 +51,7 @@ import { UsageCard } from '@/components/usage-card';
 import { MemoryCommand } from '@/components/memory-command';
 import { MemoryComposer } from '@/components/memory-composer';
 import { MemoryLibrary } from '@/components/memory-library';
+import { answerState, canSpeakAnswer } from '@/components/dashboard/answer-detail';
 import {
   AnimatedNumber,
   MemoryFilmstrip,
@@ -979,24 +980,14 @@ export default function Home() {
                               className="quiet icon-button"
                               aria-label="Read answer aloud"
                               onClick={() => speak(a.answer)}
-                              disabled={
-                                a.mode === 'checking' ||
-                                (!!status?.verification_enabled &&
-                                  !a.verification?.receipt?.claims_reviewed)
-                              }
+                              disabled={!canSpeakAnswer(a)}
                             >
                               <Volume2 size={15} />
                             </CatalogButton>
                           </div>
                           <h3>{a.question}</h3>
                           <span className="answer-kind">
-                            {a.mode === 'checking'
-                              ? 'Draft · checking original evidence'
-                              : a.verification?.receipt?.claims_reviewed
-                                ? a.mode === 'insufficient'
-                                  ? 'Reviewed · evidence incomplete'
-                                  : 'Original evidence reviewed'
-                                : 'Not independently reviewed'}
+                            {answerState(a)}
                           </span>
                           <p>
                             {a.answer.replace(
@@ -1453,10 +1444,11 @@ export default function Home() {
                   </CatalogButton>
                   <CatalogButton
                     className="quiet danger"
-                    disabled={selected.source === 'notch'}
+                    disabled={selected.source === 'notch' || selected.demo_protected}
                     onClick={() => setDeleting(selected)}
                   >
-                    <Trash2 size={16} /> Delete recording
+                    <Trash2 size={16} />
+                    {selected.demo_protected ? 'Saved walkthrough protected' : 'Delete recording'}
                   </CatalogButton>
                 </div>
               )}

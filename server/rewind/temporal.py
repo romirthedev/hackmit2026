@@ -38,6 +38,35 @@ def is_day_overview(question):
     return _DAY_OVERVIEW.fullmatch(_overview_clause(question)) is not None
 
 
+def is_memory_overview(question):
+    """Recognize requests to inspect the workspace without a search keyword.
+
+    An inventory is not a factual claim that every moment has been processed.
+    Keep topic-specific knowledge questions out of this path.
+    """
+    text = _overview_clause(question).lower().rstrip("?.!")
+    text = re.sub(r"\bu\b", "you", text)
+    text = re.sub(r"\bur\b", "your", text)
+    return bool(
+        re.fullmatch(
+            r"(?:please\s+)?(?:"
+            r"what\s+(?:information|info|data|details|memories)\s+(?:(?:do\s+)?you\s+have|have\s+you\s+"
+            r"(?:saved|recorded|learned|learnt|collected))"
+            r"(?:\s+(?:(?:about|on)\s+me|(?:from|in|across)\s+"
+            r"(?:(?:all|of|my|our|your|the)\s+){0,4}(?:data|recordings?|videos?|photos?|memories)))?"
+            r"|what\s+do\s+you\s+(?:know|remember)\s+about\s+me"
+            r"|what\s+have\s+you\s+(?:seen|recorded|learned|learnt|remembered)"
+            r"(?:\s+from\s+(?:my|the)\s+(?:recordings?|videos?|photos?))?"
+            r"|(?:summari[sz]e|recap|describe)\s+(?:my|our|the)\s+(?:saved\s+)?"
+            r"(?:recordings|videos|photos|memories)"
+            r"|(?:tell|show)\s+me\s+(?:what\s+you\s+(?:know|remember|have\s+seen|have\s+learned)"
+            r"(?:\s+about\s+me)?|(?:the\s+)?(?:information|memories)\s+you\s+have)"
+            r")",
+            text,
+        )
+    )
+
+
 def day_overview_bounds(question, *, timezone, now, after=None, before=None):
     """Use the user's local calendar day only when no explicit time filters exist.
 

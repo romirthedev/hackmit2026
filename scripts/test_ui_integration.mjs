@@ -41,7 +41,7 @@ assert.equal(initial.workers, 0, "Fixture must not process uploaded fixture medi
 const browser = await chromium.launch({
   executablePath: process.env.REWIND_TEST_CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : undefined),
   headless: true,
-  args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", "--autoplay-policy=no-user-gesture-required"],
+  args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
 });
 const contexts = [];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -135,7 +135,7 @@ async function queue(page) {
       const db = request.result;
       if (!db.objectStoreNames.contains("chunks")) { db.close(); resolve([]); return; }
       const tx = db.transaction("chunks"), read = tx.objectStore("chunks").getAll();
-      tx.oncomplete = () => { resolve(read.result.map((item) => ({ id: item.id, kind: item.kind, bytes: item.blob.size }))); db.close(); };
+      tx.oncomplete = () => { resolve(read.result.map((item) => ({ id: item.id, kind: item.kind, bytes: item.blob?.size ?? item.bytes?.byteLength }))); db.close(); };
       tx.onerror = () => reject(tx.error);
     };
   }));
@@ -211,7 +211,7 @@ try {
   });
   await test("record/stop retains real original video and automatic voice upload", async () => {
     const page = await newPage("capture"); await pair(page);
-    await page.getByRole("button", { name: "Start recording with orb", exact: true }).click();
+    await page.getByRole("button", { name: "Record", exact: true }).click();
     await page.getByRole("button", { name: "Stop recording", exact: true }).waitFor();
     await page.waitForFunction(() => window.__uiQA.audio.length > 0);
     await page.waitForTimeout(1200); await page.evaluate(() => window.__uiQA.tone());
@@ -233,11 +233,11 @@ try {
     await page.close();
     return { bytes: recording.bytes, chunks: recording.received_chunks, speechUpload: true };
   });
-  await test("scanner uses actual camera JPEG; offline queue survives and retries", async () => {
+  await test("Camera saves actual camera JPEG; offline queue survives and retries", async () => {
     const page = await newPage("scanner"); await pair(page);
     const before = (await admin("/status")).received;
     await page.route("**/api/ingest/frame", (r) => respond(r, 503, { detail: "Test upload unavailable" }));
-    await page.getByRole("button", { name: "Scan", exact: true }).click();
+    await page.getByRole("button", { name: "Camera", exact: true }).click();
     await until(async () => (await queue(page)).some((c) => c.kind === "frame" && c.bytes > 1000), "Real scan must remain in durable retry queue");
     await page.getByText(/waiting|queued|retry|interrupted|offline/i).first().waitFor();
     assert.equal((await admin("/status")).received, before, "Failed upload cannot increment backend received count");
@@ -253,7 +253,7 @@ try {
   await test("cleared offline uploads are discarded and cannot return after reload", async () => {
     const page = await newPage("cleared-queue"); await pair(page);
     await page.route("**/api/ingest/frame", r => respond(r, 503, {detail:"Test offline"}));
-    await page.getByRole("button", {name:"Scan",exact:true}).click();
+    await page.getByRole("button", {name:"Camera",exact:true}).click();
     await until(async()=> (await queue(page)).length>0, "Offline scan is durable");
     await page.getByRole("button", {name:"Close camera",exact:true}).click();
     await page.unroute("**/api/ingest/frame");
@@ -305,7 +305,7 @@ try {
     await page.route("**/api/answers", (r) => respond(r, 200, submitted ? [{ ...answer, ...(verified ? { answer: "CHECKED_FIXTURE_RESULT", mode: "verified", grounded: true, verification: { status: "complete", receipt: { claims_reviewed: true, answer_complete: true, reviews: [{ model: "Fixture reviewer", seconds: 0.01, result: { reason: "Controlled browser-state fixture, not an actual model review." } }] } } } : {}) }] : []));
     await page.route("**/api/conversation/state", (r) => respond(r, 200, { status: submitted ? (verified ? "completed" : "checking") : "listening", turns: submitted ? [{ id: "fixture-turn", transcript: question, response: verified ? "CHECKED_FIXTURE_RESULT" : "", response_revision: verified ? 2 : 1, status: verified ? "completed" : "checking", kind: "recall", answer_id: answer.id, created_at: answer.created_at }] : [] }));
     await page.route("**/api/conversation/text", (r) => { assert.equal(r.request().postDataJSON().text, question); submitted = true; return respond(r, 200, { id: "fixture-turn", status: "queued" }); });
-    await page.getByRole("button", { name: "Spoken answers and reminders", exact: true }).click();
+    await page.getByRole("button", { name: "Test voice", exact: true }).click();
     await page.getByRole("textbox", { name: "Type a question or request", exact: true }).fill(question);
     await page.getByRole("button", { name: "Send question", exact: true }).click();
     await page.getByText("UNVERIFIED_FIXTURE_DRAFT", { exact: true }).waitFor();

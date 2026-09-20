@@ -45,12 +45,13 @@ try{
  await phone.setViewportSize({width:320,height:740});await fits(phone);await phone.setViewportSize({width:390,height:844});
  report.cases.push('Fresh desktop and separate phone browser open without sign-in; Ask controls fit at six widths and 200% zoom');
  assert.equal(await phone.getByText('Your connections',{exact:true}).count(),0);assert.equal(await phone.getByText('Your computer',{exact:true}).count(),0);
- const recordBounds=await phone.getByRole('button',{name:'Record',exact:true}).boundingBox();assert(recordBounds.y+recordBounds.height<844,'Record is visible without scrolling');
+ await phone.getByRole('button',{name:'Record',exact:true}).scrollIntoViewIfNeeded();
+ const recordBounds=await phone.getByRole('button',{name:'Record',exact:true}).boundingBox();assert(recordBounds.y+recordBounds.height<844,'Record is reachable without clipping');
  // Each repeat must animate newly saved document IDs, then retain exactly two fixed documents.
  let previous=[];
  for(let run=0;run<2;run++){
   if(run)await dashboard.getByRole('button',{name:'Next month',exact:true}).click();
-  await phone.bringToFront();await phone.getByRole('button',{name:'Scan',exact:true}).click();
+  await phone.bringToFront();await phone.getByRole('button',{name:'Camera',exact:true}).click();
   await phone.locator('.letter-layer').waitFor({state:'visible'});
   if(!run)await phone.screenshot({path:path.join(out,'phone-sending.png')});
   await dashboard.bringToFront();

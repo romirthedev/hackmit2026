@@ -2,6 +2,19 @@
 import { VoiceActivityCapture, type VoiceActivity } from './voice-activity';
 import { ServerSpeech } from './server-speech';
 import { AUTH_REQUIRED_EVENT } from './api';
+import { attachCamera, mediaAccessError, requestMedia } from './media-access';
+import {
+  activeOriginals,
+  chunks,
+  database,
+  endChunk,
+  queueInfo,
+  recoverSessions,
+  write,
+  type Chunk,
+  type EndReason,
+  type RecordingSession,
+} from './phone-storage';
 
 export type CaptureState = {
   recording: boolean;
@@ -32,130 +45,17 @@ export type Snapshot = {
   width: number;
   height: number;
 };
-type Chunk = {
-  id: string;
-  boot: string;
-  seq: number;
-  kind: 'frame' | 'audio' | 'video' | 'recording_end' | 'conversation_audio';
-  at: number;
-  blob: Blob;
-  intent: 'memory' | 'question' | 'scan';
-  recordingStartedAt?: number;
-};
 export type CaptureOptions = {
   // Receives each spoken utterance while recording. When set, speech is
   // handled by the caller (the wake-word voice flow) instead of the
   // server-side conversation queue.
   onUtterance?: (blob: Blob, at: number) => void;
 };
-type EndReason =
-  | 'stopped'
-  | 'hidden'
-  | 'interrupted'
-  | 'storage_full'
-  | 'page_closed';
-type RecordingSession = {
-  id: string;
-  mime: string;
-  startedAt: number;
-  lastAt: number;
-  chunks: number;
-  closed: boolean;
-};
 const MAX_QUEUE_BYTES = 150 * 1024 * 1024;
 // Leave room for the final recorder fragment after stopping at the soft limit.
 const STOP_QUEUE_BYTES = 120 * 1024 * 1024;
 const ORIGINAL_FRAGMENT_BYTES = 4 * 1024 * 1024;
-const activeOriginals = new Set<string>();
 const pageHidden = () => document.visibilityState === 'hidden';
-let dbPromise: Promise<IDBDatabase> | undefined;
-function database() {
-  if (!dbPromise)
-    dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open('rewind-phone-recordings', 2);
-      req.onupgradeneeded = () => {
-        if (!req.result.objectStoreNames.contains('chunks'))
-          req.result.createObjectStore('chunks', { keyPath: 'id' });
-        if (!req.result.objectStoreNames.contains('sessions'))
-          req.result.createObjectStore('sessions', { keyPath: 'id' });
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  return dbPromise;
-}
-async function chunks(): Promise<Chunk[]> {
-  const db = await database();
-  return new Promise((resolve, reject) => {
-    const req = db.transaction('chunks').objectStore('chunks').getAll();
-    req.onsuccess = () => resolve(req.result as Chunk[]);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function write(
-  item: Chunk | string,
-  session?: RecordingSession | string,
-) {
-  const db = await database();
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['chunks', 'sessions'], 'readwrite');
-    if (typeof item === 'string') tx.objectStore('chunks').delete(item);
-    else tx.objectStore('chunks').put(item);
-    if (typeof session === 'string') tx.objectStore('sessions').delete(session);
-    else if (session) tx.objectStore('sessions').put(session);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-}
-
-function endChunk(
-  session: RecordingSession,
-  reason: EndReason,
-  endedAt: number,
-): Chunk {
-  return {
-    id: `finish-${session.id}`,
-    boot: session.id,
-    seq: session.chunks,
-    kind: 'recording_end',
-    at: endedAt,
-    intent: 'memory',
-    blob: new Blob(
-      [
-        JSON.stringify({
-          mime: session.mime,
-          started_at: session.startedAt,
-          ended_at: Math.max(session.startedAt, endedAt),
-          chunks: session.chunks,
-          reason,
-        }),
-      ],
-      { type: 'application/json' },
-    ),
-  };
-}
-
-async function recoverSessions() {
-  const db = await database();
-  const sessions = await new Promise<RecordingSession[]>((resolve, reject) => {
-    const req = db.transaction('sessions').objectStore('sessions').getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  for (const session of sessions) {
-    if (!session.closed && !activeOriginals.has(session.id)) {
-      await write(endChunk(session, 'page_closed', session.lastAt), {
-        ...session,
-        closed: true,
-      });
-    }
-  }
-  return sessions.some(
-    (session) => !session.closed && !activeOriginals.has(session.id),
-  );
-}
-
 export class PhoneCapture {
   state: CaptureState = {
     recording: false,
@@ -180,6 +80,7 @@ export class PhoneCapture {
   private previewSequence = 0;
   private mediaGeneration = 0;
   private mediaOpening = false;
+  private mediaRequest: AbortController | null = null;
   private wake: WakeLockSentinel | null = null;
   private audio: MediaRecorder | null = null;
   private original: MediaRecorder | null = null;
@@ -194,15 +95,13 @@ export class PhoneCapture {
   private pumping = false;
   private disposed = false;
   private speaking = false;
+  private manualQuestion = false;
   private serverSpeech = new ServerSpeech();
   private speechQueue: SpeechRequest[] = [];
   private activeSpeech: SpeechRequest | null = null;
-  // Safari may release an utterance that has no JavaScript owner before it ends.
-  private activeUtterance: SpeechSynthesisUtterance | null = null;
   private lastFailedSpeech: string | null = null;
   private lastFailedRequest: SpeechRequest | null = null;
   private speechGeneration = 0;
-  private speechTimer: ReturnType<typeof setTimeout> | null = null;
   private uploadError = '';
   private persist = Promise.resolve();
   private ready: Promise<void>;
@@ -250,7 +149,7 @@ export class PhoneCapture {
       this.stop('hidden');
       this.update({
         error:
-          'Camera paused because this page was hidden. Open the page and tap Record or Scan to continue.',
+          'Camera paused because this page was hidden. Open the page and tap Record or Camera to continue.',
       });
     }
   };
@@ -273,6 +172,26 @@ export class PhoneCapture {
     const current = () => !this.disposed && generation === this.mediaGeneration;
     this.mediaOpening = true;
     this.update({ requesting: true, error: '' });
+    const request = new AbortController();
+    this.mediaRequest = request;
+    const opening = requestMedia(
+      {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: { echoCancellation: true, noiseSuppression: true },
+      },
+      request.signal,
+    );
+    const opened: { stream: MediaStream | null } = { stream: null };
+    void opening.then(
+      (stream) => {
+        opened.stream = stream;
+      },
+      () => {},
+    );
     try {
       try {
         this.voice = new VoiceActivityCapture(
@@ -329,20 +248,7 @@ export class PhoneCapture {
         throw new Error(
           'This browser cannot save full video recordings. Try current Safari or Chrome.',
         );
-      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
-        throw new Error(
-          'Open the secure HTTPS phone link to use the camera and microphone.',
-        );
-      if (pageHidden())
-        throw new Error('Keep this page open to begin recording.');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: { echoCancellation: true, noiseSuppression: true },
-      });
+      const stream = await opening;
       if (!current()) {
         stream.getTracks().forEach((t) => t.stop());
         this.releaseStream();
@@ -351,8 +257,7 @@ export class PhoneCapture {
       this.stream = stream;
       if (pageHidden())
         throw new Error('Keep this page open to begin recording.');
-      this.video.srcObject = this.stream;
-      await this.video.play();
+      await attachCamera(this.video, this.stream, request.signal);
       if (!current()) return;
       this.boot = crypto.randomUUID();
       this.seq = { frame: 0, audio: 0 };
@@ -412,16 +317,26 @@ export class PhoneCapture {
       if (!current()) return;
       this.stop('interrupted');
       this.update({
-        error:
-          error instanceof Error ? error.message : 'Unable to start recording.',
+        error: mediaAccessError(error, 'camera and microphone'),
       });
     } finally {
-      this.mediaOpening = false;
-      this.update({ requesting: false });
+      if (!current()) {
+        request.abort();
+        opened.stream?.getTracks().forEach((track) => track.stop());
+      }
+      if (this.mediaRequest === request) {
+        this.mediaRequest = null;
+        this.mediaOpening = false;
+        this.update({ requesting: false });
+      }
     }
   }
   stop(reason: EndReason = 'stopped') {
     ++this.mediaGeneration;
+    this.mediaRequest?.abort();
+    this.mediaRequest = null;
+    this.mediaOpening = false;
+    this.update({ requesting: false });
     this.closePreview();
     this.endReason = reason;
     this.update({ recording: false, question: false });
@@ -468,24 +383,24 @@ export class PhoneCapture {
     const current = () => !this.disposed && generation === this.mediaGeneration;
     this.mediaOpening = true;
     this.update({ requesting: true, error: '' });
+    const request = new AbortController();
+    this.mediaRequest = request;
     let opened: MediaStream | null = null;
     try {
-      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
-        throw new Error('Open the secure HTTPS phone link to use the camera.');
-      if (pageHidden())
-        throw new Error('Keep this page open to use the camera.');
-      opened = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+      opened = await requestMedia(
+        {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
         },
-        audio: false,
-      });
+        request.signal,
+      );
       if (!current() || pageHidden()) return false;
       this.previewStream = opened;
-      this.video.srcObject = opened;
-      await this.video.play();
+      await attachCamera(this.video, opened, request.signal);
       if (!current() || pageHidden()) return false;
       this.previewBoot = crypto.randomUUID();
       this.previewSequence = 0;
@@ -493,7 +408,7 @@ export class PhoneCapture {
         track.addEventListener('ended', () => {
           if (this.previewStream === opened) {
             this.stopPreview();
-            this.update({ error: 'Camera stopped. Open it again to scan.' });
+            this.update({ error: 'Camera stopped. Tap Camera to try again.' });
           }
         }),
       );
@@ -502,10 +417,7 @@ export class PhoneCapture {
     } catch (error) {
       if (current())
         this.update({
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Unable to open the camera.',
+          error: mediaAccessError(error, 'camera'),
         });
       return false;
     } finally {
@@ -513,8 +425,11 @@ export class PhoneCapture {
         opened?.getTracks().forEach((track) => track.stop());
         if (this.previewStream === opened) this.closePreview();
       }
-      this.mediaOpening = false;
-      this.update({ requesting: false });
+      if (this.mediaRequest === request) {
+        this.mediaRequest = null;
+        this.mediaOpening = false;
+        this.update({ requesting: false });
+      }
     }
   }
   async snap(): Promise<Snapshot | null> {
@@ -527,7 +442,7 @@ export class PhoneCapture {
         !this.video.videoWidth ||
         !this.video.videoHeight
       )
-        throw new Error('The camera is still opening. Try Scan again.');
+        throw new Error('The camera is still opening. Tap Camera again.');
       const canvas = document.createElement('canvas');
       const scale = Math.min(
         1,
@@ -711,7 +626,7 @@ export class PhoneCapture {
   // Pause hands-free listening while a spoken answer plays, so the answer is
   // not heard as a new question.
   suppressListening(value: boolean) {
-    this.voice?.suppress(value);
+    this.voice?.suppress(value || this.manualQuestion);
   }
   toggleQuestion() {
     if (!this.state.recording) return;
@@ -831,24 +746,20 @@ export class PhoneCapture {
     };
     this.persist = this.persist
       .then(async () => {
-        const pending = await chunks();
-        if (
-          pending.reduce((n, chunk) => n + chunk.blob.size, 0) + blob.size >
-          MAX_QUEUE_BYTES
-        )
+        const pending = await queueInfo();
+        if (pending.bytes + blob.size > MAX_QUEUE_BYTES)
           throw new Error(
             'Phone storage queue is full. Reconnect to upload saved recordings, then tap Record.',
           );
         await write(item, session);
         saved = true;
         this.update({
-          queued: pending.length + 1,
+          queued: pending.count + 1,
           originalBytes:
             this.state.originalBytes + (kind === 'video' ? blob.size : 0),
         });
         if (
-          pending.reduce((n, chunk) => n + chunk.blob.size, 0) + blob.size >
-            STOP_QUEUE_BYTES &&
+          pending.bytes + blob.size > STOP_QUEUE_BYTES &&
           this.state.recording
         ) {
           this.stop('storage_full');
@@ -871,16 +782,12 @@ export class PhoneCapture {
     if (this.pumping || this.disposed) return;
     this.pumping = true;
     try {
-      const pending = (await chunks()).sort(
-        (a, b) =>
-          Number(b.intent === 'question') - Number(a.intent === 'question') ||
-          a.at - b.at,
-      );
-      this.update({ queued: pending.length });
-      for (let i = 0; i < pending.length; i += 2) {
-        if (this.disposed) break;
+      this.update({ queued: (await queueInfo()).count });
+      while (!this.disposed) {
+        const pending = await chunks();
+        if (!pending.length) break;
         await Promise.all(
-          pending.slice(i, i + 2).map(async (item) => {
+          pending.map(async (item) => {
             const recording =
               item.kind === 'video' || item.kind === 'recording_end';
             const url =
@@ -957,6 +864,27 @@ export class PhoneCapture {
     return this.enqueueSpeech(text);
   }
   // Call directly inside a click handler, before any await or camera prompt.
+  microphoneStream(): MediaStream | undefined {
+    const tracks = this.stream
+      ?.getAudioTracks()
+      .filter((track) => track.readyState === 'live');
+    return tracks?.length ? new MediaStream(tracks) : undefined;
+  }
+  unlockSpeech() {
+    this.serverSpeech.unlock();
+    this.update({ speechError: '' });
+  }
+  prepareQuestion() {
+    this.manualQuestion = true;
+    this.silenceSpeech();
+    this.unlockSpeech();
+    this.voice?.suppress(true);
+  }
+  finishQuestion() {
+    this.manualQuestion = false;
+    this.voice?.suppress(this.speaking);
+    if (!this.speaking) this.playSpeech();
+  }
   testVoice(): Promise<boolean> {
     return this.speakFromGesture('Voice is on.');
   }
@@ -965,16 +893,12 @@ export class PhoneCapture {
   }
   speakFromGesture(text: string): Promise<boolean> {
     this.silenceSpeech();
-    this.serverSpeech.unlock();
+    this.unlockSpeech();
     return this.enqueueSpeech(text, true);
   }
   private enqueueSpeech(text: string, fromGesture = false): Promise<boolean> {
     if (this.disposed || !text.trim()) return Promise.resolve(false);
-    if (
-      !this.serverSpeech.enabled &&
-      (!('speechSynthesis' in window) ||
-        typeof SpeechSynthesisUtterance === 'undefined')
-    ) {
+    if (!this.serverSpeech.available) {
       const result = Promise.resolve(false);
       this.lastFailedRequest = { text, resolve: () => {}, result };
       this.lastFailedSpeech = text;
@@ -998,31 +922,24 @@ export class PhoneCapture {
   silenceSpeech() {
     this.serverSpeech.cancel();
     this.speechGeneration++;
-    if (this.speechTimer) clearTimeout(this.speechTimer);
-    this.speechTimer = null;
     const active = this.activeSpeech;
     this.activeSpeech = null;
-    this.activeUtterance = null;
     active?.resolve(false);
     this.speechQueue.splice(0).forEach((request) => request.resolve(false));
-    try {
-      window.speechSynthesis?.cancel();
-    } catch {
-      // Cancellation must still release listening and settle every request.
-    }
     this.speaking = false;
     this.update({ speaking: false });
-    this.voice?.suppress(false);
+    this.voice?.suppress(this.manualQuestion);
     this.beginAudio();
   }
   private playSpeech(fromGesture = false) {
-    if (!fromGesture && this.state.voice === 'hearing') return;
+    if (this.manualQuestion || (!fromGesture && this.state.voice === 'hearing'))
+      return;
     const request = this.speechQueue.shift();
     if (!request || this.disposed) {
       request?.resolve(false);
       this.speaking = false;
       this.update({ speaking: false });
-      this.voice?.suppress(false);
+      this.voice?.suppress(this.manualQuestion);
       this.beginAudio();
       return;
     }
@@ -1034,32 +951,23 @@ export class PhoneCapture {
     const generation = this.speechGeneration;
     if (this.audioTimer) clearTimeout(this.audioTimer);
     if (this.audio?.state === 'recording') this.audio.stop();
-    let started = false;
     let finished = false;
     const finish = (played: boolean, message = '') => {
       if (finished || generation !== this.speechGeneration) return;
       finished = true;
-      if (this.speechTimer) clearTimeout(this.speechTimer);
-      this.speechTimer = null;
       this.activeSpeech = null;
-      this.activeUtterance = null;
       if (!played) {
         this.lastFailedSpeech = request.text;
         this.lastFailedRequest = request;
         this.speechGeneration++;
         this.speechQueue.splice(0).forEach((queued) => queued.resolve(false));
-        try {
-          window.speechSynthesis.cancel();
-        } catch {
-          // The error below remains actionable even when native cancel fails.
-        }
         this.speaking = false;
         this.update({
           speaking: false,
           speechError: message,
           speechRetryAvailable: true,
         });
-        this.voice?.suppress(false);
+        this.voice?.suppress(this.manualQuestion);
         this.beginAudio();
       } else {
         if (this.lastFailedSpeech === request.text) {
@@ -1075,69 +983,24 @@ export class PhoneCapture {
       request.resolve(played);
       if (played) this.playSpeech();
     };
-    if (this.serverSpeech.enabled) {
-      void this.serverSpeech
-        .speak(request.text, () => {
-          if (generation === this.speechGeneration)
-            this.update({ speaking: true, speechError: '' });
-        })
-        .then((ok) =>
-          finish(ok, 'Voice could not play. Tap Retry voice to try again.'),
-        );
-      return;
-    }
-    try {
-      const utterance = new SpeechSynthesisUtterance(
-        request.text.replace(/\[[0-9a-f-]{36}\]/g, ''),
-      );
-      this.activeUtterance = utterance;
-      utterance.lang = navigator.language || 'en-US';
-      utterance.rate = 1;
-      utterance.volume = 1;
-      utterance.onstart = () => {
-        if (finished || generation !== this.speechGeneration) return;
-        started = true;
-        if (this.speechTimer) clearTimeout(this.speechTimer);
-        this.update({ speaking: true, speechError: '' });
-        this.speechTimer = setTimeout(
-          () =>
-            finish(
-              false,
-              'Voice playback stopped before finishing. Tap Retry voice to try again.',
-            ),
-          Math.min(90000, Math.max(15000, request.text.length * 100)),
-        );
-      };
-      utterance.onend = () =>
+    void this.serverSpeech
+      .speak(request.text, () => {
+        if (generation === this.speechGeneration)
+          this.update({ speaking: true, speechError: '' });
+      })
+      .then((ok) =>
         finish(
-          started,
-          'Voice playback did not start. Tap Retry voice and check your phone’s media volume.',
-        );
-      utterance.onerror = (event) =>
-        finish(
-          false,
-          event.error === 'not-allowed'
-            ? 'Your browser blocked voice. Tap Retry voice and check your phone’s media volume.'
-            : `Voice could not play (${event.error || 'playback error'}). Tap Retry voice to try again.`,
-        );
-      this.speechTimer = setTimeout(
-        () =>
-          finish(
-            false,
-            'Voice did not start within 5 seconds. Tap Retry voice and check your phone’s media volume.',
-          ),
-        5000,
+          ok,
+          this.serverSpeech.error ||
+            'Voice could not play. Tap Retry voice to try again.',
+        ),
       );
-      window.speechSynthesis.resume();
-      // This stays synchronous for testVoice/retrySpeech/speakFromGesture.
-      window.speechSynthesis.speak(utterance);
-    } catch {
-      finish(false, 'Voice could not start. Tap Retry voice to try again.');
-    }
   }
+
   dispose() {
     this.disposed = true;
     this.silenceSpeech();
+    this.serverSpeech.dispose();
     this.stop('page_closed');
     clearInterval(this.uploadTimer);
     document.removeEventListener('visibilitychange', this.visibility);

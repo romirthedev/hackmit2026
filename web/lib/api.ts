@@ -9,6 +9,7 @@ export type Recording = {
   id: string;
   kind: 'frame' | 'audio' | 'context';
   source?: 'notch';
+  demo_protected?: boolean;
   context_kind?: string;
   title?: string;
   text?: string;
@@ -54,6 +55,9 @@ export type Answer = {
     status: string;
     receipt: {
       claims_reviewed?: boolean;
+      cached?: boolean;
+      method?: string;
+      reviewer?: string;
       answer_complete?: boolean;
       reviews?: {
         model: string;
@@ -90,6 +94,14 @@ export type Device = {
   };
 };
 export type Status = {
+  demo?: {
+    enabled: boolean;
+    ready: boolean;
+    entry_count: number;
+    protected_media_count: number;
+    protected_recording_count: number;
+    error: string;
+  };
   phone?: {
     last_seen: number;
     battery: number | null;

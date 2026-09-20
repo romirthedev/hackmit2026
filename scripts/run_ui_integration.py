@@ -41,7 +41,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="api-", dir=artifacts) as temporary:
         site = Path(temporary)
         (site / "web/dist").mkdir(parents=True)
-        (site / "web/dist/client").symlink_to(client, target_is_directory=True)
+        # Freeze the tested assets: a concurrent rebuild must not swap bundles mid-run.
+        shutil.copytree(client, site / "web/dist/client")
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]

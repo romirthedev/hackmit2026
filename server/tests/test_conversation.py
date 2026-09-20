@@ -407,19 +407,229 @@ def test_backpressure_rejects_new_turn_but_accepts_idempotent_retry(conversation
     assert client.post("/api/conversation/text", json=body).json()["id"] == first.json()["id"]
 
 
-@pytest.mark.parametrize('question', ['Rewind. When is my doctor bill due?', 'When does my doctor bill due?'])
+@pytest.mark.parametrize("question", ["Rewind. When is my doctor bill due?", "When does my doctor bill due?"])
 async def test_direct_personal_question_searches_memory_before_clarifying(conversation, question):
     service, client = conversation
-    service.p.kind = 'clarify'  # Regression: small router model asked "which bill?" without searching.
+    service.p.kind = "clarify"  # Regression: small router model asked "which bill?" without searching.
     text(client, question)
     await service.process(service.claim())
-    turn = service.state()['turns'][0]
-    assert turn['kind'] == 'memory'
-    assert turn['status'] == 'checking' and turn['answer_id']
-    assert not service.db.all('SELECT * FROM computer_commands')
+    turn = service.state()["turns"][0]
+    assert turn["kind"] == "memory"
+    assert turn["status"] == "checking" and turn["answer_id"]
+    assert not service.db.all("SELECT * FROM computer_commands")
 
 
-@pytest.mark.parametrize('utterance', ['He said where is my laptop?', 'Rewind, open my email', 'When is it due?', 'What did he mean by "open my email"?'])
+@pytest.mark.parametrize(
+    "utterance",
+    [
+        "He said where is my laptop?",
+        "Rewind, open my email",
+        "When is it due?",
+        'What did he mean by "open my email"?',
+    ],
+)
 def test_question_fast_path_never_authorizes_ambient_commands_or_resolves_missing_context(utterance):
     from rewind.conversation import direct_memory_question
+
     assert direct_memory_question(utterance) is None
+
+
+@pytest.mark.parametrize(
+    "utterance", ["What is your name?", "Hello!", "How are you?", "Thanks!", "hi can u hear me whats ur name"]
+)
+async def test_mobile_small_talk_completes_without_recall_or_computer(conversation, utterance):
+    service, client = conversation
+    text(client, utterance)
+    await service.process(service.claim())
+    turn = service.state()["turns"][-1]
+    assert turn["kind"] == "chat" and turn["status"] == "completed"
+    assert turn["response"] and turn["answer_id"] is None
+    assert not service.db.all("SELECT * FROM answers")
+    assert not service.db.all("SELECT * FROM computer_commands")
+    # General conversation is not checked evidence for an ensuing computer task.
+    assert service.history() == []
+
+
+async def test_chat_router_generates_conversation_and_preserves_followup_context(conversation):
+    from rewind.models import ConversationReply
+
+    service, client = conversation
+    text(client, "Hello!")
+    await service.process(service.claim())
+
+    async def structured(system, payload, schema, **kwargs):
+        data = json.loads(payload)
+        if schema is ConversationIntent:
+            assert data["casual_conversation"][0]["transcript"] == "Hello!"
+            return ConversationIntent(
+                kind="chat", directed_request=True, resolved_request="Tell me a joke", clarification=""
+            )
+        assert data["conversation"][0]["transcript"] == "Hello!"
+        return ConversationReply(
+            needs_memory=False, answer="Why did the bicycle fall over? It was two-tired."
+        )
+
+    service.p.structured = structured
+    text(client, "Tell me a joke")
+    await service.process(service.claim())
+    turn = service.state()["turns"][-1]
+    assert turn["status"] == "completed" and turn["kind"] == "chat"
+    assert "two-tired" in turn["response"]
+    assert not service.db.all("SELECT * FROM answers")
+
+
+async def test_chat_defers_personal_facts_to_checked_recall(conversation):
+    from rewind.models import ConversationReply
+
+    service, client = conversation
+
+    async def structured(system, payload, schema, **kwargs):
+        if schema is ConversationIntent:
+            return ConversationIntent(
+                kind="chat",
+                directed_request=True,
+                resolved_request="Tell me about my appointment",
+                clarification="",
+            )
+        return ConversationReply(needs_memory=True, answer="")
+
+    service.p.structured = structured
+    text(client, "Tell me about my appointment")
+    await service.process(service.claim())
+    turn = service.state()["turns"][-1]
+    assert turn["kind"] == "memory" and turn["status"] == "checking"
+    assert turn["answer_id"] and not turn["response"]
+
+
+@pytest.mark.parametrize("question", [
+    "What information do you have?", "What information do u have from your all ur data", "What floor do I live on?",
+])
+async def test_workspace_inventory_and_personal_floor_skip_chat_router(conversation, question):
+    service, client = conversation
+
+    async def unavailable(*args, **kwargs):
+        raise AssertionError("Explicit memory questions must search retained sources")
+
+    service.p.structured = unavailable
+    text(client, question)
+    await service.process(service.claim())
+    turn = service.state()["turns"][-1]
+    assert turn["kind"] == "memory" and turn["status"] == "checking"
+    assert service.db.one("SELECT question FROM answers")["question"] == question
+
+
+async def test_uncited_abstention_is_guidance_not_a_failed_review(conversation):
+    service, client = conversation
+    text(client, "Where are my keys?")
+    await service.process(service.claim())
+    service.db.execute(
+        "UPDATE answers SET mode='no_evidence',answer='The saved photos do not answer that question.'"
+    )
+    service.memory.verifier = None
+    await service.monitor()
+    turn = service.state()["turns"][-1]
+    assert turn["status"] == "clarification"
+    assert turn["response"] == "The saved photos do not answer that question."
+    assert "unavailable" not in turn["response"]
+
+
+@pytest.mark.parametrize("kind", ["chat", "ignore", "memory", "computer"])
+async def test_explicit_orb_turn_is_answered_when_router_marks_it_as_ambient(conversation, kind):
+    from rewind.models import ConversationReply
+
+    service, client = conversation
+
+    async def structured(system, payload, schema, **kwargs):
+        data = json.loads(payload)
+        if schema is ConversationIntent:
+            assert data["direct_user_request"] is True
+            return ConversationIntent(
+                kind=kind, directed_request=False, resolved_request="", clarification=""
+            )
+        return ConversationReply(needs_memory=False, answer="Of course! Here's a joke.")
+
+    service.p.structured = structured
+    for message in ("Could you tell me a joke?", "Another one please", "And another one"):
+        identifier = text(client, message)
+        await service.process(service.claim())
+        turn = next(row for row in service.state()["turns"] if row["id"] == identifier)
+        assert turn["status"] == "completed" and turn["kind"] == "chat"
+        assert turn["response"] == "Of course! Here's a joke."
+    assert len(service.state()["turns"]) == 3
+    assert not service.db.all("SELECT * FROM computer_commands")
+
+
+async def test_explicit_input_does_not_turn_personal_facts_into_unchecked_chat(conversation):
+    from rewind.models import ConversationReply
+
+    service, client = conversation
+
+    async def structured(system, payload, schema, **kwargs):
+        if schema is ConversationIntent:
+            return ConversationIntent(
+                kind="ignore", directed_request=False, resolved_request="", clarification=""
+            )
+        return ConversationReply(needs_memory=True, answer="")
+
+    service.p.structured = structured
+    text(client, "Could you tell me what my grandson is called?")
+    await service.process(service.claim())
+    turn = service.state()["turns"][-1]
+    assert turn["status"] == "checking" and turn["kind"] == "memory"
+    assert turn["response"] == ""
+
+
+async def test_router_failure_returns_visible_error_and_next_turn_recovers(conversation):
+    service, client = conversation
+
+    async def unavailable(*args, **kwargs):
+        raise RuntimeError("routing temporarily unavailable")
+
+    service.p.structured = unavailable
+    text(client, "Could you explain something?")
+    await service.process(service.claim())
+    first = service.state()["turns"][-1]
+    assert first["status"] == "error" and first["response"]
+    text(client, "hi can u hear me whats ur name")
+    await service.process(service.claim())
+    second = service.state()["turns"][-1]
+    assert second["status"] == "completed" and "I'm Rewind" in second["response"]
+
+
+@pytest.mark.parametrize("utterance", ["What can you do for me?", "What should I do about my cold?"])
+def test_general_help_questions_are_not_forced_into_personal_memory(utterance):
+    from rewind.conversation import direct_memory_question
+
+    assert direct_memory_question(utterance) is None
+
+
+async def test_recovered_explicit_turn_cannot_reuse_a_silent_ambient_decision(conversation):
+    from rewind.models import ConversationReply
+
+    service, client = conversation
+    identifier = text(client, "Could you explain gravity?")
+    intent = ConversationIntent(kind="ignore", directed_request=False, resolved_request="", clarification="")
+    service.db.execute(
+        "UPDATE conversation_turns SET intent=?,status='routing' WHERE id=?",
+        (intent.model_dump_json(), identifier),
+    )
+
+    async def structured(system, payload, schema, **kwargs):
+        assert schema is ConversationReply
+        return ConversationReply(needs_memory=False, answer="Gravity pulls masses toward each other.")
+
+    service.p.structured = structured
+    await service.process(service.claim())
+    turn = service.state()["turns"][-1]
+    assert turn["status"] == "completed" and turn["response"]
+    assert turn["kind"] == "chat"
+
+
+@pytest.mark.parametrize("reply", ["yes", "no", "go ahead"])
+async def test_explicit_short_reply_without_permission_is_visible_and_never_authorizes(conversation, reply):
+    service, client = conversation
+    text(client, reply)
+    await service.process(service.claim())
+    turn = service.state()["turns"][-1]
+    assert turn["status"] == "clarification" and turn["response"]
+    assert not service.db.all("SELECT * FROM computer_commands")

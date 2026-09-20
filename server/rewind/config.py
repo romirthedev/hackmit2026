@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # Scanned mail: wait this long for the vision model, report a readable failure if it times out.
     scan_model_deadline_s: float = Field(90, gt=0, le=180)
     scan_demo_template: bool = True
+    # Opt-in private walkthrough fixture. Off outside the demo deployment.
+    demo_mode: bool = False
+    demo_response_delay_s: float = Field(0.70, ge=0, le=3)
     codex_verify: bool = False
     codex_binary: str = "/Applications/ChatGPT.app/Contents/Resources/codex"
     codex_verify_timeout: float = Field(120, ge=10, le=600)

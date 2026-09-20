@@ -145,18 +145,19 @@ html.rw-light body { background: #fbfbfb; }
 .rw [data-state="thinking"] .live { background: #c4b5fd; box-shadow: 0 0 8px #c4b5fd; animation: blink 0.7s ease-in-out infinite; }
 .rw [data-state="answer"] .live { background: #5eead4; }
 .rw .card-ask { padding-bottom: 18px; }
-.rw .orb-stage { position: relative; display: grid; place-items: center; width: 100%; padding: 14px 0 8px; border-radius: 20px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.rw .orb { position: relative; transition: transform 0.7s var(--ease), filter 0.7s; }
+.rw .orb-stage { position: relative; display: grid; place-items: center; width: 100%; padding: 14px 0 8px; border-radius: 20px; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.rw .orb { position: relative; transition: transform 0.12s ease-out, filter 0.12s; }
 .rw .orb canvas { display: block; }
 .rw .orb::after { content: ""; position: absolute; inset: 22%; border-radius: 50%; background: radial-gradient(circle, rgba(120,140,255,0.22), transparent 70%); filter: blur(14px); z-index: -1; }
 .rw .orb.orb-fallback::before { content: ""; position: absolute; inset: 14%; border-radius: 50%; border: 3px solid transparent; background: conic-gradient(#9c43fe, #4cc2e9, #9c43fe) border-box; -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; filter: blur(2px); animation: hue 6s linear infinite; }
-.rw [data-state="listening"] .orb { transform: scale(1.08); }
+.rw [data-state="starting"] .orb, .rw [data-state="listening"] .orb { transform: scale(1.08); outline: 1px solid #5eead477; outline-offset: -12px; border-radius: 50%; }
 .rw [data-state="thinking"] .orb { transform: scale(0.96); filter: saturate(1.3); }
-.rw .orb-stage:hover .orb { transform: scale(1.03); }
-.rw .waves { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 3px; align-items: center; height: 18px; opacity: 0; transition: opacity 0.4s; }
+.rw [data-state="idle"] .orb-stage:hover .orb { transform: scale(1.03); }
+.rw .orb-stage:not(:disabled):active .orb { transform: scale(0.97); transition-duration: 0s; }
+.rw .waves { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 3px; align-items: center; height: 18px; opacity: 0; transition: opacity 0.08s; }
 .rw .waves i { width: 3px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.7); }
-.rw [data-state="listening"] .waves { opacity: 1; }
-.rw [data-state="listening"] .waves i { animation: wave 1s ease-in-out infinite; animation-delay: calc(var(--n) * 90ms); }
+.rw [data-state="starting"] .waves, .rw [data-state="listening"] .waves { opacity: 1; }
+.rw [data-state="starting"] .waves i, .rw [data-state="listening"] .waves i { animation: wave 1s ease-in-out infinite; animation-delay: calc(var(--n) * 90ms); }
 .rw .ask-body { text-align: center; min-height: 44px; padding: 0 8px; margin-top: 6px; }
 .rw .hint { color: rgba(255,255,255,0.45); font-size: calc(13px * var(--fs)); }
 .rw .answer { font-size: calc(15px * var(--fs)); line-height: 1.4; font-weight: 500; letter-spacing: -0.01em; text-wrap: balance; animation: rise 0.6s var(--ease) both; }

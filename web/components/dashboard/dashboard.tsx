@@ -295,7 +295,7 @@ export function Dashboard() {
           <span className="rw-brand-time">{clock}</span>
         </a>
         <div className="top-right">
-          <MemoryReset />
+          <MemoryReset demo={live.status?.demo} />
           {rw.connection !== 'live' && (
             <span className={`conn ${rw.connection}`}>
               <i />

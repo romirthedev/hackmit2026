@@ -28,6 +28,7 @@ from .config import Settings
 from .context import ContextScopes, NotchContext
 from .conversation import Conversation, conversation_router
 from .db import Database, event_public
+from .demo import DemoIntegrityError
 from .history import clear_memory, require_current_capture
 from .memory import Memory
 from .models import AskRequest, RuleRequest, VideoProvenance
@@ -275,6 +276,9 @@ def create_app(settings=None, provider=None):
         response.headers["X-Frame-Options"] = "DENY"
         if request.url.path.startswith("/api"):
             response.headers["Cache-Control"] = "no-store"
+        elif response.headers.get("content-type", "").startswith("text/html"):
+            # A reload must pick up the current phone controls after deployment.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     @app.get("/api/health")
@@ -334,6 +338,7 @@ def create_app(settings=None, provider=None):
         totals["processing_host"] = "ASUS via Tailscale" if s.processing_url else "server"
         totals["analysis_ready"] = s.provider != "disabled" and (await p.ready() if s.processing_url else True)
         totals["verification_enabled"] = s.codex_verify
+        totals["demo"] = await asyncio.to_thread(memory.demo.status)
         totals["model"] = s.openai_model if s.provider == "openai" else s.vision_model
         totals["recall_model"] = (
             s.openai_model if s.provider == "openai" else s.ollama_recall_model or s.vision_model
@@ -456,8 +461,14 @@ def create_app(settings=None, provider=None):
             # No awaits between the busy check and reset: background jobs cannot
             # claim a new row or finish an old request during this transaction.
             cutoff = time.time()
-            clear_memory(db, s.data_dir, cutoff)
-            return {"cleared": True, "history_cleared_before": cutoff}
+            try:
+                protected = memory.demo.protection() if s.demo_mode else None
+            except DemoIntegrityError as exc:
+                raise HTTPException(409, str(exc)) from None
+            clear_memory(db, s.data_dir, cutoff, protected=protected)
+            return {"cleared": True, "history_cleared_before": cutoff,
+                    "protected_media_count": len(protected["media"]) if protected else 0,
+                    "protected_recording_count": len(protected["recordings"]) if protected else 0}
 
     @app.post("/api/device/heartbeat", dependencies=[Depends(device)])
     async def heartbeat(body: Heartbeat):
@@ -623,10 +634,21 @@ def create_app(settings=None, provider=None):
     async def events(q: str = "", after: float | None = None, before: float | None = None, limit: int = 50):
         return await memory.search(q[:2000], after, before, max(1, min(limit, 100)))
 
+    def demo_protected_ids():
+        if not s.demo_mode:
+            return set()
+        try:
+            return memory.demo.protection()["media"]
+        except DemoIntegrityError:
+            # Invalid protection metadata disables delete controls as well as
+            # the deletion API. Never invite a potentially destructive retry.
+            return None
+
     @app.get("/api/recordings", dependencies=[Depends(admin)])
     async def recordings(before: float | None = None, limit: int = 60):
+        protected = await asyncio.to_thread(demo_protected_ids)
         return [
-            event_public(r)
+            {**event_public(r), "demo_protected": protected is None or r["id"] in protected}
             for r in db.all(
                 """SELECT m.*,e.summary,e.transcript,e.objects,e.tags,e.confidence,e.segments FROM media m LEFT JOIN events e ON e.id=m.id
             WHERE m.captured_at<=? ORDER BY m.captured_at DESC LIMIT ?""",
@@ -642,7 +664,8 @@ def create_app(settings=None, provider=None):
         )
         if not row:
             raise HTTPException(404, "Recording not found")
-        return event_public(row)
+        protected = await asyncio.to_thread(demo_protected_ids)
+        return {**event_public(row), "demo_protected": protected is None or event_id in protected}
 
     @app.get("/api/media/{event_id}", dependencies=[Depends(admin)])
     async def media(event_id: str):
@@ -654,6 +677,13 @@ def create_app(settings=None, provider=None):
     @app.delete("/api/media/{event_id}", dependencies=[Depends(admin)])
     async def delete_media(event_id: str):
         async with ingestion_lock:
+            if s.demo_mode:
+                try:
+                    protected = memory.demo.protection()
+                except DemoIntegrityError as exc:
+                    raise HTTPException(409, str(exc)) from None
+                if event_id in protected["media"]:
+                    raise HTTPException(409, "This recording belongs to the protected demo walkthrough.")
             row = db.one("SELECT path,status FROM media WHERE id=?", (event_id,))
             if not row:
                 raise HTTPException(404, "Recording not found")
@@ -689,7 +719,7 @@ def create_app(settings=None, provider=None):
 
     @app.post("/api/ask", dependencies=[Depends(admin)])
     async def ask(body: AskRequest):
-        return await memory.ask(body.question, body.after, body.before)
+        return await memory.ask(body.question, body.after, body.before, allow_chat=True)
 
     @app.get("/api/answers", dependencies=[Depends(admin)])
     async def answers():
@@ -697,7 +727,7 @@ def create_app(settings=None, provider=None):
             {
                 **r,
                 "evidence": json.loads(r["evidence"]),
-                "verification": verifier.public(r["id"]) if verifier else None,
+                "verification": memory.review(r["id"]),
             }
             for r in db.all("SELECT * FROM answers ORDER BY created_at DESC LIMIT 30")
         ]

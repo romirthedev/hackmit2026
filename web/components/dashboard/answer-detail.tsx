@@ -6,14 +6,30 @@ import {
   type SpeechPlayback,
 } from '@/lib/use-speech-playback';
 
-export function isReviewedAnswer(answer: Answer) {
+export function isCachedAnswer(answer: Answer) {
   return (
-    answer.verification?.receipt?.claims_reviewed === true &&
-    (answer.mode === 'verified' || answer.mode === 'insufficient')
+    answer.mode === 'demo_cached' &&
+    answer.verification?.receipt?.cached === true &&
+    answer.verification?.receipt?.claims_reviewed === true
   );
 }
 
+export function isReviewedAnswer(answer: Answer) {
+  return (
+    answer.verification?.receipt?.claims_reviewed === true &&
+    (answer.mode === 'verified' ||
+      answer.mode === 'insufficient' ||
+      isCachedAnswer(answer))
+  );
+}
+
+export function canSpeakAnswer(answer: Answer) {
+  return answer.mode === 'conversation' || isReviewedAnswer(answer);
+}
+
 export function answerState(answer: Answer) {
+  if (isCachedAnswer(answer)) return 'Saved walkthrough · source reviewed';
+  if (answer.mode === 'conversation') return 'Rewind';
   const reviewed = answer.verification?.receipt?.claims_reviewed === true;
   if (answer.mode === 'verified' && reviewed) return 'Verified answer';
   if (answer.mode === 'insufficient' && reviewed)
@@ -46,7 +62,7 @@ export function AnswerDetail({
   return (
     <div className="answer-detail" aria-live="polite">
       <span
-        className={`answer-state ${answer.mode === 'verified' && answer.verification?.receipt?.claims_reviewed ? 'reviewed' : ''}`}
+        className={`answer-state ${isReviewedAnswer(answer) ? 'reviewed' : ''}`}
       >
         {answerState(answer)}
       </span>
@@ -55,7 +71,7 @@ export function AnswerDetail({
         <button
           type="button"
           className="voice-action"
-          disabled={!isReviewedAnswer(answer) || !answer.answer}
+          disabled={!canSpeakAnswer(answer) || !answer.answer}
           aria-label={
             voice.speaking ? 'Stop reading answer' : 'Read answer aloud'
           }
@@ -66,9 +82,7 @@ export function AnswerDetail({
           {voice.speaking ? <Square /> : <Volume2 />}
           {voice.speaking ? 'Stop reading' : 'Read aloud'}
         </button>
-        {!isReviewedAnswer(answer) && (
-          <small>Voice available after review</small>
-        )}
+        {!canSpeakAnswer(answer) && <small>Voice available after review</small>}
       </div>
       {!playback && voice.speechError && (
         <div className="voice-error" role="alert">

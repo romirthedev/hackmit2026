@@ -37,6 +37,17 @@ await context.addInitScript(()=>{
   return player;
  };
  window.Audio.prototype=NativeAudio.prototype;
+ const AudioCtx=window.AudioContext||window.webkitAudioContext;
+ const createSource=AudioCtx.prototype.createBufferSource;
+ AudioCtx.prototype.createBufferSource=function(){
+  const source=createSource.call(this),start=source.start;
+  source.start=function(...args){
+   window.__actualAudio.push({kind:'playing',duration:source.buffer?.duration,time:Date.now()});
+   source.addEventListener('ended',()=>window.__actualAudio.push({kind:'ended',duration:source.buffer?.duration,time:Date.now()}));
+   return start.apply(source,args);
+  };
+  return source;
+ };
 });
 let dashboard,phone;
 try{
@@ -70,7 +81,7 @@ try{
  await until(async()=>await phone.locator('.cell').first().evaluate(el=>Number(getComputedStyle(el).opacity)===1),'phone widgets visible',5000);
  await phone.screenshot({path:path.join(out,'restored-phone.png'),fullPage:true});
  // Open the camera and scan through the real phone UI; keep the dashboard foreground for animation.
- await phone.getByRole('button',{name:'Scan',exact:true}).click();
+ await phone.getByRole('button',{name:'Camera',exact:true}).click();
  await until(async()=> (await api('/scans/jobs')).some(j=>j.status==='done'),'scan completed');
  await dashboard.bringToFront();
  await dashboard.locator('.letter-layer').waitFor({state:'visible',timeout:15000});
@@ -106,7 +117,7 @@ try{
  assert.equal(await phone.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  // A separate postcard question uses the same live model/review/speech path.
  const beforePostcard=await dashboard.evaluate(()=>window.__actualAudio.filter(a=>a.kind==='ended'&&a.duration>2).length);
- await dashboard.getByRole('textbox',{name:'Ask about your recordings'}).fill('What did Emma write to me?');
+ await dashboard.getByRole('textbox',{name:'Ask about your recordings',exact:true}).fill('What did Emma write to me?');
  await dashboard.getByRole('button',{name:'Send question',exact:true}).click();
  await until(async()=>{
    const answers=await api('/answers');
@@ -119,7 +130,7 @@ try{
  await dashboard.screenshot({path:path.join(out,'postcard-answer.png'),fullPage:true});
  // Hands-free path uses the durable conversation endpoint and the same reviewed answer UI.
  await phone.bringToFront();
- await phone.getByRole('button',{name:'Start recording with orb',exact:true}).click();
+ await phone.getByRole('button',{name:'Record',exact:true}).click();
  await until(async()=> (await api('/conversation/state')).turns.some(t=>t.transcript),'phone microphone transcribed');
  await phone.getByRole('button',{name:'Stop recording',exact:true}).click();
  await until(async()=> (await api('/conversation/state')).turns.some(t=>t.status==='completed'&&t.answer_id),'phone reviewed conversation completed');

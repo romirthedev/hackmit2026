@@ -5,10 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ConversationIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["memory", "computer", "ignore", "clarify"]
+    kind: Literal["memory", "computer", "chat", "ignore", "clarify"]
     directed_request: bool
     resolved_request: str = Field(max_length=1600)
     clarification: str = Field(max_length=350)
+
+
+class ConversationReply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    needs_memory: bool
+    answer: str = Field(max_length=1200)
 
 
 class ObjectObservation(BaseModel):

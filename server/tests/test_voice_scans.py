@@ -341,7 +341,8 @@ async def test_voice_never_synthesizes_unreviewed_answers(tmp_path, mode, claims
 
     voice.memory.verifier = Reviewer()
 
-    async def ask(*args):
+    async def ask(*args, **kwargs):
+        assert kwargs.get("allow_chat") is True
         return record
 
     synthesized = []

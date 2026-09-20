@@ -98,6 +98,13 @@ on the actual phone before a long session. See
 [MDN wake lock](https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API)
 and [camera requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
 
+The orb records a microphone-only question, ending on a pause or a second tap.
+It does not open the video camera. Under Your view, Camera saves a still photo
+through the document-reading flow; Record starts continuous video/audio capture.
+While recording, the orb reuses the microphone and pauses hands-free routing to
+avoid submitting the same request twice. Greetings and general conversation have
+an explicit conversation response type, separate from reviewed personal recall.
+
 After Record, a pause in speech submits the utterance automatically. Directed
 questions use evidence-grounded recall; direct Mac requests go to the actual Notch
 agent. Typed requests use the same router. Speaker playback pauses request routing

@@ -32,6 +32,11 @@ def main():
     )
     args = parser.parse_args()
     configured = dotenv_values(args.env_file)
+    # Permit launchers to supply service credentials in memory without copying
+    # them to a test file. Workspace/account settings are intentionally excluded.
+    for name in ("REWIND_DEEPGRAM_API_KEY", "REWIND_PROCESSING_URL", "REWIND_PROCESSING_TOKEN"):
+        if os.environ.get(name):
+            configured[name] = os.environ[name]
     key = configured.get("REWIND_DEEPGRAM_API_KEY")
     if not key or not args.node or not shutil.which("ffmpeg"):
         parser.error("Requires a configured Deepgram key, Node (--node), and ffmpeg.")
@@ -40,7 +45,9 @@ def main():
         parser.error("Build web first.")
     site = root / "data/voice-mail-live" / f"run-{int(time.time())}"
     (site / "web/dist").mkdir(parents=True)
-    (site / "web/dist/client").symlink_to(client, target_is_directory=True)
+    # Freeze this run's assets so a concurrent rebuild cannot remove routes or
+    # replace JavaScript midway through an evidence/voice integration check.
+    shutil.copytree(client, site / "web/dist/client")
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]

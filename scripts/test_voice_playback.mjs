@@ -152,7 +152,7 @@ const calls = (page, text) => page.evaluate((text) => window.__voiceQA.calls.fil
 const delivered = async (page, text) => (await calls(page, text)).filter((call) => call.started && call.ended && !call.error);
 const mode = (page, value) => page.evaluate((value) => { window.__voiceQA.mode = value; }, value);
 async function enablePhone(page) {
-  await page.getByRole("button", { name: "Spoken answers and reminders", exact: true }).click();
+  await page.getByRole("button", { name: "Test voice", exact: true }).click();
   await until(async () => (await delivered(page, "Voice is on.")).length === 1, "Sound enable confirms successful playback");
 }
 async function test(name, run) {
@@ -166,7 +166,7 @@ async function test(name, run) {
 }
 
 try {
-  await test("phone initial history stays silent; voice and Record warm up from a user gesture", async () => {
+  await test("phone initial history stays silent; explicit voice test speaks and Record requests camera silently", async () => {
     const model = fixture(), historical = answer("HISTORICAL_CHECKED_RESPONSE");
     model.answers = [historical]; model.turns = [turn(historical)];
     const page = await pageFor("history-gesture", model);
@@ -184,9 +184,8 @@ try {
     await page.getByRole("button", { name: "Record", exact: true }).click();
     await until(() => page.evaluate(() => window.__voiceQA.cameraRequests > 0), "Record begins camera request");
     const timeline = await page.evaluate(() => window.__voiceQA.timeline);
-    assert.equal(timeline[0]?.kind, "speech", "Voice warmup must run before awaiting camera permission");
-    assert.equal(timeline[0]?.text, "Voice is on.");
-    assert.equal((await calls(page, "Voice is on.")).at(-1).userActivation, true);
+    assert(timeline.some(item => item.kind === "camera-request"), "Record requests the camera");
+    assert(!timeline.some(item => item.kind === "speech" && item.text.trim()), "Record unlocks audio silently without a distracting spoken confirmation");
   });
 
   await test("phone draft is silent; failed reviewed playback retries explicitly once and never duplicates while pending", async () => {
@@ -226,7 +225,7 @@ try {
     await enablePhone(page); await mode(page, "no-events");
     const candidate = answer("PHONE_WATCHDOG_RESPONSE");
     model.answers = [candidate]; model.turns = [turn(candidate)];
-    await page.getByText(/did not start within 5 seconds/i).waitFor();
+    await page.getByText(/voice did not start/i).waitFor();
     assert.equal((await delivered(page, candidate.answer)).length, 0);
     await page.waitForTimeout(2700);
     assert.equal((await calls(page, candidate.answer)).length, 1);
@@ -285,8 +284,7 @@ try {
     model.ask = candidate;
     await page.getByRole("textbox", { name: "Ask about your recordings", exact: true }).fill(candidate.question);
     await page.getByRole("button", { name: "Send question", exact: true }).click();
-    await until(async () => (await delivered(page, "I'll check that.")).length === 1, "Submit gesture enables future reviewed playback");
-    assert.equal((await calls(page, "I'll check that."))[0].userActivation, true);
+    assert.equal((await calls(page, "I'll check that.")).length, 0, "Submitting a question primes voice silently");
     await composer.getByText(candidate.answer, { exact: true }).waitFor();
     assert(await composer.getByRole("button", { name: "Read answer aloud", exact: true }).isDisabled());
     assert.equal((await calls(page, candidate.answer)).length, 0);
@@ -318,10 +316,10 @@ try {
     model.ask = candidate;
     await page.getByRole("textbox", { name: "Ask about your recordings", exact: true }).fill(candidate.question);
     await page.getByRole("button", { name: "Send question", exact: true }).click();
-    await until(async () => (await delivered(page, "I'll check that.")).length === 1, "Submit acknowledgement completes");
+    await composer.getByText(candidate.answer, { exact: true }).waitFor();
     await mode(page, "not-allowed");
     model.answers = [answer(candidate.answer)];
-    await composer.getByRole("alert").filter({ hasText: /browser blocked the voice/i }).waitFor();
+    await composer.getByRole("alert").filter({ hasText: /browser blocked voice/i }).waitFor();
     await page.waitForTimeout(3300);
     assert.equal((await calls(page, candidate.answer)).length, 1);
     assert.equal((await delivered(page, candidate.answer)).length, 0);
@@ -345,7 +343,7 @@ try {
     model.ask = candidate;
     await page.getByRole("textbox", { name: "Ask about your recordings", exact: true }).fill(candidate.question);
     await page.getByRole("button", { name: "Send question", exact: true }).click();
-    await until(async () => (await delivered(page, "I'll check that.")).length === 1, "Initial gesture acknowledgement completes");
+    await composer.getByText(candidate.answer, { exact: true }).waitFor();
     await page.evaluate(() => {
       Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
       Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });

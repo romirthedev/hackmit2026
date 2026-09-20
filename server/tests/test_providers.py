@@ -237,3 +237,67 @@ def test_local_schema_drops_string_length_limits_only():
 
     with pytest.raises(ValidationError):
         RecallAnswer(answer="x" * 8001, evidence_ids=[], insufficient_evidence=True)
+
+
+async def test_compact_text_scene_enriches_from_original_without_losing_poster_details(tmp_path):
+    import hashlib
+    import io
+
+    from PIL import Image
+
+    original = tmp_path / 'poster.jpg'
+    Image.new('RGB', (1280, 960), 'white').save(original)
+    digest = hashlib.sha256(original.read_bytes()).hexdigest()
+    provider = Provider(Settings(
+        _env_file=None, compact_observations=True, labeler_long_side=448,
+        observation_max_tokens=128, processing_url='http://asus', processing_token='test',
+    ))
+    await provider.http.aclose()
+    calls = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        calls.append(payload['schema_name'])
+        with Image.open(io.BytesIO(base64.b64decode(payload['images'][0]))) as image:
+            size = image.size
+        if payload['schema_name'] == 'CompactObservation':
+            assert size == (448, 336)
+            return httpx.Response(200, json={
+                'summary': 'A game night poster hangs beside a study door.', 'tags': ['poster', 'door'],
+            })
+        assert payload['schema_name'] == 'Observation'
+        assert size == (1280, 960)
+        assert payload['max_tokens'] >= 1536
+        return httpx.Response(200, json={
+            'summary': 'Game night: October 12 at 7 PM, room 204.',
+            'objects': [{'label': 'poster', 'description': 'October 12 at 7 PM, room 204',
+                         'location': 'beside the study door'}],
+            'tags': ['game night', 'study room'],
+        })
+
+    provider.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await provider.observe(original)
+    assert calls == ['CompactObservation', 'Observation']
+    assert 'October 12 at 7 PM' in result.summary
+    assert result.objects[0].location == 'beside the study door'
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == digest
+    await provider.close()
+
+
+async def test_compact_ordinary_scene_stays_one_call(tmp_path):
+    provider = Provider(Settings(_env_file=None, compact_observations=True,
+                                 processing_url='http://asus', processing_token='test'))
+    await provider.http.aclose()
+    original = tmp_path / 'chair.jpg'
+    original.write_bytes(b'original-fixture')
+    calls = []
+
+    def handler(request):
+        calls.append(json.loads(request.content)['schema_name'])
+        return httpx.Response(200, json={'summary': 'A blue chair beside a table.', 'tags': ['chair']})
+
+    provider.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await provider.observe(original)
+    assert result.summary == 'A blue chair beside a table.'
+    assert calls == ['CompactObservation']
+    await provider.close()

@@ -124,7 +124,12 @@ class Worker:
                         embedding_error = caption.inherited["embedding_error"]
                     else:
                         vector = await self.p.embed(
-                            observed.summary + " " + transcript + " " + " ".join(observed.tags)
+                            " ".join([
+                                observed.summary,
+                                transcript,
+                                *observed.tags,
+                                *(" ".join((obj.label, obj.description, obj.location)) for obj in observed.objects),
+                            ])
                         )
                         if vector is not None:
                             embedding = np.asarray(vector, dtype=np.float32).tobytes()

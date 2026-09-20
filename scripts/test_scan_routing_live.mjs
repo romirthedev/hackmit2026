@@ -33,7 +33,7 @@ try {
    await until(async()=>await dashboard.locator('[data-card="notes"] .postcard').count()===0 && await dashboard.locator('[data-card="calendar"] .cal-event').count()===0,'Clear previous fixture cards');
    await phone.evaluate(image=>window.__setScanFixture(image),fixtures[fixture]);
    const known=new Set((await api('/recordings?limit=200')).map(r=>r.id));
-   await phone.getByRole('button',{name:'Scan',exact:true}).click();
+   await phone.getByRole('button',{name:'Camera',exact:true}).click();
    let job;
    await until(async()=>{job=(await api('/scans/jobs')).find(j=>!known.has(j.media_id));return job && job.status!=='reading';},'Recognize '+fixture);
    assert.equal(job.status,'done',JSON.stringify(job));

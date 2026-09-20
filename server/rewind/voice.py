@@ -90,9 +90,11 @@ def reviewed_spoken_text(answer: str) -> str:
 
 def reviewed_answer(record: dict) -> bool:
     review = record.get("verification") or {}
-    return record.get("mode") in {"verified", "insufficient"} and bool(
-        (review.get("receipt") or {}).get("claims_reviewed")
-    )
+    receipt = review.get("receipt") or {}
+    if record.get("mode") == "demo_cached":
+        return bool(receipt.get("claims_reviewed") and receipt.get("cached")
+                    and receipt.get("method") == "original-evidence-review")
+    return record.get("mode") in {"verified", "insufficient"} and bool(receipt.get("claims_reviewed"))
 
 
 class Voice:
@@ -192,9 +194,15 @@ class Voice:
         if response.status_code != 200 or not response.content:
             log.warning("Deepgram speech failed (%s)", response.status_code)
             raise HTTPException(503, "The voice is unavailable right now.")
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(response.content)
-        os.replace(tmp, path)
+        # Concurrent requests can synthesize the same line. Each writer owns
+        # a unique temporary file, so a cache hit can never consume another's temp.
+        with tempfile.NamedTemporaryFile(dir=self.directory, suffix=".tmp", delete=False) as target:
+            tmp = Path(target.name)
+            target.write(response.content)
+        try:
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
         return path
 
     async def filler(self) -> Path:
@@ -205,7 +213,12 @@ class Voice:
         """Pre-generate filler lines so the first spoken question has no extra delay."""
         if not self.enabled:
             return
-        for line in FILLERS + LISTENING_REPLIES:
+        demo = getattr(self.memory, "demo", None)
+        try:
+            demo_lines = demo.speech_lines() if demo and demo.enabled else []
+        except ValueError:
+            demo_lines = []
+        for line in demo_lines + FILLERS + LISTENING_REPLIES:
             try:
                 await self.synthesize(line)
             except Exception:
@@ -254,8 +267,8 @@ def voice_router(voice: Voice, admin, max_bytes: int):
                 except HTTPException:
                     speech = None
             return {"answer": None, "spoken": reply, "speech_url": speech}
-        record = await voice.memory.ask(question, body.after, body.before)
-        if not reviewed_answer(record) and record.get("mode") != "no_evidence":
+        record = await voice.memory.ask(question, body.after, body.before, allow_chat=True)
+        if not reviewed_answer(record) and record.get("mode") not in {"no_evidence", "conversation"}:
             return {
                 "answer": record,
                 "spoken": REVIEW_PENDING if record.get("mode") == "checking" else REVIEW_UNAVAILABLE,
@@ -282,8 +295,11 @@ def voice_router(voice: Voice, admin, max_bytes: int):
         row = voice.memory.db.one("SELECT id,answer,mode FROM answers WHERE id=?", (answer_id,))
         if not row:
             raise HTTPException(404, "Answer not found")
-        row["verification"] = voice.memory.verifier.public(answer_id) if voice.memory.verifier else None
-        if not reviewed_answer(row):
+        row["verification"] = (
+            voice.memory.review(answer_id) if hasattr(voice.memory, "review")
+            else voice.memory.verifier.public(answer_id) if voice.memory.verifier else None
+        )
+        if not reviewed_answer(row) and row.get("mode") != "conversation":
             raise HTTPException(409, "This answer has not completed evidence review.")
         path = await voice.synthesize(reviewed_spoken_text(row["answer"]))
         return FileResponse(path, media_type="audio/mpeg")

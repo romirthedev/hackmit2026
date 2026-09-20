@@ -1,7 +1,12 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 
-export type OrbState = 'idle' | 'listening' | 'thinking' | 'answer';
+export type OrbState =
+  | 'idle'
+  | 'starting'
+  | 'listening'
+  | 'thinking'
+  | 'answer';
 
 // WebGL orb adapted from the React Bits "Orb" fragment shader (MIT), rewritten
 // against raw WebGL so it carries no extra dependency. See
@@ -67,6 +72,7 @@ const STATES: Record<
   { speed: number; hover: number; energy: number; hue: number }
 > = {
   idle: { speed: 0.45, hover: 0, energy: 0, hue: 0 },
+  starting: { speed: 1.1, hover: 1, energy: 0.6, hue: 25 },
   listening: { speed: 1.1, hover: 1, energy: 0.6, hue: 25 },
   thinking: { speed: 2.4, hover: 0.35, energy: 1, hue: -20 },
   answer: { speed: 0.6, hover: 0.15, energy: 0.2, hue: 40 },
@@ -83,7 +89,7 @@ export function Orb({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const stateRef = useRef(state);
-  useEffect(() => {
+  useLayoutEffect(() => {
     stateRef.current = state;
   }, [state]);
 
@@ -156,6 +162,7 @@ export function Orb({
     window.addEventListener('resize', resize);
 
     const cur = { hover: 0, energy: 0, hue: 0 };
+    let shownState: OrbState | null = null;
     let t = 0,
       rot = 0,
       last = performance.now(),
@@ -176,6 +183,13 @@ export function Orb({
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       const target = STATES[stateRef.current];
+      if (shownState !== stateRef.current) {
+        // A tap changes the animation on this frame, even on a slow GPU.
+        shownState = stateRef.current;
+        speed = target.speed;
+        cur.hover = target.hover;
+        cur.energy = target.energy;
+      }
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       speed += (target.speed - speed) * 0.05;
@@ -209,6 +223,7 @@ export function Orb({
     <div
       ref={ref}
       className="orb"
+      data-orb-state={state}
       style={{ width: size, height: size }}
       aria-hidden="true"
     />
