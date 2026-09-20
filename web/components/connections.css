@@ -1,0 +1,130 @@
+.connections-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.connections-dialog {
+  width: min(760px, calc(100vw - 28px));
+  max-height: 90dvh;
+  margin: auto;
+  overflow-y: auto;
+  border: 1px solid #ded8e2;
+  border-radius: 24px;
+  padding: 20px;
+  background: #faf8fb;
+  color: #302a38;
+  box-shadow: 0 20px 100px #25163744;
+}
+.connections-dialog::backdrop {
+  background: #1b142c88;
+  backdrop-filter: blur(6px);
+}
+.connections-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.connections-dialog > header h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.7px;
+}
+.connections-dialog > header button {
+  border: 0;
+  border-radius: 50%;
+  background: #eee9f1;
+  padding: 9px;
+  cursor: pointer;
+}
+.connections-computer {
+  display: flex;
+  gap: 14px;
+  padding: 18px;
+  margin-bottom: 14px;
+  border: 1px solid #e0d8e9;
+  border-radius: 18px;
+  background: #efe9f6;
+  font-size: 13px;
+}
+.connections-computer > svg {
+  flex-shrink: 0;
+}
+.connections-computer p {
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.connections-computer small {
+  color: #70637d;
+}
+.computer-progress {
+  font-size: 13px;
+  margin: 16px 0 4px;
+  padding: 14px;
+  border: 1px solid #9886b455;
+  border-radius: 14px;
+  background: #9886b411;
+}
+.computer-progress-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.computer-progress-heading span,
+.computer-progress button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.computer-progress button {
+  border: 1px solid #9886b466;
+  border-radius: 20px;
+  padding: 7px 12px;
+  color: inherit;
+  background: #9886b422;
+  cursor: pointer;
+}
+.computer-progress button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.computer-progress p {
+  margin: 10px 0 0;
+  line-height: 1.6;
+}
+.computer-decision {
+  padding-top: 16px;
+}
+.computer-decision pre {
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  margin: 12px 0;
+}
+.computer-decision > div {
+  display: flex;
+  gap: 8px;
+}
+@media (max-width: 550px) {
+  .connections-label {
+    display: none;
+  }
+  .rw .topbar {
+    flex-wrap: wrap;
+  }
+  .rw .top-right {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .connections-dialog {
+    padding: 12px;
+  }
+  .connections-dialog > header h2 {
+    font-size: 18px;
+  }
+}

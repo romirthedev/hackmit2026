@@ -176,9 +176,11 @@ final class NotchViewModel: ObservableObject {
     /// no invoker.cancel(), no queue clearing — so everything in flight
     /// keeps going underneath. Otherwise it's the full interrupt.
     private var remoteRequestID: String?
+    private var remoteResponseSucceeded = false
 
     private func prepareStageForCapture() {
         remoteRequestID = nil
+        remoteResponseSucceeded = false
         if hasBackgroundWork || presentationActive {
             generation += 1
             presentationActive = false
@@ -289,8 +291,13 @@ final class NotchViewModel: ObservableObject {
     /// of the same accepted request do not repeat a computer action.
     func rewindCommand(_ text: String, id: String) -> Bool {
         if remoteRequestID == id { return transcript == text }
-        guard !hasBackgroundWork, !captureActive, !presentationActive,
-              state == .idle || state == .error else { return false }
+        // A phone follow-up may replace its completed result immediately.
+        // It must still never interrupt a running or unrelated native request.
+        let replacingRemoteResult = remoteRequestID != nil && presentationActive
+            && (state == .responding || state == .error)
+        guard !hasBackgroundWork, !captureActive,
+              !presentationActive || replacingRemoteResult,
+              state == .idle || state == .error || replacingRemoteResult else { return false }
         remoteCommand(text)
         remoteRequestID = id
         return true
@@ -327,7 +334,7 @@ final class NotchViewModel: ObservableObject {
             errorMessage: errorMessage,
             workersRunning: workersRunning,
             contextApp: contextAppName,
-            actionSucceeded: actionSucceeded,
+            actionSucceeded: remoteResponseSucceeded,
             learnedSkill: learnedSkillName,
             outputFile: outputFile,
             requestID: remoteRequestID,
@@ -733,6 +740,9 @@ final class NotchViewModel: ObservableObject {
         learnedSkillName = p.learnedSkill
         outputFile = p.outputFile
         transition(to: .responding)
+        // Successful read-only answers are successful computer requests too.
+        // A clarification remains unfinished even though it is presented normally.
+        remoteResponseSucceeded = p.type != .clarify
         if p.type == .action { actionSucceeded = true }
 
         let shownAt = Date()
@@ -753,6 +763,13 @@ final class NotchViewModel: ObservableObject {
                 scheduleCollapse(after: readingDuration(for: p.message))
             }
         case .clarify:
+            if remoteRequestID != nil {
+                // The paired phone owns this conversation's microphone.
+                // Keep the clarification available there instead of recording
+                // an unrelated person speaking near the Mac.
+                scheduleCollapse(after: readingDuration(for: p.message))
+                return
+            }
             // Conversational follow-up: reopen the mic AFTER Notch finishes
             // asking (half-duplex — the mic must never hear our own voice).
             // The follow-up resumes this session's conversation.

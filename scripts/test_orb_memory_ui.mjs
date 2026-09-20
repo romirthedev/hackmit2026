@@ -29,7 +29,7 @@ async function until(fn, message, timeout=15000) {
 const context = await browser.newContext({viewport:{width:1440,height:900}, permissions:['microphone']});
 const page = await context.newPage();
 page.on('pageerror', e=>report.errors.push(e.message));
-let heard=0, asked=0;
+let heard=0, asked=0, answers=[], turns=[];
 const fixtureAnswer={id:'77777777-7777-4777-8777-777777777777', question:'Where are my glasses?', answer:'Your glasses were on the table.', evidence:[], created_at:Date.now()/1000, mode:'verified', grounded:true, verification:{receipt:{claims_reviewed:true}}};
 try {
   const status=await admin('/status');assert.equal(status.provider,'disabled');
@@ -42,7 +42,14 @@ try {
     heard++; assert(route.request().postDataBuffer().length>100,'Recorder submitted real encoded audio');
     return respond(route,{question:fixtureAnswer.question, transcript:fixtureAnswer.question,directed:true});
   });
-  await page.route('**/api/ask', route=>{asked++;return respond(route,fixtureAnswer);});
+  await page.route('**/api/answers', route=>respond(route,answers));
+  await page.route('**/api/conversation/state', route=>respond(route,{status:'listening',turns}));
+  await page.route('**/api/conversation/text', route=>{
+    const request=route.request().postDataJSON();
+    assert.equal(request.text,fixtureAnswer.question);asked++;answers=[fixtureAnswer];
+    turns=[{id:request.id,transcript:request.text,response:fixtureAnswer.answer,response_revision:1,status:'completed',kind:'memory',answer_id:fixtureAnswer.id,created_at:Date.now()/1000}];
+    return respond(route,{id:request.id,status:'queued',duplicate:false});
+  });
   await page.getByRole('button',{name:'Ask by voice',exact:true}).click();
   await page.getByRole('button',{name:'Finish and send question'}).first().waitFor();
   await page.waitForTimeout(650);

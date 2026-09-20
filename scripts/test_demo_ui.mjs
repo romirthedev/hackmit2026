@@ -35,7 +35,7 @@ try{
  }
  await dashboard.setViewportSize({width:1440,height:1000});
  await dashboard.evaluate(()=>document.body.style.zoom='2');await fits(dashboard);await dashboard.evaluate(()=>document.body.style.zoom='');
- await dashboard.getByRole('textbox',{name:'Ask about your recordings'}).fill('When is my doctor bill due?');assert(await dashboard.getByRole('button',{name:'Send question',exact:true}).isEnabled());
+ await dashboard.getByRole('textbox',{name:'Ask a question or request a computer action'}).fill('When is my doctor bill due?');assert(await dashboard.getByRole('button',{name:'Send question',exact:true}).isEnabled());
  await dashboard.locator('.card-ask').screenshot({path:path.join(out,'ask-fixed.png')});
  await dashboard.getByRole('tab',{name:'Caretaker',exact:true}).click();await settled(dashboard);await fits(dashboard);
  await dashboard.getByRole('tab',{name:'Rose',exact:true}).click();await settled(dashboard);

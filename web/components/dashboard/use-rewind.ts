@@ -6,6 +6,8 @@ import {
   isAuthenticationError,
   type Alert,
   type Answer,
+  type ConversationState,
+  type ConversationTurn,
   type Recording,
   type Rule,
   type ScanDocument,
@@ -53,6 +55,7 @@ type Snapshot = {
   reminders: Reminder[];
   people: ConfirmedPerson[];
   scans: ScanDocument[];
+  conversation: ConversationState;
 };
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -109,6 +112,7 @@ export function useRewind() {
           reminders,
           persons,
           scans,
+          conversation,
         ] = await Promise.all([
           api<Status>('/status', init),
           api<Recording[]>('/recordings?limit=24', init),
@@ -119,6 +123,7 @@ export function useRewind() {
           api<Reminder[]>('/context/reminders', init),
           api<{ people: ConfirmedPerson[] }>('/people', init),
           api<ScanDocument[]>('/scans?limit=20', init),
+          api<ConversationState>('/conversation/state', init),
         ]);
         if (
           !alive.current ||
@@ -145,6 +150,7 @@ export function useRewind() {
           reminders,
           people: persons.people,
           scans,
+          conversation,
         });
         setNow(timestamp);
         setLastSync(timestamp);
@@ -239,24 +245,40 @@ export function useRewind() {
   );
   const ask = useCallback(
     async (question: string) => {
-      const answer = await change<Answer>('/ask', {
+      const id = crypto.randomUUID();
+      await change('/conversation/text', {
         method: 'POST',
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ id, text: question }),
       });
+      const turn: ConversationTurn = {
+        id,
+        transcript: question,
+        response: '',
+        response_revision: 0,
+        status: 'queued',
+        kind: null,
+        created_at: Date.now() / 1000,
+      };
       setSnapshot((previous) =>
         previous
           ? {
               ...previous,
-              answers: [
-                answer,
-                ...previous.answers.filter((item) => item.id !== answer.id),
-              ],
+              conversation: {
+                ...previous.conversation,
+                turns: [
+                  ...previous.conversation.turns.filter(
+                    (item) => item.id !== id,
+                  ),
+                  turn,
+                ],
+              },
             }
           : previous,
       );
-      return answer;
+      void reload();
+      return turn;
     },
-    [change],
+    [change, reload],
   );
   const action = useCallback(
     async (path: string, init: RequestInit = { method: 'POST' }) => {
@@ -284,6 +306,7 @@ export function useRewind() {
     status: snapshot?.status ?? null,
     records: snapshot?.records ?? [],
     answers: snapshot?.answers ?? [],
+    turns: snapshot?.conversation.turns ?? [],
     rules: snapshot?.rules ?? [],
     alerts: snapshot?.alerts ?? [],
     graph: snapshot?.graph ?? null,

@@ -573,6 +573,11 @@ Do not invent dates or anchor actions. Return JSON.""",
                         synced_at=row["synced_at"],
                         source_kind=row["context_kind"],
                         starts_at=row.get("starts_at"),
+                        starts_at_local=(
+                            datetime.fromtimestamp(row["starts_at"], ZoneInfo(self.s.timezone)).isoformat(timespec="minutes")
+                            if row.get("starts_at") is not None else None
+                        ),
+                        all_day=row.get("all_day", False),
                     )
                 elif row.get("source") == "scan":
                     item.update(
@@ -626,7 +631,10 @@ Do not invent dates or anchor actions. Return JSON.""",
                     if not response.insufficient_evidence or inline:
                         raise ValueError("Missing evidence citations for an asserted answer")
                     # Do not display uncited model prose: it could still contain unsupported claims.
-                    answer = "The available recordings do not establish an answer to that question."
+                    answer = (
+                        "Your saved moments and connected sources don't establish an answer to that yet."
+                        if digital_sources else "The available recordings do not establish an answer to that question."
+                    )
                     # No factual claim exists to review. Treat this as server
                     # guidance so voice/conversation do not report a broken
                     # reviewer for an intentionally unqueued abstention.

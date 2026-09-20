@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import Login from '@/components/login';
 import { MemoryReset } from '@/components/memory-reset';
+import { Connections } from '@/components/connections';
+import { ComputerAction } from '@/components/computer-action';
 import { PhoneBattery, usePhoneBattery } from '@/components/phone-battery';
 import {
   api,
@@ -28,7 +30,10 @@ import {
   type Status,
   type ConversationState,
 } from '@/lib/api';
-import { canSpeakAnswer, isCachedAnswer } from '@/components/dashboard/answer-detail';
+import {
+  canSpeakAnswer,
+  isCachedAnswer,
+} from '@/components/dashboard/answer-detail';
 import { usePhoneQuestion } from '@/lib/use-phone-question';
 import { PhoneCapture, type CaptureState } from '@/lib/phone-capture';
 import { Orb, type OrbState } from '@/components/dashboard/orb';
@@ -700,6 +705,7 @@ export default function Phone() {
             <span className="rw-brand-time">{clock}</span>
           </a>
           <div className="ph-status">
+            <Connections compact />
             <PhoneBattery {...power} />
             <MemoryReset
               className="ph-memory"
@@ -779,9 +785,9 @@ export default function Phone() {
                 </output>
                 <div className="ask-body">
                   <p className="hint">
-                    Tap the orb and ask me anything. Tap again to send, or pause
-                    and I’ll answer. Camera saves a photo; Record saves your
-                    day.
+                    Ask about your day, your notes and plans, or ask me to do
+                    something on your Mac. Tap again to send, or pause and I’ll
+                    answer.
                   </p>
                 </div>
                 <div className="ph-voice-controls">
@@ -803,7 +809,7 @@ export default function Phone() {
                   <label className={`ask-input ${question ? 'has-text' : ''}`}>
                     <input
                       aria-label="Type a question or request"
-                      placeholder="Or type a question…"
+                      placeholder="Ask a question or make a request…"
                       value={question}
                       onChange={(event) => setQuestion(event.target.value)}
                       maxLength={2000}
@@ -858,6 +864,10 @@ export default function Phone() {
                           ? 'Notch is working on your Mac…'
                           : 'Working on your request…')}
                     </p>
+                    {turn.command_id &&
+                      ['acting', 'awaiting_permission'].includes(
+                        turn.status,
+                      ) && <ComputerAction commandId={turn.command_id} />}
                     {turn.response && (
                       <button
                         type="button"
@@ -895,22 +905,22 @@ export default function Phone() {
                         ? 'Saved walkthrough · source reviewed'
                         : answer.mode === 'conversation'
                           ? 'Rewind'
-                        : answer.mode === 'checking'
-                          ? 'Waiting for Codex review'
-                          : answer.mode === 'legacy_unverified'
-                            ? 'Earlier answer · not checked'
-                            : answer.mode === 'verified' &&
-                                answer.verification?.receipt.claims_reviewed
-                              ? 'Checked against sources by ' +
-                                (answer.verification?.receipt.reviews
-                                  ?.map((r) => r.model)
-                                  .join(' → ') || 'Codex')
-                              : answer.mode === 'insufficient' &&
+                          : answer.mode === 'checking'
+                            ? 'Waiting for Codex review'
+                            : answer.mode === 'legacy_unverified'
+                              ? 'Earlier answer · not checked'
+                              : answer.mode === 'verified' &&
                                   answer.verification?.receipt.claims_reviewed
-                                ? 'Sources checked · evidence is incomplete'
-                                : answer.grounded
-                                  ? `${answer.evidence.length} sources cited`
-                                  : 'Evidence incomplete'}
+                                ? 'Checked against sources by ' +
+                                  (answer.verification?.receipt.reviews
+                                    ?.map((r) => r.model)
+                                    .join(' → ') || 'Codex')
+                                : answer.mode === 'insufficient' &&
+                                    answer.verification?.receipt.claims_reviewed
+                                  ? 'Sources checked · evidence is incomplete'
+                                  : answer.grounded
+                                    ? `${answer.evidence.length} sources cited`
+                                    : 'Evidence incomplete'}
                     </small>
                     <button
                       aria-label="Read answer aloud"

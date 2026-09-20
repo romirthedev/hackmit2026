@@ -6,7 +6,14 @@ import { ArrowUp, Mic, Square, Volume2, VolumeX } from 'lucide-react';
 import { Orb } from './orb';
 import { Card, Cell } from './primitives';
 import { AnswerDetail, canSpeakAnswer } from './answer-detail';
-import { api, type Answer, type Recording, type Heard } from '@/lib/api';
+import {
+  api,
+  type Answer,
+  type ConversationTurn,
+  type Recording,
+  type Heard,
+} from '@/lib/api';
+import { ComputerAction } from '@/components/computer-action';
 import { recordUtterance } from '@/lib/voice';
 import { voiceTapFeedback } from '@/lib/voice-feedback';
 import { useSpeechPlayback } from '@/lib/use-speech-playback';
@@ -14,6 +21,7 @@ import { useSpeechPlayback } from '@/lib/use-speech-playback';
 export function AskCard({
   ask,
   answers,
+  turns,
   onOpen,
   index,
   disabled = false,
@@ -21,8 +29,9 @@ export function AskCard({
   placeholder = 'Ask Rewind anything',
   title = 'Ask',
 }: {
-  ask: (question: string) => Promise<Answer>;
+  ask: (question: string) => Promise<ConversationTurn>;
   answers: Answer[];
+  turns: ConversationTurn[];
   onOpen: (record: Recording) => void;
   index: number;
   disabled?: boolean;
@@ -30,7 +39,7 @@ export function AskCard({
   placeholder?: string;
   title?: string;
 }) {
-  const [submitted, setSubmitted] = useState<Answer | null>(null);
+  const [submitted, setSubmitted] = useState<ConversationTurn | null>(null);
   const [text, setText] = useState('');
   const [starting, setStarting] = useState(false);
   const [listening, setListening] = useState(false);
@@ -47,9 +56,29 @@ export function AskCard({
   const { speak, cancel } = voice;
   const attempted = useRef(new Set<string>());
   const pending = useRef(false);
-  const answer = submitted
-    ? (answers.find((item) => item.id === submitted.id) ?? submitted)
+  const turn = submitted
+    ? (turns.find((item) => item.id === submitted.id) ?? submitted)
     : null;
+  const answer = answers.find((item) => item.id === turn?.answer_id);
+  const working =
+    !!turn &&
+    [
+      'queued',
+      'transcribing',
+      'routing',
+      'thinking',
+      'checking',
+      'acting',
+      'awaiting_permission',
+    ].includes(turn.status);
+  const progress =
+    turn?.status === 'acting'
+      ? 'Working on your Mac…'
+      : turn?.status === 'awaiting_permission'
+        ? 'Your decision is needed'
+        : turn?.status === 'checking'
+          ? 'Checking evidence'
+          : 'Thinking…';
   useEffect(() => {
     const changed = () => setVisibilityEpoch((epoch) => epoch + 1);
     document.addEventListener('visibilitychange', changed);
@@ -69,6 +98,19 @@ export function AskCard({
     if (sound && !disabled) void speak(answer.answer);
   }, [answer, sound, disabled, speak, visibilityEpoch]);
   useEffect(() => {
+    if (
+      !turn?.response ||
+      turn.answer_id ||
+      !['completed', 'clarification', 'error'].includes(turn.status) ||
+      document.hidden
+    )
+      return;
+    const key = `${turn.id}:${turn.response_revision}`;
+    if (attempted.current.has(key)) return;
+    attempted.current.add(key);
+    if (sound && !disabled) void speak(turn.response);
+  }, [turn, sound, disabled, speak, visibilityEpoch]);
+  useEffect(() => {
     if (disabled) {
       cancel();
       microphone.current?.abort();
@@ -78,9 +120,9 @@ export function AskCard({
     ? 'starting'
     : listening
       ? 'listening'
-      : busy || hearing || answer?.mode === 'checking'
+      : busy || hearing || working || answer?.mode === 'checking'
         ? 'thinking'
-        : answer
+        : answer || turn?.response
           ? 'answer'
           : 'idle';
   async function go(question = text.trim()) {
@@ -180,8 +222,8 @@ export function AskCard({
                 ? 'Listening… tap to send'
                 : hearing
                   ? 'Transcribing…'
-                  : busy
-                    ? 'Thinking…'
+                  : busy || working
+                    ? progress
                     : answer?.mode === 'checking'
                       ? 'Checking evidence'
                       : disabled
@@ -213,8 +255,28 @@ export function AskCard({
         <div className="ask-body">
           {answer ? (
             <AnswerDetail answer={answer} onOpen={onOpen} playback={voice} />
+          ) : turn ? (
+            <div aria-live="polite">
+              <p className="hint">{turn.transcript}</p>
+              <p className="answer-copy">{turn.response || progress}</p>
+              {turn.response && (
+                <button
+                  type="button"
+                  className="voice-action"
+                  onClick={() => void speak(turn.response)}
+                >
+                  <Volume2 /> Read aloud
+                </button>
+              )}
+            </div>
           ) : (
-            <p className="hint">Tap the orb to talk, or type below.</p>
+            <p className="hint">
+              Ask about your day, your digital life, or ask me to do something
+              on your Mac.
+            </p>
+          )}
+          {turn?.command_id && working && (
+            <ComputerAction commandId={turn.command_id} />
           )}
           {error && (
             <p role="alert" className="ask-error">
@@ -251,7 +313,7 @@ export function AskCard({
               value={text}
               onChange={(event) => setText(event.target.value)}
               placeholder={placeholder}
-              aria-label="Ask about your recordings"
+              aria-label="Ask a question or request a computer action"
               disabled={busy || hearing || starting || listening || disabled}
               maxLength={2000}
             />

@@ -425,6 +425,11 @@ async def test_direct_personal_question_searches_memory_before_clarifying(conver
         "He said where is my laptop?",
         "Rewind, open my email",
         "When is it due?",
+        "Where is my Downloads folder?",
+        "What files are on my desktop?",
+        "Where is my doctor bill PDF file?",
+        "Where is my medicine and open my calendar?",
+        "Pull it up on my Mac",
         'What did he mean by "open my email"?',
     ],
 )

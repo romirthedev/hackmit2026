@@ -10,6 +10,7 @@ import {
 } from '@/lib/api';
 import Login from '@/components/login';
 import { MemoryReset } from '@/components/memory-reset';
+import { Connections } from '@/components/connections';
 import { demoStatus } from './demo-data';
 import '@/app/mail.css';
 import {
@@ -193,6 +194,7 @@ export function Dashboard() {
           index={1}
           ask={rw.ask}
           answers={rw.answers}
+          turns={rw.turns}
           onOpen={openSource}
           disabled={rw.connection !== 'live'}
           label="Ask about Rose"
@@ -295,6 +297,7 @@ export function Dashboard() {
           <span className="rw-brand-time">{clock}</span>
         </a>
         <div className="top-right">
+          <Connections />
           <MemoryReset demo={live.status?.demo} />
           {rw.connection !== 'live' && (
             <span className={`conn ${rw.connection}`}>
@@ -388,6 +391,7 @@ export function Dashboard() {
               index={1}
               ask={rw.ask}
               answers={rw.answers}
+              turns={rw.turns}
               onOpen={openSource}
               disabled={rw.connection !== 'live'}
             />

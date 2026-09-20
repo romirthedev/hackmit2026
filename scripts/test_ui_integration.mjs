@@ -295,6 +295,51 @@ try {
     assert(!report.requests.some((r) => r.label === "computer" && r.path === "/api/computer/command"));
     await noOverflow(page); await page.close();
   });
+  await test("dashboard natural computer request shows actual progress, current permission and cancellation", async () => {
+    const page = await newPage("dashboard-computer", {width:1440,height:1000});
+    let turn = null, state = null;
+    const decisions = [], cancellations = [];
+    await page.route("**/api/answers", r => respond(r,200,[]));
+    await page.route("**/api/conversation/state", r => respond(r,200,{status:turn?.status ?? "listening",turns:turn?[turn]:[]}));
+    await page.route("**/api/conversation/text", r => {
+      const request=r.request().postDataJSON();
+      assert.equal(request.text,"Find the synthetic note on my Mac");
+      turn={id:request.id,transcript:request.text,response:"",response_revision:0,status:"acting",kind:"computer",command_id:request.id,created_at:Date.now()/1000};
+      state={request_id:request.id,state:"working",steps:[{text:"Searching synthetic notes",verify:false}],permission:null};
+      return respond(r,200,{id:request.id,status:"queued",duplicate:false});
+    });
+    await page.route("**/api/computer/state", r => respond(r,200,state ?? {state:"idle",steps:[]}));
+    await page.route("**/api/computer/permission", r => {
+      const decision=r.request().postDataJSON();decisions.push(decision);
+      assert.equal(decision.id,"synthetic-current-permission");assert.equal(decision.allow,true);
+      state={...state,permission:null,steps:[{text:"Opening synthetic note",verify:true}]};turn.status="acting";
+      return respond(r,200,{ok:true});
+    });
+    await page.route("**/api/computer/cancel", r => {
+      const request=r.request().postDataJSON();cancellations.push(request);assert.equal(request.id,turn.command_id);
+      state={...state,state:"idle",steps:[]};turn={...turn,status:"error",response:"Synthetic computer request stopped.",response_revision:1};
+      return respond(r,200,{ok:true});
+    });
+    await pair(page,"/");
+    await page.getByRole("textbox",{name:"Ask a question or request a computer action",exact:true}).fill("Find the synthetic note on my Mac");
+    await page.getByRole("button",{name:"Send question",exact:true}).click();
+    await page.getByText("Searching synthetic notes",{exact:true}).waitFor();
+    assert(!report.requests.some(r=>r.label==="dashboard-computer" && ["/api/ask","/api/computer/command"].includes(r.path)),"Unified client submits only the natural request");
+    // A stale native snapshot must not expose another request's controls.
+    const current=state;state={...state,request_id:"different-request",permission:{id:"stale-permission",tool:"Synthetic tool",detail:"Unrelated request"}};
+    await until(()=>page.getByRole("button",{name:"Stop",exact:true}).isDisabled(),"Stale native snapshot disables cancellation");
+    assert.equal(await page.getByRole("button",{name:"Allow once",exact:true}).count(),0);
+    state={...current,permission:{id:"synthetic-current-permission",tool:"Read synthetic note",detail:"Fixture permission for this request only"}};turn.status="awaiting_permission";
+    await page.getByText("Fixture permission for this request only",{exact:true}).waitFor();
+    await page.getByRole("button",{name:"Allow once",exact:true}).click();
+    await page.getByText("Checking: Opening synthetic note",{exact:true}).waitFor();
+    assert.deepEqual(decisions,[{id:"synthetic-current-permission",allow:true}]);
+    await page.getByRole("button",{name:"Stop",exact:true}).click();
+    await page.getByText("Synthetic computer request stopped.",{exact:true}).waitFor();
+    assert.deepEqual(cancellations,[{id:turn.command_id}]);
+    assert.equal(await page.getByRole("region",{name:"Computer action",exact:true}).count(),0);
+    await noOverflow(page);await page.close();
+  });
   await test("phone pending answer updates to checked evidence; draft is not spoken", async () => {
     assert(source, "Record fixture must produce a real cited frame first");
     const page = await newPage("review-transition"); await pair(page);
@@ -303,7 +348,7 @@ try {
     const answer = { id: "66666666-6666-4666-8666-666666666666", question, answer: "UNVERIFIED_FIXTURE_DRAFT", created_at: Date.now() / 1000, mode: "checking", grounded: false, evidence: [evidence], verification: { status: "pending", receipt: {} } };
     let submitted = false, verified = false;
     await page.route("**/api/answers", (r) => respond(r, 200, submitted ? [{ ...answer, ...(verified ? { answer: "CHECKED_FIXTURE_RESULT", mode: "verified", grounded: true, verification: { status: "complete", receipt: { claims_reviewed: true, answer_complete: true, reviews: [{ model: "Fixture reviewer", seconds: 0.01, result: { reason: "Controlled browser-state fixture, not an actual model review." } }] } } } : {}) }] : []));
-    await page.route("**/api/conversation/state", (r) => respond(r, 200, { status: submitted ? (verified ? "completed" : "checking") : "listening", turns: submitted ? [{ id: "fixture-turn", transcript: question, response: verified ? "CHECKED_FIXTURE_RESULT" : "", response_revision: verified ? 2 : 1, status: verified ? "completed" : "checking", kind: "recall", answer_id: answer.id, created_at: answer.created_at }] : [] }));
+    await page.route("**/api/conversation/state", (r) => respond(r, 200, { status: submitted ? (verified ? "completed" : "checking") : "listening", turns: submitted ? [{ id: "fixture-turn", transcript: question, response: verified ? "CHECKED_FIXTURE_RESULT" : "", response_revision: verified ? 2 : 1, status: verified ? "completed" : "checking", kind: "memory", answer_id: answer.id, created_at: answer.created_at }] : [] }));
     await page.route("**/api/conversation/text", (r) => { assert.equal(r.request().postDataJSON().text, question); submitted = true; return respond(r, 200, { id: "fixture-turn", status: "queued" }); });
     await page.getByRole("button", { name: "Test voice", exact: true }).click();
     await page.getByRole("textbox", { name: "Type a question or request", exact: true }).fill(question);
@@ -332,12 +377,20 @@ try {
       await pair(page, route);
       const question = "Fixture question for review-state transition";
       const answer = { id: "77777777-7777-4777-8777-777777777777", question, answer: "DESKTOP_FIXTURE_DRAFT", mode: "checking", grounded: false, evidence: [{ ...source, summary: "Desktop fixture original" }], created_at: Date.now() / 1000 };
-      let submitted = false, verified = false;
+      let submitted = false, verified = false, turnId = null;
       const current = () => ({ ...answer, ...(verified ? { answer: "DESKTOP_FIXTURE_CHECKED", mode: "verified", grounded: true, verification: { status: "complete", receipt: { claims_reviewed: true, answer_complete: true, reviews: [] } } } : {}) });
       await page.route("**/api/answers", (r) => respond(r, 200, submitted ? [current()] : []));
-      await page.route("**/api/ask", (r) => { assert.equal(r.request().postDataJSON().question, question); submitted = true; return respond(r, 200, current()); });
+      await page.route("**/api/ask", (r) => { assert.equal(route,"/workspace/","Dashboard must use the unified conversation route"); assert.equal(r.request().postDataJSON().question, question); submitted = true; return respond(r, 200, current()); });
+      await page.route("**/api/conversation/state", r => respond(r, 200, {
+        status: submitted ? (verified ? "listening" : "checking") : "listening",
+        turns: turnId ? [{id:turnId,transcript:question,response:verified?current().answer:"",response_revision:verified?1:0,status:verified?"completed":"checking",kind:"memory",answer_id:answer.id,created_at:answer.created_at}] : [],
+      }));
+      await page.route("**/api/conversation/text", r => {
+        const request=r.request().postDataJSON();assert.equal(request.text,question);turnId=request.id;submitted=true;
+        return respond(r,200,{id:turnId,status:"queued",duplicate:false});
+      });
       if (route === "/") {
-        await page.getByRole("textbox", { name: "Ask about your recordings", exact: true }).fill(question);
+        await page.getByRole("textbox", { name: "Ask a question or request a computer action", exact: true }).fill(question);
         await page.getByRole("button", { name: "Send question", exact: true }).click();
       } else {
         await page.getByPlaceholder("Where did I leave…", { exact: true }).fill(question);

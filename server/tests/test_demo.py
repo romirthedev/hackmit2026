@@ -11,6 +11,7 @@ import httpx
 import pytest
 from rewind.app import create_app
 from rewind.config import Settings
+from rewind.context import ContextSnapshot
 from rewind.demo import DemoIntegrityError
 from rewind.history import clear_memory
 from rewind.voice import reviewed_answer
@@ -182,6 +183,38 @@ async def test_clear_preserves_walkthrough_originals_labels_graph_and_prepared_v
         assert (await demo.ask("Where are my keys?"))["mode"] == "demo_cached"
         assert await demo.ask("Where exactly?")
         assert db.one("PRAGMA foreign_key_check") is None
+
+
+async def test_demo_clear_preserves_connected_digital_knowledge_and_reminder_identity(tmp_path):
+    app, _ = setup(tmp_path)
+    db, context = app.state.db, app.state.context
+    context.ingest(ContextSnapshot(
+        version=1, exported_at=time.time(),
+        sources={"notes": "connected", "calendar": "connected"},
+        documents=[
+            {"key": "note:planting", "kind": "note", "title": "Planting", "text": "See [[Garden]]."},
+            {"key": "note:garden", "kind": "note", "title": "Garden", "text": "Bring a watering can."},
+            {"key": "calendar:planting", "kind": "calendar", "title": "Planting", "starts_at": time.time() + 900},
+        ],
+    ))
+    db.set_setting("notch_enabled", True)
+    reminder = context.reminders()[0]
+    db.execute("UPDATE context_reminders SET seen=1 WHERE id=?", (reminder["id"],))
+    before = context.status()
+    graph = context.graph()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        result = await client.request("DELETE", "/api/memory", headers=HEADERS, json={"confirm": True})
+    assert result.status_code == 200, result.text
+    assert context.status() == before
+    assert context.reminders()[0]["id"] == reminder["id"]
+    assert context.reminders()[0]["seen"] == 1
+    assert [edge for edge in context.graph()["edges"] if edge["relation"] == "linked_source"] == [
+        edge for edge in graph["edges"] if edge["relation"] == "linked_source"
+    ]
+    assert context.search("Garden")[0]["text"] == "Bring a watering can."
+    context.disconnect()  # The explicit disconnect action still removes connected knowledge.
+    assert context.db.all("SELECT * FROM context_documents") == []
+    assert context.reminders() == []
 
 
 @pytest.mark.parametrize("broken", ["missing", "malformed", "missing-original", "changed-original"])

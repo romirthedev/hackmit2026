@@ -75,6 +75,7 @@ export type ConversationTurn = {
   status: string;
   kind: string | null;
   answer_id?: string | null;
+  command_id?: string | null;
   created_at: number;
 };
 export type ConversationState = {

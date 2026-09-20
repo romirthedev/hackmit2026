@@ -58,9 +58,9 @@ const answer = (text, reviewed = true, id = "55555555-5555-4555-8555-55555555555
 });
 const turn = (candidate, id = "fixture-turn") => ({
   id, transcript: candidate.question, response: candidate.answer, response_revision: 1,
-  status: "completed", kind: "recall", answer_id: candidate.id, created_at: candidate.created_at,
+  status: "completed", kind: "memory", answer_id: candidate.id, created_at: candidate.created_at,
 });
-function fixture() { return { answers: [], turns: [], unauthorized: false, polls: 0, ask: null }; }
+function fixture() { return { answers: [], turns: [], unauthorized: false, polls: 0, ask: null, submitted: null }; }
 
 async function pageFor(label, model, route = "/phone/") {
   const context = await browser.newContext({ viewport: { width: route === "/" ? 1440 : 390, height: 900 } });
@@ -125,13 +125,21 @@ async function pageFor(label, model, route = "/phone/") {
   await page.route("**/api/answers", (r) => respond(r, model.unauthorized ? 401 : 200, model.unauthorized ? { detail: "Fixture session expired" } : model.answers));
   await page.route("**/api/conversation/state", (r) => {
     model.polls++;
-    return respond(r, model.unauthorized ? 401 : 200, model.unauthorized ? { detail: "Fixture session expired" } : { status: "listening", turns: model.turns });
+    const candidate = model.answers.find(answer => answer.id === model.ask?.id);
+    const submitted = model.submitted && candidate ? [{
+      ...turn(candidate, model.submitted.id),
+      status: candidate.mode === "checking" ? "checking" : "completed",
+      response: candidate.mode === "checking" ? "" : candidate.answer,
+      kind: "memory",
+    }] : model.turns;
+    return respond(r, model.unauthorized ? 401 : 200, model.unauthorized ? { detail: "Fixture session expired" } : { status: "listening", turns: submitted });
   });
-  await page.route("**/api/ask", (r) => {
+  await page.route("**/api/conversation/text", (r) => {
     assert(model.ask, "Every question is an explicit synthetic browser fixture");
-    assert.equal(r.request().postDataJSON().question, "Synthetic playback test question");
+    model.submitted = r.request().postDataJSON();
+    assert.equal(model.submitted.text, "Synthetic playback test question");
     model.answers = [model.ask];
-    return respond(r, 200, model.ask);
+    return respond(r, 200, { id: model.submitted.id, status: "queued", duplicate: false });
   });
   if (cookies) {
     await context.addCookies(cookies);
@@ -282,7 +290,7 @@ try {
     assert.equal((await calls(page, "Voice is on."))[0].userActivation, true);
     const candidate = answer("DASHBOARD_CHECKED_RESPONSE", false, "66666666-6666-4666-8666-666666666666");
     model.ask = candidate;
-    await page.getByRole("textbox", { name: "Ask about your recordings", exact: true }).fill(candidate.question);
+    await page.getByRole("textbox", { name: "Ask a question or request a computer action", exact: true }).fill(candidate.question);
     await page.getByRole("button", { name: "Send question", exact: true }).click();
     assert.equal((await calls(page, "I'll check that.")).length, 0, "Submitting a question primes voice silently");
     await composer.getByText(candidate.answer, { exact: true }).waitFor();
@@ -314,7 +322,7 @@ try {
     const composer = page.locator(".card-ask");
     const candidate = answer("DASHBOARD_RETRY_RESPONSE", false);
     model.ask = candidate;
-    await page.getByRole("textbox", { name: "Ask about your recordings", exact: true }).fill(candidate.question);
+    await page.getByRole("textbox", { name: "Ask a question or request a computer action", exact: true }).fill(candidate.question);
     await page.getByRole("button", { name: "Send question", exact: true }).click();
     await composer.getByText(candidate.answer, { exact: true }).waitFor();
     await mode(page, "not-allowed");
@@ -341,7 +349,7 @@ try {
     const composer = page.locator(".card-ask");
     const candidate = answer("DASHBOARD_HIDDEN_RESPONSE", false);
     model.ask = candidate;
-    await page.getByRole("textbox", { name: "Ask about your recordings", exact: true }).fill(candidate.question);
+    await page.getByRole("textbox", { name: "Ask a question or request a computer action", exact: true }).fill(candidate.question);
     await page.getByRole("button", { name: "Send question", exact: true }).click();
     await composer.getByText(candidate.answer, { exact: true }).waitFor();
     await page.evaluate(() => {

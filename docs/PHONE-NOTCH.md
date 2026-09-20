@@ -19,6 +19,7 @@ Build and launch on macOS 14 or newer with Swift installed:
 bash integrations/notch/scripts/build-app.sh
 open -n integrations/notch/build/Notch.app --args --rewind-bridge
 .venv/bin/python scripts/connect_notch.py
+bash integrations/notch/scripts/run-rewind-control.sh
 ```
 
 Generate `.env` with `scripts/setup.py` first if needed. The helper copies the
@@ -28,7 +29,25 @@ GET/POST context requests. It does not start desktop automation, microphones,
 calendar nudging, or model-driven memory consolidation. Launching Notch normally
 still provides the complete upstream application on its original port.
 
-Restart REWIND after environment changes. Select sources in **Your connections**
+The second process is the **actual Notch computer agent**, bound to loopback
+port **8737** by `--rewind-control`. The launcher uses this Mac's signed-in Codex
+and Astra through a separate ephemeral agent session. It can inspect files and
+the current app, execute natural requests, and verify the result; this is not a
+list of hard-coded app commands. Its permission prompts, progress, cancellation,
+and final result are relayed to the paired workspace. Existing Notch permission
+rules still apply, and macOS Accessibility/Screen Recording/Automation grants
+must be available for the corresponding GUI operations. REWIND owns spoken
+responses, so the launcher disables duplicate native speech and unattended vault
+consolidation. The normal standalone Notch launch behavior is unchanged.
+
+`connect_notch.py` saves both `REWIND_NOTCH_URL` (knowledge) and
+`REWIND_NOTCH_CONTROL_URL` (actions), together with the existing private token.
+The read-only bridge alone cannot execute a computer request. Keep both native
+processes and REWIND running. The Mac performs the local actions; Codex inference
+requires the existing signed-in account and an internet connection.
+
+Restart REWIND after environment changes. Open **Connected life** in the dashboard
+header (the link icon on the phone), then select sources
 and tap **Connect Notch**. Calendar, Contacts, and Mail may display normal macOS
 permission dialogs. The bridge reads the signed-in Mac user's sources; a Grandma
 workspace needs her accounts and her Notch vault. Copying code does not connect
@@ -135,9 +154,38 @@ throughput and question latency; uploading in parallel is independent of GPU
 inference slots. The temporary phone preview currently uses the Mac's 3B fallback
 while the isolated ASUS benchmarks and 122B download run.
 
+## One conversation for physical and digital life
+
+The dashboard and phone orb submit voice and text to the same conversation
+router. Saved surroundings and connected notes/calendar/mail/contacts use cited
+memory retrieval and evidence review. Questions about current files, browser
+tabs or app state, and requests to act on the Mac, use the actual Notch agent.
+No separate mode or fixed command phrase is needed. A checked answer can be
+followed by “pull that note up”; its full sources and original Notch identifiers
+are handed to the agent as reference data, never as permission to act.
+
+Active computer requests show native progress, a Stop control and the current
+permission decision on both main screens. The connections panel exposes the
+knowledge graph, source access state and Mac availability. In protected demo
+mode, resetting live memories retains this independently connected knowledge
+and its sync settings. Explicitly disconnecting Notch still removes its cache.
+
 ## Verified and pending
 
 - Native Swift release build and signed app bundle succeed.
+- On September 20, the signed-in Codex/Astra native bridge opened Calculator and
+  verified its visible window in about 16 seconds. A follow-up was accepted while
+  the first result was still displayed and correctly identified the current app
+  in 4 seconds. Accessibility and Screen Recording were already granted on this
+  Mac. These are measured examples, not a guarantee for arbitrary computer tasks.
+- Full live browser checks answered from a connected note with reviewed sources,
+  opened that exact note in TextEdit through a natural follow-up, and answered a
+  phone question by inspecting the project folder. The protected medicine reply
+  completed in 0.9 seconds. Live Mac requests varied from 6–36 seconds; a reviewed
+  digital answer took 21 seconds. Arbitrary actions are not instantaneous.
+- Thirty isolated browser cases cover conversation routing, action progress,
+  stale permission rejection, Allow once, Stop, reviewed speech, reset protection
+  and desktop/phone layouts down to 320 pixels.
 - A public HTTPS browser check verifies pairing, certificate validation, a Secure/HttpOnly
   session cookie, and a configured Notch connection without starting personal capture.
 - Browser automation verifies QR redemption, images/audio accepted by the real

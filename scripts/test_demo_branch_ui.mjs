@@ -24,16 +24,15 @@ await context.route('**/api/status',r=>respond(r,{...baseline,history_cleared_be
 await context.route('**/api/answers',r=>respond(r,answers));
 await context.route('**/api/voice/status',r=>respond(r,{deepgram:true,tts_model:'synthetic-wave',stt_model:'fixture'}));
 await context.route('**/api/voice/speak',r=>{spoken.push(r.request().postDataJSON().text);return r.fulfill({status:200,contentType:'audio/wav',body:wave()});});
-await context.route('**/api/ask',r=>{answers=[cached];return respond(r,cached);});
 await context.route('**/api/conversation/state',r=>respond(r,{status:'listening',turns}));
-await context.route('**/api/conversation/text',r=>{const q=r.request().postDataJSON();answers=[cached];turns=[{id:q.id,transcript:q.text,response:cached.answer,response_revision:1,status:'completed',kind:'recall',answer_id:cached.id,created_at:Date.now()/1000}];return respond(r,{accepted:true,id:q.id});});
+await context.route('**/api/conversation/text',r=>{const q=r.request().postDataJSON();answers=[cached];turns=[{id:q.id,transcript:q.text,response:cached.answer,response_revision:1,status:'completed',kind:'memory',answer_id:cached.id,created_at:Date.now()/1000}];return respond(r,{status:'queued',id:q.id,duplicate:false});});
 await context.route('**/api/memory',r=>{assert.equal(r.request().method(),'DELETE');assert.equal(r.request().postDataJSON().confirm,true);resets++;answers=[];turns=[];cleared=Date.now()/1000;return respond(r,{cleared:true});});
 const page=await context.newPage();page.on('pageerror',e=>report.errors.push(e.message));
 try{
  const invite=await api('/pairing',{method:'POST'});
  await page.goto(origin+'/#connect='+invite.ticket);
  await page.getByRole('button',{name:'Ask by voice',exact:true}).waitFor();
- await page.getByRole('textbox',{name:'Ask about your recordings'}).fill(cached.question);
+ await page.getByRole('textbox',{name:'Ask a question or request a computer action'}).fill(cached.question);
  await page.getByRole('button',{name:'Send question',exact:true}).click();
  await page.getByText('Saved walkthrough · source reviewed',{exact:true}).waitFor();
  await until(()=>spoken.includes(cached.answer),'Reviewed cached answer starts desktop voice');
@@ -42,7 +41,7 @@ try{
  report.cases.push('Desktop speaks a reviewed cached answer and identifies its saved walkthrough source');
  await page.getByRole('button',{name:'Reset live demo memories',exact:true}).click();
  await page.getByRole('alertdialog',{name:'Reset live demo memories?'}).waitFor();
- await page.getByText('The saved dorm walkthrough and its answers stay ready for the next demo.',{exact:false}).waitFor();
+ await page.getByText('The saved dorm walkthrough, its answers and your connected digital knowledge stay ready for the next demo.',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(resets,0);
  await page.getByRole('button',{name:'Reset live demo memories',exact:true}).click();
  await page.getByRole('button',{name:'Reset demo',exact:true}).click();

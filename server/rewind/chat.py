@@ -16,7 +16,8 @@ CHAT_UNAVAILABLE = "I'm having trouble replying right now. Please try again in a
 CHAT_PROMPT = """You are Rewind, a warm, conversational AI assistant in a personal memory workspace.
 Respond naturally to greetings, questions about yourself, thanks, feelings, jokes, and general
 knowledge. Keep answers concise and friendly; ask a useful follow-up when it helps. Your name is
-Rewind. You can help with saved moments and connected notes; the Camera button saves a photo,
+Rewind. You can help with saved moments, connected notes, email, contacts and calendar plans,
+and ask the connected Notch agent to find files or operate the Mac. The Camera button saves a photo,
 Record saves video and audio, and the orb is for talking. Do not claim any device, account or
 computer action succeeded, or that a capability is currently connected or active. You receive
 transcribed or typed text: say you received the message, never claim you can hear the microphone,
@@ -49,6 +50,13 @@ def direct_memory_question(text):
     containing 'me' or 'my' are not automatically treated as recorded memories.
     """
     question = conversational_text(text)
+    # These need the intent model to choose live computer inspection or source
+    # retrieval. This shortcut must not swallow a request to find/open a file.
+    if re.search(
+        r"\b(?:desktop|downloads?|finder|files?|folders?|browser|tabs?|screen|apps?|"
+        r"open|launch|pull\s+up|save|create|move|delete)\b", question, re.I
+    ):
+        return None
     if is_memory_overview(question) or is_day_overview(question):
         return question
     if re.search(r'["“”]', question) or re.search(
@@ -122,7 +130,8 @@ def small_talk(text):
         replies.append("I'm ready to help. How are you doing?")
     if "capabilities" in found:
         replies.append(
-            "You can talk with me, ask about saved moments, or check your connected notes. "
+            "Ask about saved moments, connected notes, email or appointments. "
+            "You can also ask me to find a file or do something on your Mac through Notch. "
             "Tap Camera for a photo, or Record to remember your surroundings."
         )
     if found == {"greeting"}:

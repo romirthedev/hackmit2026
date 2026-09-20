@@ -117,7 +117,7 @@ try{
  assert.equal(await phone.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  // A separate postcard question uses the same live model/review/speech path.
  const beforePostcard=await dashboard.evaluate(()=>window.__actualAudio.filter(a=>a.kind==='ended'&&a.duration>2).length);
- await dashboard.getByRole('textbox',{name:'Ask about your recordings',exact:true}).fill('What did Emma write to me?');
+ await dashboard.getByRole('textbox',{name:'Ask a question or request a computer action',exact:true}).fill('What did Emma write to me?');
  await dashboard.getByRole('button',{name:'Send question',exact:true}).click();
  await until(async()=>{
    const answers=await api('/answers');

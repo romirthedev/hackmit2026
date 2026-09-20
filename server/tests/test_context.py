@@ -118,6 +118,28 @@ async def test_recall_uses_notch_source_with_valid_citation_without_recordings(c
     assert not context.db.all("SELECT * FROM answers")
 
 
+async def test_calendar_recall_keeps_all_day_and_local_date_without_inventing_appointment(context):
+    # September 21 midnight in the configured New York timezone, not a timed visit.
+    context.ingest(snapshot([{
+        "key": "calendar:holiday", "kind": "calendar", "title": "Holiday",
+        "starts_at": 1789963200, "ends_at": 1790049600, "all_day": True,
+    }]))
+
+    class Provider:
+        async def embed(self, text):
+            return None
+
+        async def structured(self, prompt, body, schema, **kwargs):
+            source = json.loads(body)["evidence"][0]
+            assert source["starts_at_local"] == "2026-09-21T00:00-04:00"
+            assert source["all_day"] is True
+            return RecallAnswer(answer="", evidence_ids=[], insufficient_evidence=True)
+
+    answer = await Memory(context.db, Provider(), context.s, context=context).ask("What is my next appointment?")
+    assert answer["mode"] == "no_evidence"
+    assert "connected sources" in answer["answer"]
+
+
 def test_changed_sources_purge_cached_answers_and_rescheduled_reminders(context):
     original = {"key": "visit", "kind": "calendar", "title": "Garden visit", "starts_at": time.time() + 600}
     context.ingest(snapshot([original]))
@@ -213,3 +235,69 @@ def test_old_export_cannot_gain_freshness_when_received_and_partial_failed_sourc
     assert not context.db.all("SELECT * FROM context_documents")
     with pytest.raises(ValueError, match="Stale"):
         context.ingest(snapshot([doc], time.time() + 60))
+
+
+def test_search_recognizes_digital_source_kind_and_preserves_original_key(context):
+    context.ingest(snapshot([
+        {"key": "mail:synthetic-123", "kind": "email", "title": "Trip details", "text": "Train leaves at noon."},
+        {"key": "note:groceries.md", "kind": "note", "title": "Groceries", "text": "Tea and apples."},
+    ]))
+    emails = context.search("Can you show me my emails?")
+    assert [row["source_key"] for row in emails] == ["mail:synthetic-123"]
+    assert emails[0]["text"] == "Train leaves at noon."
+    assert [row["title"] for row in context.search("What notes do I have on my computer?")] == ["Groceries"]
+    assert context.search("Anything about volcanoes?") == []
+
+
+def test_search_supplies_directly_linked_knowledge_without_inventing_relationships(context):
+    context.ingest(snapshot([
+        {"key": "note:orchard", "kind": "note", "title": "Orchard", "text": "Coordinator: [[Alice]]."},
+        {"key": "note:alice", "kind": "note", "title": "Alice", "text": "Coordinator's phone: 555-0100. See [[Travel]]."},
+        {"key": "note:travel", "kind": "note", "title": "Travel", "text": "Book a bus ticket."},
+        {"key": "contact:alice", "kind": "contact", "title": "Alice", "text": "Unlinked contact."},
+    ]))
+    result = context.search("Who coordinates the orchard?")
+    assert [row["source_key"] for row in result] == ["note:orchard", "note:alice"]
+    assert "555-0100" in result[1]["text"]
+    assert context.search("orchard", limit=0) == []
+
+
+def test_ambiguous_note_titles_require_an_exported_source_key_for_graph_relationships(context):
+    docs = [
+        {"key": "note:orchard", "kind": "note", "title": "Orchard", "text": "Coordinator: [[Alice]]."},
+        {"key": "note:alice-one", "kind": "note", "title": "Alice", "text": "First person's private facts."},
+        {"key": "note:alice-two", "kind": "note", "title": "Alice", "text": "A different person's private facts."},
+    ]
+    context.ingest(snapshot(docs))
+    assert context.graph()["edges"] == []
+    assert [row["source_key"] for row in context.search("orchard")] == ["note:orchard"]
+    context.ingest(snapshot([{**docs[0], "links": ["note:alice-one"]}, *docs[1:]]))
+    assert [row["source_key"] for row in context.search("orchard")] == ["note:orchard", "note:alice-one"]
+
+
+def test_next_appointment_retrieves_nearest_upcoming_source_before_alphabetical_history(context):
+    now = time.time()
+    docs = [{"key": f"past:{i}", "kind": "calendar", "title": f"A past visit {i}", "starts_at": now - 600 * (i + 1)}
+            for i in range(8)]
+    docs += [
+        {"key": "calendar:later", "kind": "calendar", "title": "Another visit", "starts_at": now + 7200},
+        {"key": "calendar:next", "kind": "calendar", "title": "Zinnia planting", "starts_at": now + 1200},
+    ]
+    context.ingest(snapshot(docs))
+    assert [row["source_key"] for row in context.search("What's my next appointment?", limit=2)] == [
+        "calendar:next", "calendar:later",
+    ]
+
+
+def test_next_appointment_prefers_calendar_dates_and_preserves_named_doctor_relevance(context):
+    now = time.time()
+    context.ingest(snapshot([
+        {"key": "note:rose", "kind": "note", "title": "Dr Rose's appointments", "text": "See Dr Rose.", "links": ["calendar:rose"]},
+        {"key": "calendar:near", "kind": "calendar", "title": "Dr Jones", "starts_at": now + 600},
+        {"key": "calendar:rose", "kind": "calendar", "title": "Dr Rose", "text": "Scheduled visit.", "starts_at": now + 1800},
+        {"key": "calendar:later-rose", "kind": "calendar", "title": "Dr Rose", "starts_at": now + 3600},
+    ]))
+    # Generic phrasing must not promote the later event just because its body
+    # happens to contain 'scheduled'. A named doctor remains a real constraint.
+    assert context.search("What's my next scheduled appointment?", limit=1)[0]["source_key"] == "calendar:near"
+    assert context.search("When is my next appointment with Dr Rose?", limit=1)[0]["source_key"] == "calendar:rose"

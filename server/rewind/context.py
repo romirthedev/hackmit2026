@@ -125,7 +125,10 @@ class NotchContext:
             for d in snapshot.documents
             if snapshot.sources.get(scope[d.kind], "connected") == "connected"
         }
-        by_title = {d.title.casefold(): d.key for d in documents.values() if d.kind == "note"}
+        by_title = {}
+        for d in documents.values():
+            if d.kind == "note":
+                by_title.setdefault(d.title.casefold(), set()).add(d.key)
         contact_emails = {}
         for d in documents.values():
             if d.kind == "contact":
@@ -162,9 +165,11 @@ class NotchContext:
             for key, d in documents.items():
                 linked = set(d.links)
                 for title in re.findall(r"\[\[([^\]\n]+)\]\]", d.text):
-                    target = by_title.get(title.split("|", 1)[0].split("#", 1)[0].casefold())
-                    if target:
-                        linked.add(target)
+                    matches = by_title.get(title.split("|", 1)[0].split("#", 1)[0].strip().casefold(), set())
+                    # Matching display names are not a unique document identity.
+                    # An explicit exported key may still resolve an ambiguous title.
+                    if len(matches) == 1:
+                        linked.update(matches)
                 for email in email_addresses(" ".join(d.emails)):
                     # An email address shared by two contacts does not establish identity.
                     matches = contact_emails.get(email, set())
@@ -189,6 +194,7 @@ class NotchContext:
             "kind": "context",
             "context_kind": row["kind"],
             "source": "notch",
+            "source_key": row["source_key"],
             "title": row["title"],
             "summary": row["title"],
             "text": row["text"],
@@ -199,39 +205,65 @@ class NotchContext:
             "source_stale": self.status()["stale"],
             "clock_quality": "digital_source",
             "starts_at": payload.get("starts_at"),
+            "ends_at": payload.get("ends_at"),
+            "all_day": payload.get("all_day", False),
             "media_url": "",
             "objects": [],
             "tags": [],
         }
 
     def search(self, query, limit=6):
-        words = set(re.findall(r"\w{3,}", query.lower())) - {
-            "the",
-            "what",
-            "when",
-            "where",
-            "have",
-            "with",
-            "about",
-            "does",
+        if limit <= 0:
+            return []
+        words = set(re.findall(r"\w{2,}", query.casefold()))
+        kinds = {
+            "note": {"note", "notes", "knowledge"},
+            "contact": {"contact", "contacts", "addressbook"},
+            "calendar": {"appointment", "appointments", "calendar", "meeting", "meetings", "schedule"},
+            "email": {"email", "emails", "mail", "inbox"},
         }
-        candidates = []
-        for row in self.db.all("SELECT * FROM context_documents"):
-            text = (row["title"] + " " + row["text"]).lower()
-            score = sum(1 for word in words if re.search(r"\b" + re.escape(word) + r"\b", text))
-            if row["kind"] == "calendar" and words & {
-                "appointment",
-                "appointments",
-                "calendar",
-                "meeting",
-                "next",
-                "today",
-            }:
-                score += 2
+        requested = {kind for kind, aliases in kinds.items() if words & aliases}
+        next_calendar = bool(words & {"next", "upcoming"} and "calendar" in requested)
+        terms = words - set().union(*kinds.values()) - set(
+            "a an the my me i you it this that what which who where when how is are was were "
+            "do does did can could would will have has had with about for from to of in on and "
+            "or please tell show give find look pull up know say says any all some latest recent "
+            "next upcoming scheduled coming soon today tomorrow computer digital saved connected".split()
+        )
+        rows = {row["id"]: row for row in self.db.all("SELECT * FROM context_documents")}
+        scores, matched = {}, set()
+        now = time.time()
+        for key, row in rows.items():
+            title_words = set(re.findall(r"\w{2,}", row["title"].casefold()))
+            text_words = set(re.findall(r"\w{2,}", row["text"].casefold()))
+            text_score = 3 * len(terms & title_words) + len(terms & text_words)
+            if text_score:
+                matched.add(key)
+            score = text_score + (2 if row["kind"] in requested else 0)
             if score:
-                candidates.append((score, row))
-        chosen = [r for _, r in sorted(candidates, key=lambda pair: (-pair[0], pair[1]["title"]))[:limit]]
-        return [self.public(r) for r in chosen]
+                scores[key] = score
+
+        # Follow only relationships exported by Notch or grounded in actual
+        # wikilinks/email addresses. One hop supplies the linked note's facts;
+        # a matching name alone never establishes a physical person's identity.
+        seeds = {key: scores[key] for key in sorted(matched, key=lambda key: (-scores[key], rows[key]["title"]))[:3]}
+        for edge in self.db.all("SELECT source,target FROM context_edges"):
+            for seed, neighbor in ((edge["source"], edge["target"]), (edge["target"], edge["source"])):
+                if seed in seeds and neighbor in rows:
+                    scores[neighbor] = max(scores.get(neighbor, 0), seeds[seed] * .65)
+
+        def rank(key):
+            row = rows[key]
+            start = json.loads(row["payload"]).get("starts_at")
+            # Alphabetical titles can push the actual next appointment out of
+            # the evidence packet. Prefer real upcoming appointments over notes
+            # mentioning them, then subject relevance and chronological order.
+            if next_calendar and row["kind"] == "calendar":
+                upcoming = start is not None and start >= now
+                return (0 if upcoming else 2, -scores[key] if terms else 0, start or float("inf"), row["title"])
+            return (1 if next_calendar else 0, -scores[key], float("inf"), row["title"])
+
+        return [self.public(rows[key]) for key in sorted(scores, key=rank)[:limit]]
 
     def graph(self):
         docs = self.db.all("SELECT * FROM context_documents ORDER BY kind,title LIMIT 300")

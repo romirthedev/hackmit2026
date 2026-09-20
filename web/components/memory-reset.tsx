@@ -26,7 +26,8 @@ export function MemoryReset({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const demoMode = demo?.enabled === true;
-  const protectedWalkthrough = demo?.ready === true && demo.protected_media_count > 0;
+  const protectedWalkthrough =
+    demo?.ready === true && demo.protected_media_count > 0;
   const protectionUnavailable = demoMode && !protectedWalkthrough;
   async function clear() {
     if (busy || protectionUnavailable) return;
@@ -71,12 +72,13 @@ export function MemoryReset({
         </AlertDialogTitle>
         <AlertDialogDescription>
           {demoMode
-            ? 'Clear the letter, medical bill, new recordings and conversation history. The saved dorm walkthrough and its answers stay ready for the next demo.'
+            ? 'Clear the letter, medical bill, new recordings and conversation history. The saved dorm walkthrough, its answers and your connected digital knowledge stay ready for the next demo.'
             : 'This permanently clears saved recordings, scans, answers, people and conversation history from Rewind. Connected memory is cleared and sync is turned off. Original mail, calendars and notes in connected apps stay there.'}
         </AlertDialogDescription>
         {protectionUnavailable ? (
           <p className="memory-reset-error" role="alert">
-            Walkthrough protection is not ready. Reset is unavailable until it is restored.
+            Walkthrough protection is not ready. Reset is unavailable until it
+            is restored.
           </p>
         ) : (
           <p>

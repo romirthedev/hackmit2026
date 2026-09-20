@@ -21,7 +21,11 @@ MEMORY_TABLES = (
 
 
 def clear_memory(db, directory, cutoff, protected=None):
-    """Clear local memory and reject delayed pre-reset uploads. Caller holds the write gate."""
+    """Clear captures and reject delayed uploads. Caller holds the write gate.
+
+    A protected demo reset retains the separately connected Notch workspace, as
+    well as its pinned walkthrough. Disconnecting Notch remains an explicit act.
+    """
     import json
     import shutil
 
@@ -55,16 +59,21 @@ def clear_memory(db, directory, cutoff, protected=None):
                 "continuous_recordings": "id IN (SELECT id FROM keep_recordings)",
                 "alerts": "event_id IN (SELECT id FROM keep_media)",
                 "rules": "id IN (SELECT id FROM keep_rules)",
+                "context_documents": "1",
+                "context_edges": "1",
+                "context_reminders": "1",
             }
         for table in MEMORY_TABLES:
             if table in existing:
                 predicate = " WHERE NOT COALESCE((" + preserved[table] + "),0)" if table in preserved else ""
                 connection.execute(f'DELETE FROM "{table}"' + predicate)
-        for key, value in {
-            "history_cleared_before": cutoff,
-            "notch_enabled": False, "notch_last_sync": None,
-            "notch_sources": {}, "notch_error": "",
-        }.items():
+        settings = {"history_cleared_before": cutoff}
+        if not protected:
+            settings.update({
+                "notch_enabled": False, "notch_last_sync": None,
+                "notch_sources": {}, "notch_error": "",
+            })
+        for key, value in settings.items():
             connection.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, json.dumps(value)))
     # Only dedicated memory stores, never credentials, configuration or model caches.
     for name in ("media", "recordings", "conversation-audio", "conversation-context", "voice"):
