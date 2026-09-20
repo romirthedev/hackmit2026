@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AUTH_REQUIRED_EVENT } from './api';
+import { ServerSpeech } from './server-speech';
 
 function playbackError(code: string) {
   if (code === 'not-allowed')
@@ -23,6 +24,8 @@ function stopNativeSpeech() {
 // Keep an utterance alive until the browser actually finishes speaking it.
 // Enqueuing speech is not proof of delivery: browsers may reject it or stall.
 export function useSpeechPlayback() {
+  const server = useRef<ServerSpeech | null>(null);
+  const epoch = useRef(0);
   const [speaking, setSpeaking] = useState(false);
   const [speechError, setSpeechError] = useState('');
   const active = useRef<{
@@ -33,6 +36,9 @@ export function useSpeechPlayback() {
   const allowed = useRef(true);
 
   const cancel = useCallback(() => {
+    epoch.current++;
+    server.current?.cancel();
+    setSpeaking(false);
     const current = active.current;
     if (!current) return;
     current.finish(false);
@@ -47,6 +53,22 @@ export function useSpeechPlayback() {
         return Promise.resolve(false);
       failedText.current = text;
       setSpeechError('');
+      if (server.current?.enabled) {
+        if (navigator.userActivation?.isActive) server.current.unlock();
+        const current = epoch.current;
+        return server.current
+          .speak(text, () => setSpeaking(true))
+          .then((ok) => {
+            if (current !== epoch.current) return false;
+            setSpeaking(false);
+            if (ok) failedText.current = '';
+            else
+              setSpeechError(
+                'Voice could not play. Press Retry voice to try again.',
+              );
+            return ok;
+          });
+      }
       if (
         !window.speechSynthesis ||
         typeof SpeechSynthesisUtterance === 'undefined'
@@ -125,13 +147,15 @@ export function useSpeechPlayback() {
   const retry = useCallback(() => speak(failedText.current), [speak]);
   useEffect(() => {
     allowed.current = true;
+    const remote = new ServerSpeech();
+    server.current = remote;
     const revoke = () => {
       allowed.current = false;
       failedText.current = '';
       cancel();
     };
     const hide = () => {
-      if (document.hidden && active.current) {
+      if (document.hidden && (active.current || server.current?.active)) {
         setSpeechError(
           'Voice paused while this tab was hidden. Press Retry voice to hear it.',
         );
@@ -146,9 +170,12 @@ export function useSpeechPlayback() {
       window.removeEventListener('pagehide', cancel);
       document.removeEventListener('visibilitychange', hide);
       cancel();
+      remote.cancel();
+      server.current = null;
     };
   }, [cancel]);
-  return { speak, cancel, retry, speaking, speechError };
+  const unlock = useCallback(() => server.current?.unlock(), []);
+  return { unlock, speak, cancel, retry, speaking, speechError };
 }
 
 export type SpeechPlayback = ReturnType<typeof useSpeechPlayback>;

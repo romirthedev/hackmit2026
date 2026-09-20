@@ -655,3 +655,31 @@ async def test_active_slow_job_keeps_lease_and_is_not_claimed_twice(context, mon
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+def test_open_browser_demo_requires_explicit_setting_and_keeps_origin_checks(context):
+    c, app, _ = context
+    assert c.get("/api/status").status_code == 401
+    app.state.settings.browser_open_access = True
+    status = c.get("/api/status")
+    assert status.status_code == 200 and status.json()["browser_open_access"] is True
+    invitation = c.post("/api/pairing").json()
+    assert invitation == {"direct": True, "public_url": "", "expires_at": None}
+    assert c.post("/api/pair", json={"ticket": "old-used-invitation"}).status_code == 200
+    c.cookies.clear()
+    assert c.get("/api/status").status_code == 200
+    assert (
+        c.post(
+            "/api/capture/pause", json={"paused": True}, headers={"Origin": "https://elsewhere.test"}
+        ).status_code
+        == 403
+    )
+    assert (
+        c.post(
+            "/api/capture/pause", json={"paused": True}, headers={"Origin": "http://testserver"}
+        ).status_code
+        == 200
+    )
+    assert c.post("/api/device/heartbeat", json={"boot": "x"}).status_code == 401
+    app.state.settings.browser_open_access = False
+    assert c.get("/api/status").status_code == 401

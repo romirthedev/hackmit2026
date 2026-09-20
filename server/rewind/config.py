@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     device_token: str = ""
     device_id: str = "necklace-01"
     public_url: str = ""
+    # Explicit no-sign-in mode for the shared hackathon workspace.
+    browser_open_access: bool = False
     notch_url: str = ""
     notch_token: str = ""
     notch_control_url: str = ""
@@ -43,8 +45,8 @@ class Settings(BaseSettings):
     deepgram_api_key: str = ""
     deepgram_tts_model: str = "aura-2-thalia-en"
     deepgram_stt_model: str = "nova-3"
-    # Scanned mail: wait this long for the vision model, then fall back to the printed demo template.
-    scan_model_deadline_s: float = Field(8, gt=0, le=120)
+    # Scanned mail: wait this long for the vision model, report a readable failure if it times out.
+    scan_model_deadline_s: float = Field(90, gt=0, le=180)
     scan_demo_template: bool = True
     codex_verify: bool = False
     codex_binary: str = "/Applications/ChatGPT.app/Contents/Resources/codex"

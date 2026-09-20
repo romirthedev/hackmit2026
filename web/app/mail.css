@@ -747,8 +747,37 @@
 
 /* Lightbox for scanned mail ------------------------------------------------ */
 .rw .lightbox.lb-mail {
-  max-width: 560px;
+  max-width: none;
   gap: 16px;
+  align-content: start;
+  overflow-y: auto;
+  padding-top: 80px;
+  cursor: default;
+}
+.rw .lb-mail .lb-close {
+  position: fixed;
+  inset: 20px 20px auto auto;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: white;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.rw .lb-mail .postcard-front img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.rw .lb-mail .pc-message p {
+  text-align: left;
+  color: var(--ink-hand);
 }
 .rw .lb-mail-doc {
   display: grid;
@@ -783,4 +812,230 @@
   text-align: center;
   color: rgba(255, 255, 255, 0.45);
   margin-top: 10px;
+}
+
+/* Mail widgets extend the original dashboard grid. */
+.rw .mail-widgets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 24px;
+}
+.rw .mail-widgets .cell {
+  min-width: 0;
+}
+@media (max-width: 700px) {
+  .rw .mail-widgets {
+    grid-template-columns: 1fr;
+  }
+}
+.rw .ask-voice-controls,
+.rw .answer-voice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  color: inherit;
+  font-size: 11px;
+}
+.rw .voice-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-underline-offset: 4px;
+}
+.rw .voice-action:hover {
+  text-decoration: underline;
+}
+.rw .voice-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.rw .voice-action svg {
+  width: 14px;
+  height: 14px;
+}
+.rw .voice-action:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+.rw .voice-error {
+  color: #87452e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.rw .voice-error p {
+  margin: 4px 0;
+}
+.rw .voice-error .voice-action {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.rw .card-dark .voice-error {
+  color: #ffbda6;
+}
+
+.rw .answer-detail {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.rw .answer-state {
+  display: inline-block;
+  border-radius: 999px;
+  background: #efeff3;
+  color: #665a81;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.rw .answer-state.reviewed {
+  color: #287345;
+  background: #e8f3e9;
+}
+.rw .answer-copy {
+  margin: 12px 0;
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+.rw .answer-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.rw .answer-sources .chip {
+  height: auto;
+  min-height: 28px;
+  padding: 5px 10px;
+  white-space: normal;
+}
+.rw .card-dark .answer-state {
+  background: rgba(198, 184, 255, 0.16);
+  color: #d9cdf7;
+}
+.rw .card-dark .answer-state.reviewed {
+  background: rgba(109, 212, 152, 0.14);
+  color: #aae0bb;
+}
+.rw .card-dark .answer-sources .chip {
+  color: #dce5ff;
+  background: rgba(255, 255, 255, 0.1);
+}
+.rw .card-dark .answer-copy {
+  color: #ebedf7;
+}
+.rw .card-dark .ask-error {
+  color: #ffcccc;
+  font-size: 13px;
+  padding: 12px 0;
+}
+.rw .ask-input input:disabled {
+  opacity: 0.55;
+}
+.rw .send:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.rw .workspace-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.rw .person-initial {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #e9ebf5;
+  color: #626587;
+  font:
+    24px 'Instrument Serif',
+    serif;
+  flex: none;
+}
+.rw .source-row {
+  width: 100%;
+  text-align: left;
+  border-radius: 8px;
+}
+.rw .source-row:hover {
+  color: #476cba;
+}
+.rw .source-row .inbox-head {
+  flex-wrap: wrap;
+}
+.rw .source-row p,
+.rw .inbox p {
+  overflow-wrap: anywhere;
+}
+
+.rw .lb-document {
+  width: min(720px, 90vw);
+  max-height: 75vh;
+  overflow: auto;
+  background: #fff;
+  color: #25262a;
+  border-radius: 20px;
+  padding: 28px;
+}
+.rw .lb-document pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.65;
+}
+.rw .lightbox > p {
+  max-width: min(720px, 90vw);
+  overflow-wrap: anywhere;
+}
+
+/* The saved document appears only when its envelope reaches the destination. */
+.rw .mail-pending {
+  visibility: hidden;
+  pointer-events: none;
+}
+.rw .postcard.is-arriving {
+  pointer-events: none;
+}
+.rw .postcard.just-landed .postcard-face.front {
+  animation: postcard-settle 1.1s var(--ease) both;
+}
+.rw .cal-event.just-landed {
+  animation: mail-row-enter 0.7s var(--ease) both;
+}
+@keyframes postcard-settle {
+  0% {
+    box-shadow: 0 20px 32px -8px rgba(142, 104, 45, 0.35);
+  }
+  55% {
+    box-shadow:
+      0 0 0 4px rgba(236, 207, 142, 0.3),
+      0 14px 22px -8px rgba(60, 40, 10, 0.28);
+  }
+  100% {
+    box-shadow: 0 14px 22px -8px rgba(60, 40, 10, 0.28);
+  }
+}
+@keyframes mail-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

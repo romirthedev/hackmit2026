@@ -3,14 +3,14 @@
 A memory helper for Grandma. Her phone clips to her shirt and records her day.
 She talks to it ("Rewind, where did I leave my glasses?") and it answers out
 loud, from what it actually saw. When she holds a postcard or a bill up to the
-camera, the postcard lands in her Letters and the bill lands on her calendar,
+camera, the postcard lands in her Notes and the bill lands on her calendar,
 on the big screen at home.
 
-Everything runs on a local machine (an ASUS with a 35B vision model in the
-demo). Deepgram handles hearing and speaking; nothing else leaves the house.
+Vision and memory inference run on the ASUS with its 35B model. Deepgram handles
+hearing and speaking; signed-in Codex reviews answer evidence before speech.
 
 <p align="center">
-  <img src="docs/screenshots/home.png" alt="Home dashboard: recording, Ask, calendar with a bill due, Letters with a postcard" width="900">
+  <img src="docs/screenshots/home.png" alt="Restored widget dashboard with voice, calendar and Notes" width="900">
 </p>
 
 ## What it does
@@ -19,19 +19,16 @@ demo). Deepgram handles hearing and speaking; nothing else leaves the house.
 screen awake, saves full video and audio, and sends one small photo per second
 to the server for analysis. Uploads queue on the phone when the network drops.
 
-**Answers questions, spoken and grounded.** While recording, the phone listens
-for the wake word. Say "Rewind" and then the question. Deepgram Nova-3 turns
-the clip into text, a filler line plays right away ("Let me look through your
-day for that"), the local model answers from the recorded evidence, and
-Deepgram Aura-2 reads a one- or two-sentence answer back. Every answer cites
-the moments it came from. The dashboard has the same voice loop behind a tap
-on the orb.
+**Answers questions, spoken and grounded.** Record enables hands-free questions.
+Deepgram Nova-3 transcribes utterances, memory retrieves evidence, and Aura-2
+reads the reviewed answer. The restored dashboard recall card has a microphone
+button, Test voice, and explicit Retry voice controls. Computer requests and
+contextual follow-ups retain the existing Notch conversation routing.
 
-**Files mail by itself.** Tap Scan mail with a postcard and a bill in view.
-The server reads both, then on the home screen a letter drops out of a cloud,
-opens, and the postcard slides into Letters, message side up. A second letter
-drops onto the calendar and tucks the bill into its due date. Ask "when is my
-doctor's bill due?" afterwards and the answer comes from the scan.
+**Files the fixed hackathon mail.** Scan saves the camera photo and immediately
+files the known demo postcard and doctor bill. The postcard flies into Notes;
+the bill flies to September 30 on the new calendar. This configured demo uses
+known print content (`source=template`), not general document recognition.
 
 **Two views of one home.** "My day" is for Grandma: big cards, a flippable
 postcard, a calendar you can tap through. "Caretaker" is for family: alerts,
@@ -88,31 +85,23 @@ browser's built-in voice reads the answers. Everything else is the same.
 ## Demo script
 
 1. Open `/` on the big screen and `/phone` on the phone. Tap Record.
-2. Hold the printed postcard and bill in front of the camera. Tap Scan mail.
+2. Hold the printed postcard and bill in front of the camera. Tap Scan.
    Watch the home screen: postcard first, then the bill onto September 30.
-3. Say: "Rewind, when is my doctor's bill due?" The phone says "Let me look
-   through your day for that", then "Your copay of $45 for Dr. Shah is due
-   September 30."
+3. Say: "Rewind, when is my doctor's bill due?" The phone checks the evidence and reads back the due date.
 4. Say: "Rewind, what did Emma write to me?"
 5. Tap the postcard on the home screen to turn it over. Tap the 30th on the
    calendar to open the bill.
 
-The vision model reads the scanned photo with an 8-second deadline
-(`REWIND_SCAN_MODEL_DEADLINE_S`). Because the demo mail is printed from
-`/print`, the server also knows its exact text: fields the model misses are
-filled from that template, and if the model is slow the template is used
-outright. Each scanned document records whether it came from the model, the
-template, or both. Set `REWIND_SCAN_DEMO_TEMPLATE=false` for real mail only.
+`REWIND_SCAN_DEMO_TEMPLATE=true` is the selected hackathon mode. It files both
+known `/print` documents immediately and replays the animation on another scan.
+Set it to false only to use the optional model-reading path.
 
 ## How it fits together
 
 ```
-phone (/phone)                    server (FastAPI, port 8000)              home screen (/)
- Record: video+audio, 1 JPEG/s ──▶ /api/ingest/frame ─▶ worker labels frames
- Scan mail: 1 JPEG, intent=scan ─▶ /api/ingest/frame ─▶ vision model reads ─▶ /api/scans ─▶ letters drop
- "Rewind, ..." utterance ────────▶ /api/voice/hear (Deepgram Nova-3, wake word check)
-                                    /api/voice/ask  (memory.ask over frames, audio, Notch, scans)
- plays filler + answer  ◀───────── /api/voice/speech/{id} (Deepgram Aura-2, cached mp3)
+phone Record → durable conversation audio → Deepgram → memory / Notch routing
+memory → ASUS inference → Codex evidence review → Deepgram audio → phone
+phone Scan → saved JPEG + fixed demo mail → Notes and Calendar animations
 ```
 
 Recall stays evidence-only: the model answers from retrieved frames,
@@ -122,9 +111,13 @@ The prompt asks for one or two friendly sentences in everyday words.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q          # 270+ server tests, fake providers, no model downloads
+.venv/bin/python -m pytest -q          # 291 server tests, fake providers, no model downloads
 cd web && pnpm exec tsc --noEmit -p . && pnpm exec oxlint app components lib
 ```
+
+Run `scripts/run_voice_mail_live.py --env-file data/phone-demo.env --asus --node /path/to/node`
+for real Deepgram, ASUS inference, evidence review and browser playback against
+isolated demo data. See [validation details](docs/evaluations/UI-VOICE-RESTORE-2026-09-20.md).
 
 `server/tests/test_voice_scans.py` covers the wake word, spoken-answer
 trimming, the scan template merge, the scan upload path, recall over scanned
@@ -142,3 +135,10 @@ This is a working prototype, not a promise of perfect recall. Frames are one
 per second; things out of view, missed captures, unclear speech, and model
 mistakes are real. Originals are kept, failures are shown, and answers without
 evidence say so.
+
+### Direct phone access for the hackathon
+
+The shared demo can opt into `REWIND_BROWSER_OPEN_ACCESS=true` in its private
+server environment. Then the phone QR points to `/phone/`, opens without sign-in,
+and remains reusable. Anyone who can reach the server has workspace access in
+this mode. The default remains authenticated for private installations.

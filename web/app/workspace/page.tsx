@@ -475,14 +475,16 @@ export default function Home() {
             </WorkspaceTabsList>
           </SidebarContent>
           <SidebarFooter className="sidebar-bottom">
-            <CatalogButton
-              className="quiet icon-button mobile-signout"
-              aria-label="Sign out"
-              onClick={signOut}
-              disabled={busy}
-            >
-              <LogOut size={17} />
-            </CatalogButton>
+            {!status?.browser_open_access && (
+              <CatalogButton
+                className="quiet icon-button mobile-signout"
+                aria-label="Sign out"
+                onClick={signOut}
+                disabled={busy}
+              >
+                <LogOut size={17} />
+              </CatalogButton>
+            )}
             <CatalogButton
               className="device-shortcut"
               onClick={() => setTab('system')}
@@ -517,15 +519,17 @@ export default function Home() {
                     : 'Your recordings'}
                 </span>
               </div>
-              <CatalogButton
-                className="quiet icon-button"
-                aria-label="Sign out"
-                title="Sign out"
-                onClick={signOut}
-                disabled={busy}
-              >
-                <LogOut size={17} />
-              </CatalogButton>
+              {!status?.browser_open_access && (
+                <CatalogButton
+                  className="quiet icon-button"
+                  aria-label="Sign out"
+                  title="Sign out"
+                  onClick={signOut}
+                  disabled={busy}
+                >
+                  <LogOut size={17} />
+                </CatalogButton>
+              )}
             </div>
           </SidebarFooter>
         </Sidebar>

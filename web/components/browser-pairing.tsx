@@ -9,9 +9,10 @@ import QRCode from 'qrcode';
 import { FrameImage } from '@/components/catalog';
 
 type Invitation = {
-  code: string;
-  ticket: string;
-  expires_at: number;
+  code?: string;
+  direct?: boolean;
+  ticket?: string;
+  expires_at: number | null;
   public_url?: string;
 };
 
@@ -29,9 +30,11 @@ export function BrowserPairing() {
     const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => clearInterval(timer);
   }, [invitation]);
-  const remaining = invitation
-    ? Math.max(0, Math.ceil(invitation.expires_at - now))
-    : 0;
+  const remaining = invitation?.direct
+    ? Infinity
+    : invitation
+      ? Math.max(0, Math.ceil((invitation.expires_at ?? 0) - now))
+      : 0;
   async function create() {
     setBusy(true);
     setError('');
@@ -41,7 +44,9 @@ export function BrowserPairing() {
       setNow(Date.now() / 1000);
       const origin = result.public_url || window.location.origin;
       const link =
-        origin.replace(/\/$/, '') + '/phone/#connect=' + result.ticket;
+        origin.replace(/\/$/, '') +
+        '/phone/' +
+        (result.direct ? '' : '#connect=' + result.ticket);
       setPhoneLink(link);
       setLocalLink(
         ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname),
@@ -68,7 +73,7 @@ export function BrowserPairing() {
       setCopied(true);
     } catch {
       setError(
-        'Copying is unavailable here. Enter the pairing code in the other browser.',
+        'Copying is unavailable here. Scan the QR code above to open your phone.',
       );
     }
   }
@@ -101,19 +106,11 @@ export function BrowserPairing() {
             </p>
           )}
           <span className="meta">
-            {remaining
-              ? 'OR ENTER THIS ONE-TIME PAIRING CODE'
-              : 'THIS INVITATION HAS EXPIRED'}
-          </span>
-          <strong
-            aria-label={'Pairing code ' + invitation.code.split('').join(' ')}
-          >
-            {remaining ? invitation.code : '••••–••••'}
-          </strong>
-          <span className="meta">
-            {remaining
-              ? `Expires in ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} · works once`
-              : 'Create a new code to connect.'}
+            {invitation.direct
+              ? 'Opens directly · no sign-in or code needed'
+              : remaining
+                ? `Expires in ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} · works once`
+                : 'Create a new QR code to connect.'}
           </span>
           {remaining > 0 && (
             <CatalogButton
@@ -123,10 +120,10 @@ export function BrowserPairing() {
             >
               {copied ? <Check size={16} /> : <Copy size={16} />}
               {copied
-                ? 'Sign-in link copied'
+                ? 'Phone link copied'
                 : localLink
                   ? 'Copy link for this computer'
-                  : 'Copy sign-in link'}
+                  : 'Copy phone link'}
             </CatalogButton>
           )}
         </div>
@@ -155,9 +152,10 @@ export function BrowserPairing() {
         </p>
       )}
       <p className="meta">
-        Only the newest invitation works. Share it only with a browser you want
-        to connect. Camera and microphone recording on your phone require an
-        HTTPS address.
+        {invitation?.direct
+          ? 'Scan this QR any time to open the phone recorder.'
+          : 'Only the newest invitation works.'}{' '}
+        Camera and microphone recording requires HTTPS.
       </p>
     </Card>
   );

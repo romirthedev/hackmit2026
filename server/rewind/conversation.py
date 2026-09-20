@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from .computer import ComputerCommand
 from .models import ConversationIntent
 from .storage import retained_bytes
+from .voice import Voice
 
 
 class ConversationText(BaseModel):
@@ -44,12 +45,31 @@ resolved_request restates only the user's current request with established refer
 clarification is one brief question only when kind=clarify. Do not answer the user's question.
 """
 
+def direct_memory_question(text):
+    """Recognize explicit first-person questions; this path can only search memory.
+
+    Statements, quotations and contextual follow-ups still use the intent model.
+    This never grants permission to the computer-command executor.
+    """
+    parsed = Voice.parse(text, require_wake=True)
+    question = parsed["question"] if parsed["directed"] else text.strip()
+    if (
+        re.match(r"^(?:where|when|what|who|how much|how many|did|have|has|is|are)\b", question, re.I)
+        and re.search(r"\b(?:my|our|me)\b", question, re.I)
+        and not re.search(r"\b(?:it|that|they|them|this|those|one)\b", question, re.I)
+        and not re.search(r"[\"“”]", question)
+    ):
+        return question
+    return None
+
+
 ACTIVE = ("queued", "transcribing", "routing", "thinking", "checking", "acting", "awaiting_permission")
 
 
 class Conversation:
     def __init__(self, db, provider, memory, computer, settings):
         self.db, self.p, self.memory, self.computer, self.s = db, provider, memory, computer, settings
+        self.voice = None
         self.directory = (settings.data_dir / "conversation-audio").resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.context_directory = (settings.data_dir / "conversation-context").resolve()
@@ -262,15 +282,18 @@ class Conversation:
         try:
             text = row["transcript"]
             if not text:
-                if not self.s.processing_url:
-                    raise ValueError("ASUS speech processing is not configured. Your audio is saved.")
+                if self.s.provider == "disabled" and not (self.voice and self.voice.enabled):
+                    raise ValueError("Speech processing is not configured. Your audio is saved.")
                 self.db.execute(
                     "UPDATE conversation_turns SET status='transcribing' WHERE id=?", (row["id"],)
                 )
                 path = Path(row["path"])
                 if hashlib.sha256(path.read_bytes()).hexdigest() != row["sha256"]:
                     raise ValueError("Saved speech differs from its original hash.")
-                transcription = await self.p.transcribe(path)
+                if self.voice and self.voice.enabled:
+                    transcription = await self.voice.transcribe(path.read_bytes(), row["mime"].split(";")[0])
+                else:
+                    transcription = await self.p.transcribe(path)
                 full_text = str(transcription.get("text", "")).strip()[:60000]
                 text = full_text[:2000]
                 with self.db.connect() as c:
@@ -282,7 +305,7 @@ class Conversation:
                             text[:650] or "No intelligible speech detected.",
                             full_text,
                             json.dumps(transcription.get("segments", [])),
-                            self.s.whisper_model,
+                            self.s.deepgram_stt_model if self.voice and self.voice.enabled else self.s.whisper_model,
                             time.time(),
                             row["id"],
                         ),
@@ -309,13 +332,20 @@ class Conversation:
                 intent = ConversationIntent.model_validate_json(row["intent"])
             else:
                 self.db.execute("UPDATE conversation_turns SET status='routing' WHERE id=?", (row["id"],))
-                intent = await self.p.structured(
-                    ROUTER_PROMPT,
-                    json.dumps({"utterance": text, "history": history}),
-                    ConversationIntent,
-                    recall=True,
-                    max_tokens=220,
-                )
+                question = direct_memory_question(text)
+                if question:
+                    intent = ConversationIntent(kind="memory", directed_request=True,
+                                                resolved_request=question, clarification="")
+                else:
+                    parsed = Voice.parse(text, require_wake=True)
+                    utterance = parsed["question"] if parsed["directed"] else text
+                    intent = await self.p.structured(
+                        ROUTER_PROMPT,
+                        json.dumps({"utterance": utterance, "history": history}),
+                        ConversationIntent,
+                        recall=True,
+                        max_tokens=220,
+                    )
                 self.db.execute(
                     "UPDATE conversation_turns SET intent=?,context=?,kind=? WHERE id=?",
                     (intent.model_dump_json(), json.dumps(history), intent.kind, row["id"]),

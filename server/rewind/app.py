@@ -93,6 +93,7 @@ def create_app(settings=None, provider=None):
     conversation = Conversation(db, p, memory, computer, s)
     people = PeopleMemory(db, s)
     voice = Voice(s, p, memory)
+    conversation.voice = voice
     ingestion_lock = asyncio.Lock()
     pairing = BrowserPairing(db, s.admin_token)
 
@@ -147,6 +148,10 @@ def create_app(settings=None, provider=None):
             return False
 
     async def admin(req: Request):
+        if s.browser_open_access:
+            if req.method not in ("GET", "HEAD"):
+                same_origin(req)
+            return
         bearer = req.headers.get("authorization", "").removeprefix("Bearer ")
         if hmac.compare_digest(bearer, s.admin_token):
             return
@@ -172,6 +177,7 @@ def create_app(settings=None, provider=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        scans.recover()
         tasks = [asyncio.create_task(worker.run()) for _ in range(s.workers)]
         if verifier:
             tasks.extend(asyncio.create_task(verifier.run()) for _ in range(s.codex_verify_workers))
@@ -267,11 +273,16 @@ def create_app(settings=None, provider=None):
 
     @app.post("/api/pairing", dependencies=[Depends(admin)])
     async def create_pairing():
+        if s.browser_open_access:
+            return {"direct": True, "public_url": s.public_url, "expires_at": None}
         return {**pairing.create(), "public_url": s.public_url}
 
     @app.post("/api/pair")
     async def pair_browser(body: PairBrowser, req: Request, response: Response):
         same_origin(req)
+        if s.browser_open_access:
+            set_session(response, True)
+            return {"ok": True}
         code = re.sub(r"[\s-]", "", body.code)
         pairing.redeem(
             code=code,
@@ -298,6 +309,7 @@ def create_app(settings=None, provider=None):
         totals["continuous_recording_bytes"] = recording_bytes(db)
         totals["stored_bytes"] = retained_bytes(db)
         totals["provider"] = s.provider
+        totals["browser_open_access"] = s.browser_open_access
         totals["processing_host"] = "ASUS via Tailscale" if s.processing_url else "server"
         totals["analysis_ready"] = s.provider != "disabled" and (await p.ready() if s.processing_url else True)
         totals["verification_enabled"] = s.codex_verify
@@ -344,6 +356,9 @@ def create_app(settings=None, provider=None):
     async def context_document(document_id: str):
         row = db.one("SELECT * FROM context_documents WHERE id=?", (document_id,))
         if not row:
+            scanned = db.one("SELECT * FROM scan_documents WHERE id=?", (document_id,))
+            if scanned:
+                return scans.evidence(scanned)
             raise HTTPException(404, "Context source not found")
         return context.public(row)
 

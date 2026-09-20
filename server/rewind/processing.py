@@ -25,6 +25,7 @@ from .models import (
     SearchPlan,
 )
 from .providers import Provider
+from .scans import DocumentScan
 from .visual import OpenClipEncoder
 
 SCHEMAS = {
@@ -33,6 +34,7 @@ SCHEMAS = {
         CompactObservation,
         ConversationIntent,
         DenseObservation,
+        DocumentScan,
         Observation,
         RecallAnswer,
         RuleDecision,

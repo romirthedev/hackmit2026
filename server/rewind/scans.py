@@ -1,11 +1,9 @@
 """Scanned mail: a postcard becomes a note, a bill becomes a calendar entry.
 
-The phone's Scan button uploads one photo with X-Intent: scan. The vision
-model is asked to read the documents in it, with a short deadline so the
-dashboard can react quickly. For the demo, the two printed documents from the
-/print page are known, so any field the model misses (or the whole result, if
-the model is slow) is filled from that template. Every row records whether it
-came from the model or the template.
+The phone's Scan button retains a photo with X-Intent: scan. In explicit
+hackathon demo mode it immediately files the two known /print documents,
+marked source=template, without waiting for a vision service. Normal mode
+reads photographed documents and reports failures without template substitution.
 """
 
 import asyncio
@@ -134,9 +132,14 @@ class Scans:
                     due_at REAL, seen INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_scan_time ON scan_documents(created_at);
+                CREATE TABLE IF NOT EXISTS scan_jobs (
+                    media_id TEXT PRIMARY KEY REFERENCES media(id) ON DELETE CASCADE,
+                    created_at REAL NOT NULL, status TEXT NOT NULL, error TEXT NOT NULL DEFAULT ''
+                );
             """)
 
     def schedule(self, media_id, path):
+        self.db.execute("INSERT OR REPLACE INTO scan_jobs VALUES(?,?,?,?)", (media_id, time.time(), "reading", ""))
         task = asyncio.create_task(self.analyze(media_id, path))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
@@ -159,13 +162,17 @@ class Scans:
 
     async def analyze(self, media_id, path):
         found, source = [], "model"
-        if self.s.provider != "disabled":
+        error = "Document reading is offline. The original photo is saved; try scanning again when connected."
+        if self.s.provider != "disabled" and not self.s.scan_demo_template:
             try:
                 found = await self.read(path)
+                error = "No readable mail was found. Try a closer, well-lit photo of one document."
             except asyncio.TimeoutError:
-                log.info("Scan model exceeded %.0fs; using the template", self.s.scan_model_deadline_s)
+                log.info("Scan model exceeded %.0fs", self.s.scan_model_deadline_s)
+                error = "Reading the document took too long. The original is saved. Please try again."
             except Exception:
-                log.exception("Scan model failed; using the template")
+                log.exception("Scan model failed")
+                error = "The document could not be read. The original is saved. Please try again."
         if self.s.scan_demo_template:
             documents = merge_with_template(found)
         else:
@@ -194,7 +201,19 @@ class Scans:
                         local_epoch(document.get("due_date", ""), self.s.timezone),
                     ),
                 )
+        self.db.execute("UPDATE scan_jobs SET status=?,error=? WHERE media_id=?",
+                        ("done" if documents else "failed", "" if documents else error, media_id))
         return documents
+
+    def jobs(self):
+        return self.db.all("""SELECT j.*, m.boot, m.seq FROM scan_jobs j JOIN media m ON m.id=j.media_id
+                              ORDER BY j.created_at DESC LIMIT 20""")
+
+    def recover(self):
+        for row in self.db.all("""SELECT j.media_id,m.path FROM scan_jobs j JOIN media m ON m.id=j.media_id
+                                   WHERE j.status='reading'"""):
+            from pathlib import Path
+            self.schedule(row["media_id"], Path(row["path"]))
 
     def public(self, row):
         data = json.loads(row["data"])
@@ -319,6 +338,10 @@ def scans_router(scans: Scans, admin):
     @router.get("")
     async def index(limit: int = 20):
         return scans.list(limit)
+
+    @router.get("/jobs")
+    async def jobs():
+        return scans.jobs()
 
     @router.post("/demo")
     async def demo():

@@ -10,6 +10,7 @@ import {
   isSameDay,
   isSameMonth,
   isToday,
+  isValid,
   parseISO,
   startOfMonth,
   startOfWeek,
@@ -51,7 +52,7 @@ export function PostcardBack({
   document: ScanDocument;
   mini?: boolean;
 }) {
-  const place = document.place || 'Portland, Oregon';
+  const place = document.place || '';
   return (
     <div className={`postcard-back ${mini ? 'is-mini' : ''}`}>
       <div className="pc-message">
@@ -71,13 +72,7 @@ export function PostcardBack({
           <small>{prettyDate(document.date, 'short')}</small>
         </div>
         <div className="pc-address">
-          <span>
-            {document.recipient === 'Mom'
-              ? 'Rose Whitaker'
-              : document.recipient}
-          </span>
-          <span>14 Orchard Lane</span>
-          <span>Boston, MA 02116</span>
+          <span>{document.recipient}</span>
         </div>
       </div>
     </div>
@@ -92,7 +87,7 @@ export function PostcardFront({
   document: ScanDocument;
   mini?: boolean;
 }) {
-  const place = (document.place || 'Portland').split(',')[0];
+  const place = (document.place || '').split(',')[0];
   return (
     <div className={`postcard-front ${mini ? 'is-mini' : ''}`}>
       {document.image_url ? (
@@ -151,6 +146,8 @@ export function LettersCard({
   graph,
   index,
   arriving,
+  pending,
+  landedId,
   onOpen,
   onDocument,
 }: {
@@ -158,6 +155,8 @@ export function LettersCard({
   graph: ContextGraph | null;
   index: number;
   arriving?: string | null;
+  pending?: ReadonlySet<string>;
+  landedId?: string | null;
   onOpen: (document: ScanDocument) => void;
   onDocument: (id: string) => void;
 }) {
@@ -180,14 +179,17 @@ export function LettersCard({
     ? graph.nodes.filter((node) => node.kind === 'note').slice(0, 2)
     : [];
   const shown = letters[Math.min(current, Math.max(0, letters.length - 1))];
+  const inFlight = !!shown && (pending?.has(shown.id) ?? shown.id === arriving);
   return (
-    <Cell label="Letters" index={index}>
-      <Card data-card="letters">
+    <Cell label="Notes" index={index}>
+      <Card data-card="notes">
         <Row>
           <span className="card-title">
-            {letters.length
-              ? `From ${shown?.sender || 'family'}`
-              : 'Nothing in the mailbox yet'}
+            {inFlight
+              ? 'A letter is arriving…'
+              : letters.length
+                ? `From ${shown?.sender || 'your mail'}`
+                : 'Nothing in the mailbox yet'}
           </span>
           <Mail className="icon-muted" />
         </Row>
@@ -199,7 +201,9 @@ export function LettersCard({
               )}
               <button
                 type="button"
-                className={`postcard ${flipped ? 'is-flipped' : ''} ${shown.id === arriving ? 'is-arriving' : ''}`}
+                className={`postcard ${flipped ? 'is-flipped' : ''} ${inFlight ? 'is-arriving' : ''} ${shown.id === landedId && !inFlight ? 'just-landed' : ''}`}
+                disabled={inFlight}
+                aria-hidden={inFlight}
                 onClick={() => setFlipped((value) => !value)}
                 aria-label={
                   flipped ? 'Show the message' : 'Show the picture side'
@@ -224,7 +228,7 @@ export function LettersCard({
           )}
         </div>
         {shown && (
-          <Row className="letter-tools">
+          <Row className={`letter-tools ${inFlight ? 'mail-pending' : ''}`}>
             <span className="muted xs">
               {prettyDate(shown.date)} · tap the card to turn it over
             </span>
@@ -309,6 +313,8 @@ export function CalendarCard({
   index,
   zone,
   arriving,
+  pending,
+  landedId,
   disabled,
   onOpen,
   onDocument,
@@ -320,6 +326,8 @@ export function CalendarCard({
   index: number;
   zone?: string;
   arriving?: string | null;
+  pending?: ReadonlySet<string>;
+  landedId?: string | null;
   disabled: boolean;
   onOpen: (document: ScanDocument) => void;
   onDocument: (id: string) => void;
@@ -333,6 +341,7 @@ export function CalendarCard({
     for (const document of scans)
       if (isBill(document) && document.due_date) {
         try {
+          if (!isValid(parseISO(document.due_date))) continue;
           items.push({
             id: document.id,
             day: parseISO(document.due_date),
@@ -380,13 +389,17 @@ export function CalendarCard({
     end: endOfWeek(endOfMonth(month)),
   });
   const onDay = (day: Date) =>
-    events.filter((event) => isSameDay(event.day, day));
+    events.filter(
+      (event) => isSameDay(event.day, day) && !pending?.has(event.id),
+    );
   const focus = selected ?? new Date();
   const listed = selected
     ? onDay(selected)
     : events
         .filter(
-          (event) => event.day >= new Date(new Date().setHours(0, 0, 0, 0)),
+          (event) =>
+            !pending?.has(event.id) &&
+            event.day >= new Date(new Date().setHours(0, 0, 0, 0)),
         )
         .slice(0, 3);
   async function markSeen(id: string) {
@@ -456,7 +469,8 @@ export function CalendarCard({
                   selected && isSameDay(day, selected) ? 'is-selected' : '',
                   here.length ? 'has-event' : '',
                   hasBill ? 'has-bill' : '',
-                  here.some((event) => event.id === arriving)
+                  (landing && isSameDay(landing.day, day)) ||
+                  here.some((event) => event.id === landedId)
                     ? 'is-landing'
                     : '',
                 ].join(' ')}
@@ -489,7 +503,10 @@ export function CalendarCard({
           {listed.length ? (
             <ul className="inbox">
               {listed.map((event) => (
-                <li key={event.id} className={`cal-event kind-${event.kind}`}>
+                <li
+                  key={event.id}
+                  className={`cal-event kind-${event.kind} ${event.id === landedId ? 'just-landed' : ''}`}
+                >
                   <button
                     type="button"
                     className="source-row"

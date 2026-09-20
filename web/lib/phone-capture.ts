@@ -1,5 +1,6 @@
 // Original chunks are persisted before upload. Retries keep the same sequence and bytes.
 import { VoiceActivityCapture, type VoiceActivity } from './voice-activity';
+import { ServerSpeech } from './server-speech';
 import { AUTH_REQUIRED_EVENT } from './api';
 
 export type CaptureState = {
@@ -24,7 +25,13 @@ type SpeechRequest = {
   resolve: (played: boolean) => void;
   result?: Promise<boolean>;
 };
-export type Snapshot = { url: string; width: number; height: number };
+export type Snapshot = {
+  boot: string;
+  seq: number;
+  url: string;
+  width: number;
+  height: number;
+};
 type Chunk = {
   id: string;
   boot: string;
@@ -187,6 +194,7 @@ export class PhoneCapture {
   private pumping = false;
   private disposed = false;
   private speaking = false;
+  private serverSpeech = new ServerSpeech();
   private speechQueue: SpeechRequest[] = [];
   private activeSpeech: SpeechRequest | null = null;
   // Safari may release an utterance that has no JavaScript owner before it ends.
@@ -523,7 +531,7 @@ export class PhoneCapture {
       const canvas = document.createElement('canvas');
       const scale = Math.min(
         1,
-        960 / Math.max(this.video.videoWidth, this.video.videoHeight),
+        1920 / Math.max(this.video.videoWidth, this.video.videoHeight),
       );
       canvas.width = Math.round(this.video.videoWidth * scale);
       canvas.height = Math.round(this.video.videoHeight * scale);
@@ -535,7 +543,7 @@ export class PhoneCapture {
         ? { boot: this.boot, seq: this.seq.frame++ }
         : { boot: this.previewBoot, seq: this.previewSequence++ };
       const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, 'image/jpeg', 0.82),
+        canvas.toBlob(resolve, 'image/jpeg', 0.92),
       );
       if (
         !blob ||
@@ -548,6 +556,7 @@ export class PhoneCapture {
       if (!saved || this.disposed || generation !== this.mediaGeneration)
         return null;
       return {
+        ...identity,
         url: URL.createObjectURL(blob),
         width: canvas.width,
         height: canvas.height,
@@ -784,7 +793,7 @@ export class PhoneCapture {
       const canvas = document.createElement('canvas');
       const scale = Math.min(
         1,
-        960 / Math.max(this.video.videoWidth, this.video.videoHeight),
+        1920 / Math.max(this.video.videoWidth, this.video.videoHeight),
       );
       canvas.width = Math.max(1, Math.round(this.video.videoWidth * scale));
       canvas.height = Math.max(1, Math.round(this.video.videoHeight * scale));
@@ -793,7 +802,7 @@ export class PhoneCapture {
       context.drawImage(this.video, 0, 0, canvas.width, canvas.height);
       const at = Date.now() / 1000;
       const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, 'image/jpeg', 0.82),
+        canvas.toBlob(resolve, 'image/jpeg', 0.92),
       );
       if (blob) void this.enqueue('frame', blob, at, 'memory', identity);
     } catch {
@@ -950,13 +959,15 @@ export class PhoneCapture {
   }
   speakFromGesture(text: string): Promise<boolean> {
     this.silenceSpeech();
+    this.serverSpeech.unlock();
     return this.enqueueSpeech(text, true);
   }
   private enqueueSpeech(text: string, fromGesture = false): Promise<boolean> {
     if (this.disposed || !text.trim()) return Promise.resolve(false);
     if (
-      !('speechSynthesis' in window) ||
-      typeof SpeechSynthesisUtterance === 'undefined'
+      !this.serverSpeech.enabled &&
+      (!('speechSynthesis' in window) ||
+        typeof SpeechSynthesisUtterance === 'undefined')
     ) {
       const result = Promise.resolve(false);
       this.lastFailedRequest = { text, resolve: () => {}, result };
@@ -979,6 +990,7 @@ export class PhoneCapture {
     return result;
   }
   silenceSpeech() {
+    this.serverSpeech.cancel();
     this.speechGeneration++;
     if (this.speechTimer) clearTimeout(this.speechTimer);
     this.speechTimer = null;
@@ -1057,6 +1069,17 @@ export class PhoneCapture {
       request.resolve(played);
       if (played) this.playSpeech();
     };
+    if (this.serverSpeech.enabled) {
+      void this.serverSpeech
+        .speak(request.text, () => {
+          if (generation === this.speechGeneration)
+            this.update({ speaking: true, speechError: '' });
+        })
+        .then((ok) =>
+          finish(ok, 'Voice could not play. Tap Retry voice to try again.'),
+        );
+      return;
+    }
     try {
       const utterance = new SpeechSynthesisUtterance(
         request.text.replace(/\[[0-9a-f-]{36}\]/g, ''),

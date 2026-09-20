@@ -1,7 +1,7 @@
 'use client';
-/* oxlint-disable next/no-img-element, next/no-html-link-for-pages, jsx-a11y/media-has-caption -- originals are authenticated media; transcripts appear beside audio */
-import { useEffect, useRef, useState } from 'react';
-import { Aperture, ArrowUpRight, LogOut, RefreshCw, X } from 'lucide-react';
+/* oxlint-disable next/no-img-element, next/no-html-link-for-pages, jsx-a11y/media-has-caption -- originals are served straight from the local server; transcripts sit beside audio */
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Aperture, X } from 'lucide-react';
 import {
   api,
   AUTH_REQUIRED_EVENT,
@@ -9,101 +9,98 @@ import {
   type ScanDocument,
 } from '@/lib/api';
 import Login from '@/components/login';
-import { VoiceClient } from '@/lib/voice';
-import '@/app/dashboard.css';
+import { demoStatus } from './demo-data';
 import '@/app/mail.css';
-import { useRewind } from './use-rewind';
-import { AskCard } from './ask-card';
-import { Arrivals } from './arrivals';
 import {
-  ClipCard,
-  ConnectionsCard,
-  HelpCard,
-  MemoryLogCard,
-  MomentsCard,
-  PeopleCard,
-  recordedWhen,
-} from './rose-cards';
-import {
-  BillSlip,
   CalendarCard,
   LettersCard,
-  MailCard,
+  BillSlip,
   PostcardBack,
   PostcardFront,
   isBill,
 } from './mail-cards';
+import '@/app/dashboard.css';
+import { useRewind } from './use-rewind';
+import { AskCard } from './ask-card';
+import { Arrivals } from './arrivals';
+import { hm } from './primitives';
 import {
+  ActivityCard,
+  ClipCard,
+  HelpCard,
+  MedsCard,
+  MemoryLogCard,
+  MomentsCard,
+  NoteCard,
+  OnTheWayCard,
+  PeopleCard,
+  TodayCard,
+  WeatherCard,
+  WhereCard,
+} from './rose-cards';
+import {
+  AdherenceCard,
+  CareTeamCard,
   DataCard,
   DeviceCard,
   LatestCard,
-  OverviewCard,
+  NotesCard,
   ProcessingCard,
   QuestionsCard,
+  RoseHeroCard,
+  TrendsCard,
   WatchCard,
 } from './care-cards';
-import { ago } from './primitives';
 
-type Mode = 'wearer' | 'care';
-type Filter = 'all' | 'memory' | 'watch' | 'device';
+type Mode = 'rose' | 'care';
+type Filter = 'all' | 'health' | 'memory' | 'watch' | 'device';
 const FILTERS: [Filter, string][] = [
   ['all', 'Overview'],
+  ['health', 'Health'],
   ['memory', 'Memory'],
-  ['watch', 'Reminders'],
-  ['device', 'Devices'],
+  ['watch', 'Watch'],
+  ['device', 'Device'],
 ];
 
 export function Dashboard() {
-  const rw = useRewind();
-  const [mode, setMode] = useState<Mode>('wearer');
+  const live = useRewind();
+  const rw = { ...live, status: live.status ?? demoStatus };
+  const [mode, setMode] = useState<Mode>('rose');
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<Recording | null>(null);
   const [openScan, setOpenScan] = useState<ScanDocument | null>(null);
   const [sourceError, setSourceError] = useState('');
-  const [arriving, setArriving] = useState<string | null>(null);
-  const [voice, setVoice] = useState<VoiceClient | null>(null);
-  const [clock, setClock] = useState('');
-  const [greeting, setGreeting] = useState('Welcome back');
-  const askRef = useRef<HTMLDivElement>(null);
   const sourceEpoch = useRef(0);
   const sourceRequest = useRef<AbortController | null>(null);
+  const [arriving, setArriving] = useState<string | null>(null);
+  const [landedId, setLandedId] = useState<string | null>(null);
+  const pendingMail = new Set(
+    rw.arrivals.filter((item) => item.id !== landedId).map((item) => item.id),
+  );
+  const [clock, setClock] = useState('');
+  const [mounted, setMounted] = useState(false);
+  const gridKey = `${mode}-${filter}`;
   useEffect(() => {
-    // oxlint-disable-next-line react/react-compiler -- Read the explicit browser view preference after hydration.
+    // Everything below depends on the browser clock and locale, so it only
+    // renders after mount to keep server and client markup identical.
+    // oxlint-disable-next-line react/react-compiler -- one-time mount flag
+    setMounted(true);
     if (window.location.hash === '#care') setMode('care');
-    const tick = () => {
-      const date = new Date();
+    const f = () =>
       setClock(
-        date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+        new Date().toLocaleTimeString([], {
+          hour: 'numeric',
+          minute: '2-digit',
+        }),
       );
-      setGreeting(
-        date.getHours() < 12
-          ? 'Good morning'
-          : date.getHours() < 18
-            ? 'Good afternoon'
-            : 'Good evening',
-      );
-    };
-    tick();
-    const timer = setInterval(tick, 15000);
-    return () => clearInterval(timer);
+    f();
+    const t = setInterval(f, 15000);
+    return () => clearInterval(t);
   }, []);
   useEffect(() => {
-    document.documentElement.classList.toggle(
-      'rw-light',
-      rw.connection !== 'signed-out',
-    );
+    document.documentElement.classList.toggle('rw-light', true);
     return () => document.documentElement.classList.remove('rw-light');
-  }, [rw.connection]);
-  useEffect(() => {
-    if (rw.connection !== 'live') return;
-    const client = new VoiceClient();
-    // oxlint-disable-next-line react/react-compiler -- one voice player per signed-in session
-    setVoice(client);
-    return () => {
-      client.dispose();
-      setVoice(null);
-    };
-  }, [rw.connection]);
+  }, []);
   useEffect(() => {
     const close = () => {
       sourceEpoch.current += 1;
@@ -150,47 +147,139 @@ export function Dashboard() {
     sourceEpoch.current += 1;
     sourceRequest.current?.abort();
     setSourceError('');
-    setOpenScan(null);
     if (record.kind === 'context') void openDocument(record.id);
     else setOpen(record);
   }
-  function openMail(document: ScanDocument) {
-    sourceEpoch.current += 1;
-    sourceRequest.current?.abort();
-    setSourceError('');
-    setOpen(null);
-    setOpenScan(document);
-  }
-  function switchMode(next: Mode) {
-    setMode(next);
+  const askRef = useRef<HTMLDivElement>(null);
+  const switchMode = (m: Mode) => {
+    setMode(m);
     history.replaceState(
       null,
       '',
-      window.location.pathname +
-        window.location.search +
-        (next === 'care' ? '#care' : ''),
+      m === 'care' ? '#care' : window.location.pathname,
     );
-  }
-  const status = rw.status,
-    zone = status?.timezone,
-    disabled = rw.connection !== 'live';
-  const show = (category: Filter) => filter === 'all' || filter === category;
+  };
 
-  if (rw.connection === 'signed-out')
+  const hour = new Date().getHours();
+  const greet =
+    hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const zone = rw.status.timezone;
+  const since = rw.records.length
+    ? hm(rw.records[rw.records.length - 1].captured_at, zone)
+    : null;
+
+  // Which caretaker cards belong to which filter. Cards can live in several.
+  const care: [Filter[], ReactNode][] = [
+    [
+      ['all', 'health', 'watch'],
+      <RoseHeroCard
+        key="hero"
+        index={0}
+        status={rw.status}
+        online={rw.online}
+        now={rw.now}
+        records={rw.records}
+        alerts={rw.alerts}
+        onAsk={() =>
+          askRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          })
+        }
+      />,
+    ],
+    [
+      ['all', 'memory', 'watch'],
+      <div key="ask" ref={askRef} className="cell-wrap">
+        <AskCard
+          index={1}
+          ask={rw.ask}
+          answers={rw.answers}
+          onOpen={openSource}
+          disabled={rw.connection !== 'live'}
+          label="Ask about Rose"
+          title="Ask"
+          placeholder="What did Rose do this morning?"
+        />
+      </div>,
+    ],
+    [
+      ['all', 'watch'],
+      <WatchCard
+        key="watch"
+        index={2}
+        rules={rw.rules}
+        alerts={rw.alerts}
+        zone={zone}
+        onAdd={rw.addRule}
+        onRemove={rw.removeRule}
+        onSeen={rw.markSeen}
+      />,
+    ],
+    [['all', 'health'], <AdherenceCard key="adh" index={3} />],
+    [
+      ['all', 'memory'],
+      <LatestCard
+        key="latest"
+        index={4}
+        records={rw.records}
+        zone={zone}
+        onOpen={openSource}
+        arriving={arriving}
+      />,
+    ],
+    [
+      ['all', 'memory'],
+      <QuestionsCard key="q" index={5} answers={rw.answers} zone={zone} />,
+    ],
+    [
+      ['all', 'device'],
+      <DeviceCard
+        key="dev"
+        index={6}
+        status={rw.status}
+        online={rw.online}
+        now={rw.now}
+        onPause={rw.setPaused}
+      />,
+    ],
+    [['health'], <TrendsCard key="trends" index={7} />],
+    [['all', 'health'], <NotesCard key="notes" index={8} />],
+    [
+      ['memory'],
+      <MemoryLogCard key="log" index={9} records={rw.records} zone={zone} />,
+    ],
+    [['memory'], <WhereCard key="where" index={10} />],
+    [
+      ['all', 'device'],
+      <ProcessingCard
+        key="proc"
+        index={11}
+        status={rw.status}
+        onRetry={rw.retryFailed}
+      />,
+    ],
+    [['health', 'all'], <TodayCard key="today" index={12} />],
+    [['health'], <CareTeamCard key="team" index={13} />],
+    [['device', 'all'], <DataCard key="data" index={14} status={rw.status} />],
+  ];
+
+  if (rw.connection === 'signed-out') return <Login />;
+  if (!live.status)
     return (
-      <>
-        {rw.error && (
-          <div className="dashboard-auth-error" role="alert">
-            {rw.error}
-            <button type="button" onClick={() => void rw.logout()}>
-              Retry sign out
-            </button>
-          </div>
-        )}
-        <Login />
-      </>
+      <div className="rw">
+        <main className="page">
+          <h1>
+            {rw.connection === 'checking'
+              ? 'Opening your workspace…'
+              : 'Your workspace is unavailable.'}
+          </h1>
+          <button type="button" onClick={() => void rw.reload()}>
+            Try again
+          </button>
+        </main>
+      </div>
     );
-
   return (
     <div className="rw">
       <header className="topbar">
@@ -202,33 +291,28 @@ export function Dashboard() {
           <span className="rw-brand-time">{clock}</span>
         </a>
         <div className="top-right">
-          <span className={`conn ${rw.connection}`}>
-            <i />
-            {rw.connection === 'live'
-              ? 'Connected'
-              : rw.connection === 'checking'
+          {rw.connection !== 'live' && (
+            <span className={`conn ${rw.connection}`}>
+              <i />
+              {rw.connection === 'checking'
                 ? 'Connecting'
                 : 'Connection interrupted'}
-          </span>
-          <a className="dashboard-workspace" href="/workspace">
-            Workspace <ArrowUpRight />
-          </a>
+            </span>
+          )}
           <div className="seg" role="tablist" aria-label="View">
             <span
               className="seg-thumb"
-              style={{
-                transform: `translateX(${mode === 'wearer' ? 0 : 100}%)`,
-              }}
+              style={{ transform: `translateX(${mode === 'rose' ? 0 : 100}%)` }}
               aria-hidden="true"
             />
             <button
               type="button"
               role="tab"
-              aria-selected={mode === 'wearer'}
-              className={`seg-btn ${mode === 'wearer' ? 'is-active' : ''}`}
-              onClick={() => switchMode('wearer')}
+              aria-selected={mode === 'rose'}
+              className={`seg-btn ${mode === 'rose' ? 'is-active' : ''}`}
+              onClick={() => switchMode('rose')}
             >
-              My day
+              Rose
             </button>
             <button
               type="button"
@@ -240,265 +324,136 @@ export function Dashboard() {
               Caretaker
             </button>
           </div>
-          <button
-            className="tbtn"
-            type="button"
-            aria-label="Sign out"
-            onClick={() => {
-              sourceEpoch.current += 1;
-              sourceRequest.current?.abort();
-              setOpen(null);
-              void rw.logout();
-            }}
-          >
-            <LogOut />
-          </button>
         </div>
       </header>
+
       <main className={`page mode-${mode}`}>
         {(rw.error || sourceError) && (
           <div className="rw-banner" role="alert">
-            <span>
-              {sourceError || rw.error}
-              {rw.connection === 'offline' && rw.lastSync
-                ? ` Showing previously loaded data from ${ago(rw.now - rw.lastSync)}.`
-                : ''}
-            </span>
+            <span>{sourceError || rw.error}</span>
             <button
               type="button"
-              onClick={() => {
-                setSourceError('');
-                void rw.reload();
-              }}
-              aria-label="Retry connection"
+              onClick={() => rw.reload()}
+              aria-label="Dismiss"
             >
-              <RefreshCw />
+              <X />
             </button>
           </div>
         )}
-        <div className={`greeting ${mode === 'care' ? 'care' : ''}`}>
-          <div>
-            <h1>{mode === 'care' ? 'Your shared day' : greeting}</h1>
+
+        {!mounted ? null : mode === 'rose' ? (
+          <div className="greeting">
+            <h1>{greet}, Rose</h1>
             <p>
-              {mode === 'care'
-                ? 'A second view of this same personal workspace.'
-                : 'A place for the moments you want to remember.'}
+              {rw.online && !rw.status.paused
+                ? `Your clip has been listening${since ? ` since ${since}` : ''}.`
+                : 'Your clip is resting. Everything you saved is still here.'}
             </p>
           </div>
-          {mode === 'care' && (
+        ) : (
+          <div className="greeting care">
+            <div>
+              <h1>Rose&rsquo;s day</h1>
+              <p>
+                {rw.status.analyzed.toLocaleString()} moments remembered ·{' '}
+                {rw.alerts.filter((a) => !a.seen).length} new alerts ·{' '}
+                {rw.online ? 'necklace connected' : 'necklace offline'}
+              </p>
+            </div>
             <div className="chipset filter" role="tablist" aria-label="Section">
-              {FILTERS.map(([key, name]) => (
+              {FILTERS.map(([f, name]) => (
                 <button
                   type="button"
                   role="tab"
-                  key={key}
-                  aria-selected={filter === key}
-                  className={`chip ${filter === key ? 'is-active' : ''}`}
-                  onClick={() => setFilter(key)}
+                  key={f}
+                  aria-selected={filter === f}
+                  className={`chip ${filter === f ? 'is-active' : ''}`}
+                  onClick={() => setFilter(f)}
                 >
                   {name}
                 </button>
               ))}
             </div>
-          )}
-        </div>
-        {!status ? (
-          <div className="dashboard-loading" aria-live="polite">
-            <Aperture />
-            <h2>
-              {rw.connection === 'checking'
-                ? 'Opening your workspace…'
-                : 'Your workspace is unavailable.'}
-            </h2>
-            <p>
-              {rw.connection === 'checking'
-                ? 'Loading your actual saved moments.'
-                : 'Reconnect to see saved recordings and connected sources.'}
-            </p>
-            {rw.connection === 'offline' && (
-              <button
-                type="button"
-                className="btn"
-                onClick={() => void rw.reload()}
-              >
-                Try again
-              </button>
-            )}
           </div>
-        ) : mode === 'wearer' ? (
-          <div className="grid" key="wearer">
-            <ClipCard index={0} status={status} latest={rw.records[0]} />
+        )}
+
+        {!mounted ? null : mode === 'rose' ? (
+          <div className="grid" key={gridKey}>
+            <ClipCard
+              index={0}
+              status={rw.status}
+              online={rw.online}
+              onPause={rw.setPaused}
+            />
             <AskCard
               index={1}
               ask={rw.ask}
               answers={rw.answers}
               onOpen={openSource}
-              voice={voice}
-              disabled={disabled}
+              disabled={rw.connection !== 'live'}
             />
+            <OnTheWayCard index={2} />
+            <WhereCard index={3} />
+            <TodayCard index={4} />
+            <PeopleCard index={5} />
+            <MemoryLogCard index={6} records={rw.records} zone={zone} />
+            <NoteCard index={7} />
+            <MomentsCard
+              index={8}
+              records={rw.records}
+              zone={zone}
+              onOpen={openSource}
+              arriving={arriving}
+            />
+            <MedsCard index={9} />
+            <WeatherCard index={10} />
+            <ActivityCard index={11} />
+            <HelpCard index={12} />
+          </div>
+        ) : (
+          <div className="grid" key={gridKey}>
+            {care
+              .filter(([tags]) => tags.includes(filter))
+              .map(([, node]) => node)}
+          </div>
+        )}
+        {live.status && (
+          <section className="mail-widgets" aria-label="Calendar and notes">
             <CalendarCard
-              index={2}
+              index={12}
               scans={rw.scans}
+              pending={pendingMail}
+              landedId={landedId}
               reminders={rw.reminders}
               graph={rw.graph}
               zone={zone}
               arriving={arriving}
-              disabled={disabled}
-              onOpen={openMail}
+              disabled={rw.connection !== 'live'}
+              onOpen={setOpenScan}
               onDocument={(id) => void openDocument(id)}
               onSeen={rw.reminderSeen}
             />
             <LettersCard
-              index={3}
+              index={13}
               scans={rw.scans}
+              pending={pendingMail}
+              landedId={landedId}
               graph={rw.graph}
               arriving={arriving}
-              onOpen={openMail}
+              onOpen={setOpenScan}
               onDocument={(id) => void openDocument(id)}
             />
-            <MemoryLogCard
-              index={4}
-              records={rw.records}
-              zone={zone}
-              onOpen={openSource}
-            />
-            <MomentsCard
-              index={5}
-              records={rw.records}
-              zone={zone}
-              onOpen={openSource}
-            />
-            <PeopleCard index={6} people={rw.people} />
-            <QuestionsCard
-              index={7}
-              answers={rw.answers}
-              zone={zone}
-              onOpen={openSource}
-            />
-            <ConnectionsCard index={8} graph={rw.graph} />
-            <HelpCard index={9} />
-          </div>
-        ) : (
-          <div className="grid" key={`care-${filter}`}>
-            {show('watch') && (
-              <OverviewCard
-                index={0}
-                status={status}
-                latest={rw.records[0]}
-                alerts={rw.alerts}
-                onAsk={() =>
-                  askRef.current?.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'center',
-                  })
-                }
-              />
-            )}
-            {(show('memory') || filter === 'watch') && (
-              <div ref={askRef} className="cell-wrap">
-                <AskCard
-                  index={1}
-                  ask={rw.ask}
-                  answers={rw.answers}
-                  onOpen={openSource}
-                  voice={voice}
-                  disabled={disabled}
-                  label="Ask about the day"
-                />
-              </div>
-            )}
-            {show('watch') && (
-              <WatchCard
-                index={2}
-                rules={rw.rules}
-                alerts={rw.alerts}
-                zone={zone}
-                onAdd={rw.addRule}
-                onRemove={rw.removeRule}
-                onSeen={rw.markSeen}
-                disabled={disabled}
-              />
-            )}
-            {show('watch') && (
-              <CalendarCard
-                index={3}
-                scans={rw.scans}
-                reminders={rw.reminders}
-                graph={rw.graph}
-                zone={zone}
-                arriving={arriving}
-                disabled={disabled}
-                onOpen={openMail}
-                onDocument={(id) => void openDocument(id)}
-                onSeen={rw.reminderSeen}
-              />
-            )}
-            {show('watch') && (
-              <MailCard
-                index={13}
-                scans={rw.scans}
-                disabled={disabled}
-                onOpen={openMail}
-                onRemove={rw.removeScan}
-                onDemo={rw.demoScan}
-              />
-            )}
-            {show('memory') && (
-              <LatestCard
-                index={4}
-                records={rw.records}
-                zone={zone}
-                onOpen={openSource}
-              />
-            )}
-            {show('memory') && (
-              <QuestionsCard
-                index={5}
-                answers={rw.answers}
-                zone={zone}
-                onOpen={openSource}
-              />
-            )}
-            {show('device') && (
-              <DeviceCard
-                index={6}
-                status={status}
-                online={rw.online}
-                now={rw.now}
-                onPause={rw.setPaused}
-                disabled={disabled}
-              />
-            )}
-            {show('memory') && <PeopleCard index={7} people={rw.people} />}
-            {show('memory') && (
-              <LettersCard
-                index={8}
-                scans={rw.scans}
-                graph={rw.graph}
-                arriving={arriving}
-                onOpen={openMail}
-                onDocument={(id) => void openDocument(id)}
-              />
-            )}
-            {show('device') && (
-              <ProcessingCard
-                index={9}
-                status={status}
-                onRetry={rw.retryFailed}
-                disabled={disabled}
-              />
-            )}
-            {show('device') && <DataCard index={10} status={status} />}
-            {show('memory') && <ConnectionsCard index={11} graph={rw.graph} />}
-            <HelpCard index={12} />
-          </div>
+          </section>
         )}
       </main>
+
       <Arrivals
         items={rw.arrivals}
         onDone={rw.dismissArrival}
         onArriving={setArriving}
+        onLanded={setLandedId}
       />
+
       {openScan && (
         <dialog className="lightbox lb-mail" open aria-label="Scanned mail">
           <button
@@ -540,52 +495,30 @@ export function Dashboard() {
         </dialog>
       )}
       {open && (
-        <dialog className="lightbox" open aria-label="Original source">
+        <dialog className="lightbox" open aria-label="Recording">
           <button
             type="button"
             className="lb-close"
             onClick={() => setOpen(null)}
-            aria-label="Close source"
-          >
-            <X />
-          </button>
+            aria-label="Close"
+          />
           {open.kind === 'context' ? (
             <div className="lb-document">
-              <h2>{open.title || 'Connected source'}</h2>
-              <p>{open.context_kind} · Notch</p>
+              <h2>{open.title || 'Saved source'}</h2>
               <pre>{open.text}</pre>
             </div>
-          ) : open.media_url ? (
-            open.kind === 'frame' ? (
-              <img src={open.media_url} alt="Original recorded source" />
-            ) : (
-              <div className="lb-audio">
-                <audio controls src={open.media_url} />
-                <p>{open.transcript || 'No transcript available.'}</p>
-              </div>
-            )
+          ) : open.kind === 'frame' ? (
+            <img src={open.media_url} alt={open.summary || ''} />
           ) : (
-            <div className="lb-document">
-              <h2>Original unavailable</h2>
-              <p>This source cannot currently be opened.</p>
+            <div className="lb-audio">
+              <audio controls src={open.media_url} />
+              <p>{open.transcript}</p>
             </div>
           )}
           <p>
-            {recordedWhen(open, zone)}
-            {open.kind !== 'context' && open.summary
-              ? ` · Automatic description: ${open.summary}`
-              : ''}
+            {hm(open.captured_at, zone)}
+            {open.summary ? ` · ${open.summary}` : ''}
           </p>
-          {open.original_recording?.original_url && (
-            <a
-              className="btn"
-              href={open.original_recording.original_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open retained original video
-            </a>
-          )}
         </dialog>
       )}
     </div>

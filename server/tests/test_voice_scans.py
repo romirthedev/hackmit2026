@@ -123,7 +123,7 @@ def wav(seconds=0.5):
 
 
 async def test_scan_upload_files_documents_and_calendar_entries(tmp_path):
-    app = create_app(settings(tmp_path))
+    app = create_app(settings(tmp_path, scan_demo_template=True))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -414,3 +414,47 @@ async def test_long_reviewed_speech_is_not_silently_truncated(tmp_path):
         assert calls == []
     finally:
         await voice.close()
+
+
+async def test_demo_scan_never_waits_for_vision_and_reports_completion(tmp_path):
+    app = create_app(settings(tmp_path, scan_demo_template=True))
+    async def forbidden(*args, **kwargs):
+        raise AssertionError('Fixed demo mail must not invoke the vision model')
+    app.state.scans.read = forbidden
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            headers = {'Authorization': 'Bearer ' + ADMIN}
+            result = await client.post('/api/ingest/frame', content=jpeg(), headers={
+                **headers, 'Content-Type':'image/jpeg', 'X-Boot-ID':'demo-test',
+                'X-Sequence':'1', 'X-Captured-At':str(time.time()), 'X-Intent':'scan',
+            })
+            assert result.status_code == 201
+            await asyncio.gather(*app.state.scans.tasks)
+            jobs = (await client.get('/api/scans/jobs', headers=headers)).json()
+            assert jobs[0]['status'] == 'done'
+            assert jobs[0]['boot'] == 'demo-test'
+            scans = (await client.get('/api/scans', headers=headers)).json()
+            assert len(scans) == 2
+            assert all(d['source'] == 'template' for d in scans)
+            assert scans[0]['due_date'] == '2026-09-30'
+            assert scans[0]['amount'] == '$45.00'
+            source = await client.get('/api/context/documents/' + scans[0]['id'], headers=headers)
+            assert source.status_code == 200
+            assert source.json()['read_by'] == 'template'
+            assert '$45.00' in source.json()['text']
+
+
+async def test_non_demo_scan_failure_is_visible_without_inventing_documents(tmp_path):
+    app = create_app(settings(tmp_path, scan_demo_template=False))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            headers = {'Authorization':'Bearer '+ADMIN}
+            response = await client.post('/api/ingest/frame', content=jpeg(), headers={
+                **headers, 'Content-Type':'image/jpeg', 'X-Boot-ID':'real-test',
+                'X-Sequence':'1', 'X-Captured-At':str(time.time()), 'X-Intent':'scan',
+            })
+            assert response.status_code == 201
+            await asyncio.gather(*app.state.scans.tasks)
+            assert (await client.get('/api/scans', headers=headers)).json() == []
+            job = (await client.get('/api/scans/jobs', headers=headers)).json()[0]
+            assert job['status'] == 'failed' and 'original photo is saved' in job['error']

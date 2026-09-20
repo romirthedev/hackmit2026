@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ScanDocument } from '@/lib/api';
 import { ReceiveLetter, type Receive } from './letter';
 import { BillSlip, PostcardBack, isBill } from './mail-cards';
@@ -13,14 +13,21 @@ export function Arrivals({
   items,
   onDone,
   onArriving,
+  onLanded,
 }: {
   items: ScanDocument[];
   onDone: (id: string) => void;
   onArriving: (id: string | null) => void;
+  onLanded: (id: string) => void;
 }) {
-  const current = items[0] ?? null;
+  const currentId = items[0]?.id;
+  const currentRef = useRef(items[0]);
+  useEffect(() => {
+    currentRef.current = items[0];
+  }, [items]);
   const [item, setItem] = useState<Receive | null>(null);
   useEffect(() => {
+    const current = currentRef.current;
     if (!current) return;
     onArriving(current.id);
     let cancelled = false;
@@ -29,7 +36,7 @@ export function Arrivals({
     const t = setTimeout(() => {
       if (cancelled) return;
       const card = document.querySelector<HTMLElement>(
-        bill ? '[data-card="calendar"]' : '[data-card="letters"]',
+        bill ? '[data-card="calendar"]' : '[data-card="notes"]',
       );
       const bounds = card?.getBoundingClientRect();
       if (!bounds) {
@@ -83,8 +90,11 @@ export function Arrivals({
       clearTimeout(t);
       clearTimeout(placement);
     };
-  }, [current, onArriving, onDone]);
-  const landed = useCallback(() => onArriving(null), [onArriving]);
+  }, [currentId, onArriving, onDone]);
+  const landed = useCallback(() => {
+    if (currentId) onLanded(currentId);
+    onArriving(null);
+  }, [currentId, onArriving, onLanded]);
   const done = useCallback(
     (id: string) => {
       setItem(null);

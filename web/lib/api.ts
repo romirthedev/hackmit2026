@@ -90,6 +90,7 @@ export type Device = {
   };
 };
 export type Status = {
+  browser_open_access?: boolean;
   received: number;
   analyzed: number;
   pending: number;

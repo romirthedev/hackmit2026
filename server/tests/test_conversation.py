@@ -405,3 +405,21 @@ def test_backpressure_rejects_new_turn_but_accepts_idempotent_retry(conversation
         == 429
     )
     assert client.post("/api/conversation/text", json=body).json()["id"] == first.json()["id"]
+
+
+@pytest.mark.parametrize('question', ['Rewind. When is my doctor bill due?', 'When does my doctor bill due?'])
+async def test_direct_personal_question_searches_memory_before_clarifying(conversation, question):
+    service, client = conversation
+    service.p.kind = 'clarify'  # Regression: small router model asked "which bill?" without searching.
+    text(client, question)
+    await service.process(service.claim())
+    turn = service.state()['turns'][0]
+    assert turn['kind'] == 'memory'
+    assert turn['status'] == 'checking' and turn['answer_id']
+    assert not service.db.all('SELECT * FROM computer_commands')
+
+
+@pytest.mark.parametrize('utterance', ['He said where is my laptop?', 'Rewind, open my email', 'When is it due?', 'What did he mean by "open my email"?'])
+def test_question_fast_path_never_authorizes_ambient_commands_or_resolves_missing_context(utterance):
+    from rewind.conversation import direct_memory_question
+    assert direct_memory_question(utterance) is None

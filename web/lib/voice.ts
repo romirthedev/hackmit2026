@@ -467,66 +467,85 @@ export async function recordUtterance(
   onLevel?: (level: number) => void,
   signal?: AbortSignal,
 ): Promise<Blob | null> {
-  if (!navigator.mediaDevices?.getUserMedia) return null;
+  if (!navigator.mediaDevices?.getUserMedia || signal?.aborted) return null;
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true },
   });
-  const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(
-    (type) => MediaRecorder.isTypeSupported(type),
-  );
-  const recorder = new MediaRecorder(
-    stream,
-    mime ? { mimeType: mime } : undefined,
-  );
-  const context = new AudioContext();
-  const source = context.createMediaStreamSource(stream);
-  const analyser = context.createAnalyser();
-  analyser.fftSize = 512;
-  source.connect(analyser);
-  const data = new Uint8Array(analyser.frequencyBinCount);
-  const parts: Blob[] = [];
-  recorder.ondataavailable = (event) => {
-    if (event.data.size) parts.push(event.data);
-  };
-  let spoke = false;
-  let quiet = 0;
-  const started = Date.now();
-  const clip = new Promise<Blob | null>((resolve) => {
-    recorder.onstop = () => {
-      stream.getTracks().forEach((track) => track.stop());
-      void context.close();
-      resolve(
-        parts.length && spoke
-          ? new Blob(parts, { type: (mime || 'audio/webm').split(';')[0] })
-          : null,
-      );
-    };
-  });
-  recorder.start(250);
-  const tick = () => {
-    if (recorder.state !== 'recording') return;
-    analyser.getByteTimeDomainData(data);
-    let sum = 0;
-    for (const sample of data) {
-      const centered = (sample - 128) / 128;
-      sum += centered * centered;
-    }
-    const level = Math.sqrt(sum / data.length);
-    onLevel?.(level);
-    if (level > 0.03) {
-      spoke = true;
+  if (signal?.aborted) {
+    stream.getTracks().forEach((track) => track.stop());
+    return null;
+  }
+  let context: AudioContext | null = null;
+  try {
+    const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(
+      (type) => MediaRecorder.isTypeSupported(type),
+    );
+    const recorder = new MediaRecorder(
+      stream,
+      mime ? { mimeType: mime } : undefined,
+    );
+    context = new AudioContext();
+    await context.resume();
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.fftSize);
+    const parts: Blob[] = [];
+    let spoke = false,
       quiet = 0;
-    } else if (spoke) quiet += 60;
-    const elapsed = Date.now() - started;
-    if (
-      signal?.aborted ||
-      (spoke && quiet >= 1200) ||
-      elapsed > 15000 ||
-      (!spoke && elapsed > 6000)
-    )
-      recorder.stop();
-    else setTimeout(tick, 60);
-  };
-  tick();
-  return clip;
+    const started = Date.now();
+    return await new Promise<Blob | null>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const stop = () => {
+        if (recorder.state === 'recording') recorder.stop();
+      };
+      const clean = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', stop);
+      };
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) parts.push(event.data);
+      };
+      recorder.onerror = () => {
+        clean();
+        reject(new Error('The microphone recording failed. Please try again.'));
+      };
+      recorder.onstop = () => {
+        clean();
+        resolve(
+          parts.length && spoke && !signal?.aborted
+            ? new Blob(parts, { type: (mime || 'audio/webm').split(';')[0] })
+            : null,
+        );
+      };
+      signal?.addEventListener('abort', stop, { once: true });
+      recorder.start(250);
+      const tick = () => {
+        if (recorder.state !== 'recording') return;
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (const sample of data) sum += ((sample - 128) / 128) ** 2;
+        const level = Math.sqrt(sum / data.length);
+        onLevel?.(level);
+        if (level > 0.03) {
+          spoke = true;
+          quiet = 0;
+        } else if (spoke) quiet += 60;
+        const elapsed = Date.now() - started;
+        if (
+          signal?.aborted ||
+          (spoke && quiet >= 1200) ||
+          elapsed > 15000 ||
+          (!spoke && elapsed > 6000)
+        )
+          stop();
+        else timer = setTimeout(tick, 60);
+      };
+      tick();
+    });
+  } finally {
+    stream.getTracks().forEach((track) => track.stop());
+    await context?.close().catch(() => {});
+  }
 }

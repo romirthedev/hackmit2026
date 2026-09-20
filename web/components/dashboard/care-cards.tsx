@@ -1,8 +1,8 @@
 'use client';
-/* oxlint-disable next/no-img-element, next/no-html-link-for-pages -- authenticated originals and workspace/download links */
-import { useState } from 'react';
+/* oxlint-disable next/no-img-element, next/no-html-link-for-pages -- plain links keep the export download and the dark workspace outside the client router */
+import { useState, type CSSProperties } from 'react';
 import {
-  Aperture,
+  AlertTriangle,
   ArrowUpRight,
   Bell,
   BellOff,
@@ -10,11 +10,19 @@ import {
   Cpu,
   Download,
   HardDrive,
+  Home,
+  Mic,
+  Moon,
   Pause,
   Play,
   Plus,
   RefreshCw,
+  Send,
+  Smile,
   Sparkles,
+  Trash2,
+  Wifi,
+  WifiOff,
   X,
 } from 'lucide-react';
 import {
@@ -25,66 +33,107 @@ import {
   type Rule,
   type Status,
 } from '@/lib/api';
-import { Btn, Card, Cell, Row, ago, hm } from './primitives';
-import { AnswerDetail, answerState } from './answer-detail';
-import { recordedWhen } from './rose-cards';
+import { Avatar, Btn, Card, Cell, Row, ago, hm } from './primitives';
+import {
+  ADHERENCE,
+  MEDS,
+  PEOPLE,
+  ROSE_AVATAR,
+  WEEK_SLEEP,
+  WEEK_STEPS,
+} from './demo-data';
 
-export function OverviewCard({
+// Rose, right now (hero, spans two columns) -----------------------------
+export function RoseHeroCard({
   status,
-  latest,
+  online,
+  now,
+  records,
   alerts,
   index,
   onAsk,
 }: {
   status: Status;
-  latest?: Recording;
+  online: boolean;
+  now: number;
+  records: Recording[];
   alerts: Alert[];
   index: number;
   onAsk: () => void;
 }) {
-  const unread = alerts.filter((alert) => !alert.seen).length;
+  const last = records[0];
+  const lastSeen =
+    status.last_capture && now
+      ? ago(now - status.last_capture)
+      : 'no capture yet';
+  const unread = alerts.filter((a) => !a.seen).length;
+  const mood = unread ? 'Needs a look' : 'Doing well';
+  const place = last?.objects?.[0]?.location || last?.tags?.[0] || 'at home';
+  const stats = [
+    { icon: <Home />, k: 'Where', v: place[0].toUpperCase() + place.slice(1) },
+    { icon: <Smile />, k: 'Mood', v: 'Cheerful' },
+    { icon: <Moon />, k: 'Sleep', v: '7h 24m' },
+    {
+      icon: online ? <Wifi /> : <WifiOff />,
+      k: 'Clip',
+      v: online ? (status.paused ? 'Paused' : 'Recording') : 'Offline',
+    },
+  ];
   return (
-    <Cell label="Shared overview" wide index={index}>
+    <Cell label="Rose, right now" wide index={index}>
       <Card className={`card-hero ${unread ? 'attention' : ''}`}>
-        <div className="hero-figure memory-figure" aria-hidden="true">
+        <div className="hero-figure">
           <div className="hero-ring" />
-          <Aperture />
+          <img
+            src={ROSE_AVATAR}
+            alt="Illustration of Rose"
+            width={220}
+            height={220}
+          />
+          <span
+            className={`hero-badge ${online && !status.paused ? 'is-live' : ''}`}
+          >
+            <i />
+            {online ? (status.paused ? 'Capture paused' : 'Live') : 'Offline'}
+          </span>
         </div>
         <div className="hero-body">
           <div className="hero-head">
             <div>
-              <h2 className="hero-title">A second look at the day.</h2>
+              <h2 className="hero-title">{mood}</h2>
               <p className="muted">
-                {latest
-                  ? `Latest sample: ${recordedWhen(latest, status.timezone)}.`
-                  : 'Start recording on your phone to build a memory.'}{' '}
-                Saved samples do not establish a person’s current location or
-                wellbeing.
+                Last capture {lastSeen}
+                {last ? ` · ${hm(last.captured_at, status.timezone)}` : ''}.{' '}
+                {last?.summary ? last.summary : 'Everything looks normal.'}
               </p>
             </div>
           </div>
           <div className="hero-stats">
-            {[
-              ['Saved samples', status.received],
-              ['Analyzed', status.analyzed],
-              ['Waiting', status.pending],
-              ['New alerts', unread],
-            ].map(([label, value]) => (
-              <div key={label} className="stat">
+            {stats.map((s) => (
+              <div key={s.k} className="stat">
+                {s.icon}
                 <span>
-                  <small>{label}</small>
-                  <b>{value}</b>
+                  <small>{s.k}</small>
+                  <b>{s.v}</b>
                 </span>
               </div>
             ))}
           </div>
           <div className="hero-actions">
             <Btn onClick={onAsk}>
-              <Sparkles /> Ask about the day
+              <Sparkles />
+              Ask about her day
             </Btn>
-            <a className="btn ghost" href="/workspace#context">
-              <ArrowUpRight /> Connected context
-            </a>
+            <Btn className="ghost">
+              <Send />
+              Send a note
+            </Btn>
+            {unread > 0 && (
+              <span className="pill-alert">
+                <Bell />
+                {unread} new {unread === 1 ? 'alert' : 'alerts'}
+              </span>
+            )}
           </div>
         </div>
       </Card>
@@ -92,6 +141,7 @@ export function OverviewCard({
   );
 }
 
+// Watch for me: monitoring rules + live alerts ---------------------------
 export function WatchCard({
   rules,
   alerts,
@@ -100,41 +150,29 @@ export function WatchCard({
   onRemove,
   onSeen,
   index,
-  disabled,
 }: {
   rules: Rule[];
   alerts: Alert[];
   zone?: string;
-  onAdd: (instruction: string) => Promise<void>;
-  onRemove: (id: string) => Promise<void>;
-  onSeen: (id: string) => Promise<void>;
+  onAdd: (s: string) => void;
+  onRemove: (id: string) => void;
+  onSeen: (id: string) => void;
   index: number;
-  disabled: boolean;
 }) {
-  const [tab, setTab] = useState<'alerts' | 'rules'>('alerts');
   const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const unread = alerts.filter((alert) => !alert.seen).length;
-  async function change(action: () => Promise<void>, after?: () => void) {
-    if (busy || disabled) return;
-    setBusy(true);
-    setError('');
-    try {
-      await action();
-      after?.();
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : String(problem));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const [tab, setTab] = useState<'alerts' | 'rules'>('alerts');
+  const unread = alerts.filter((a) => !a.seen).length;
+  const suggestions = [
+    'Stove left on',
+    'Door open after 9 PM',
+    'A fall or long stillness',
+  ];
   return (
     <Cell label="Watch for me" index={index}>
       <Card>
         <Row>
           <span className="card-title">
-            Observations{' '}
+            Watch for me{' '}
             {unread > 0 && <span className="count-bubble">{unread}</span>}
           </span>
           <div className="mini-seg">
@@ -156,56 +194,43 @@ export function WatchCard({
         </Row>
         {tab === 'alerts' ? (
           <ul className="inbox alerts">
-            {alerts.slice(0, 4).map((alert) => (
-              <li key={alert.id} className={alert.seen ? '' : 'unread'}>
+            {alerts.slice(0, 4).map((a) => (
+              <li key={a.id} className={a.seen ? '' : 'unread'}>
                 <div className="inbox-head">
-                  <b>{alert.seen ? 'Seen' : 'New'}</b>
-                  <span>{hm(alert.created_at, zone)}</span>
+                  <b>{a.seen ? 'Noticed' : 'New'}</b>
+                  <span>{hm(a.created_at, zone)}</span>
                 </div>
-                <p>{alert.message}</p>
-                <Row>
-                  <a
+                <p>{a.message}</p>
+                {!a.seen && (
+                  <button
+                    type="button"
                     className="text-btn"
-                    href={`/api/media/${encodeURIComponent(alert.event_id)}`}
-                    target="_blank"
-                    rel="noreferrer"
+                    onClick={() => onSeen(a.id)}
                   >
-                    Original source
-                  </a>
-                  {!alert.seen && (
-                    <button
-                      className="text-btn"
-                      type="button"
-                      onClick={() => void change(() => onSeen(alert.id))}
-                      disabled={busy || disabled}
-                    >
-                      <Check /> Mark as seen
-                    </button>
-                  )}
-                </Row>
+                    <Check />
+                    Mark as seen
+                  </button>
+                )}
               </li>
             ))}
             {!alerts.length && (
               <li className="none">
-                <BellOff /> No recorded alerts yet.
+                <BellOff />
+                Nothing to report. Rules run on every new capture.
               </li>
             )}
           </ul>
         ) : (
           <ul className="rules">
-            {rules.map((rule) => (
-              <li key={rule.id}>
+            {rules.map((r) => (
+              <li key={r.id}>
                 <span className="rule-dot" />
-                <span>
-                  {rule.instruction}
-                  {!rule.enabled && ' (disabled)'}
-                </span>
+                <span>{r.instruction}</span>
                 <button
                   type="button"
                   className="tbtn xs"
-                  aria-label={`Remove rule: ${rule.instruction}`}
-                  onClick={() => void change(() => onRemove(rule.id))}
-                  disabled={busy || disabled}
+                  aria-label="Remove rule"
+                  onClick={() => onRemove(r.id)}
                 >
                   <X />
                 </button>
@@ -218,170 +243,193 @@ export function WatchCard({
         )}
         <form
           className="add-rule"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const instruction = text.trim();
-            if (instruction)
-              void change(
-                () => onAdd(instruction),
-                () => {
-                  setText('');
-                  setTab('rules');
-                },
-              );
+          onSubmit={(e) => {
+            e.preventDefault();
+            const s = text.trim();
+            if (!s) return;
+            onAdd(s);
+            setText('');
+            setTab('rules');
           }}
         >
           <input
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(e) => setText(e.target.value)}
             placeholder="Tell me if…"
             aria-label="New monitoring rule"
-            maxLength={1000}
-            disabled={disabled || busy}
           />
           <button
             type="submit"
             className="tbtn tbtn-solid"
             aria-label="Add rule"
-            disabled={disabled || busy || !text.trim()}
           >
             <Plus />
           </button>
         </form>
-        {error && (
-          <p className="warn" role="alert">
-            {error}
-          </p>
-        )}
-        <p className="muted xs mt10">
-          Alerts are model interpretations of recorded samples. Open their
-          source to check.
-        </p>
+        <div className="chipset">
+          {suggestions.map((s) => (
+            <button
+              type="button"
+              key={s}
+              className="chip"
+              onClick={() => setText(`Tell me if ${s.toLowerCase()}`)}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       </Card>
     </Cell>
   );
 }
 
+// Medication adherence -------------------------------------------------
+export function AdherenceCard({ index }: { index: number }) {
+  const flat = ADHERENCE.flat();
+  const done = flat.filter((v) => v === 1).length,
+    due = flat.filter((v) => v !== 2).length;
+  const pct = Math.round((done / due) * 100);
+  return (
+    <Cell label="Medication" index={index}>
+      <Card>
+        <Row>
+          <span className="card-title">This week</span>
+          <span className="muted xs">
+            {done} of {due} doses
+          </span>
+        </Row>
+        <div className="big-num">
+          {pct}
+          <small>%</small>
+        </div>
+        <div className="adherence">
+          {ADHERENCE.map((day, d) => (
+            <div key={d} className="adh-day">
+              {day.map((v, i) => (
+                <i
+                  key={i}
+                  className={v === 1 ? 'ok' : v === 0 ? 'miss' : ''}
+                  title={`${MEDS[i].name} · ${MEDS[i].time} ${MEDS[i].when}`}
+                />
+              ))}
+              <span>{'MTWTFSS'[d]}</span>
+            </div>
+          ))}
+        </div>
+        <ul className="med-list">
+          {MEDS.map((m) => (
+            <li key={m.name}>
+              <span className={`dot ${m.taken ? 'ok' : ''}`} />
+              <span>
+                <b>{m.name}</b>
+                <small>
+                  {m.time} {m.when} · with {m.with}
+                </small>
+              </span>
+              <span className="muted xs">{m.taken ? 'Taken' : 'Upcoming'}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </Cell>
+  );
+}
+
+// Device health (from /status.devices) --------------------------------
 export function DeviceCard({
   status,
   online,
   now,
   onPause,
   index,
-  disabled,
 }: {
   status: Status;
   online: boolean;
   now: number;
-  onPause: (paused: boolean) => Promise<void>;
+  onPause: (p: boolean) => void;
   index: number;
-  disabled: boolean;
 }) {
-  const device = status.devices[0];
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  async function pause() {
-    setBusy(true);
-    setError('');
-    try {
-      await onPause(!status.paused);
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : String(problem));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const d = status.devices[0];
+  const rssi = d?.state.rssi ?? -100;
+  const bars =
+    rssi > -55 ? 4 : rssi > -65 ? 3 : rssi > -75 ? 2 : rssi > -85 ? 1 : 0;
   return (
-    <Cell label="Devices" index={index}>
+    <Cell label="Necklace" index={index}>
       <Card>
         <Row>
-          <span className="card-title">
-            {device?.id || 'Phone-first recording'}
+          <span className="card-title">{d?.id || 'No device paired'}</span>
+          <span className={`status-dot ${online ? 'ok' : ''}`}>
+            {online ? (status.paused ? 'Paused' : 'Connected') : 'Offline'}
           </span>
-          {device && (
-            <span className={`status-dot ${online ? 'ok' : ''}`}>
-              {online ? 'Recent heartbeat' : 'No recent heartbeat'}
-            </span>
-          )}
         </Row>
-        {device ? (
-          <>
-            <div className="kv two">
-              <div>
-                <small>Last heartbeat</small>
-                <b>{ago(now - device.last_seen)}</b>
-              </div>
-              <div>
-                <small>Queued on device</small>
-                <b>{device.state.queued}</b>
-              </div>
-              <div>
-                <small>Dropped samples</small>
-                <b>{device.state.dropped}</b>
-              </div>
-              <div>
-                <small>Device storage free</small>
-                <b>{bytes(device.state.free_sd_bytes)}</b>
-              </div>
-            </div>
-            {device.state.error && <p className="warn">{device.state.error}</p>}
-            <Btn
-              className="mt18"
-              onClick={() => void pause()}
-              disabled={disabled || busy}
-            >
-              {status.paused ? <Play /> : <Pause />}
-              {busy
-                ? 'Updating…'
-                : status.paused
-                  ? 'Resume hardware capture'
-                  : 'Pause hardware capture'}
-            </Btn>
-          </>
-        ) : (
-          <p className="serif sm">
-            Open the recorder on your phone. Hardware devices appear here when
-            they send a heartbeat.
+        <div className="kv">
+          <div>
+            <small>Wi-Fi</small>
+            <b className="signal" aria-label={`${rssi} dBm`}>
+              {[0, 1, 2, 3].map((i) => (
+                <i key={i} className={i < bars ? 'on' : ''} />
+              ))}
+              <span>{rssi} dBm</span>
+            </b>
+          </div>
+          <div>
+            <small>Last heartbeat</small>
+            <b>{d && now ? ago(now - d.last_seen) : '—'}</b>
+          </div>
+          <div>
+            <small>Queued on card</small>
+            <b>{d?.state.queued ?? 0} files</b>
+          </div>
+          <div>
+            <small>Dropped</small>
+            <b>{d?.state.dropped ?? 0}</b>
+          </div>
+        </div>
+        <div className="track">
+          <span
+            className="track-fill soft"
+            style={{
+              width: `${d ? Math.min(100, 100 - (d.state.free_sd_bytes / 32e9) * 100) : 0}%`,
+            }}
+          />
+        </div>
+        <Row className="muted xs">
+          <span>microSD</span>
+          <span>{d ? `${bytes(d.state.free_sd_bytes)} free` : '—'}</span>
+        </Row>
+        {d?.state.error && (
+          <p className="warn">
+            <AlertTriangle />
+            {d.state.error}
           </p>
         )}
-        {error && (
-          <p className="warn" role="alert">
-            {error}
-          </p>
-        )}
-        <a className="text-btn" href="/workspace#usage">
-          Pair a phone or review devices <ArrowUpRight />
-        </a>
+        <Row className="mt18">
+          <span className="muted xs">1 frame / second while recording</span>
+          <Btn onClick={() => onPause(!status.paused)}>
+            {status.paused ? <Play /> : <Pause />}
+            {status.paused ? 'Resume capture' : 'Pause capture'}
+          </Btn>
+        </Row>
       </Card>
     </Cell>
   );
 }
 
+// Memory processing (from /status) -------------------------------------
 export function ProcessingCard({
   status,
   onRetry,
   index,
-  disabled,
 }: {
   status: Status;
-  onRetry: () => Promise<void>;
+  onRetry: () => void;
   index: number;
-  disabled: boolean;
 }) {
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
   const total = Math.max(1, status.received);
-  async function retry() {
-    setBusy(true);
-    setError('');
-    try {
-      await onRetry();
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : String(problem));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const seg = (n: number) => `${(n / total) * 100}%`;
+  const used = status.storage_limit_bytes
+    ? status.stored_bytes / status.storage_limit_bytes
+    : 0;
   return (
     <Cell label="Memory" index={index}>
       <Card>
@@ -391,21 +439,12 @@ export function ProcessingCard({
         </Row>
         <div className="big-num">
           {status.analyzed.toLocaleString()}
-          <small>samples analyzed</small>
+          <small>ready to recall</small>
         </div>
         <div className="segbar">
-          <span
-            className="sb-ok"
-            style={{ width: `${(status.analyzed / total) * 100}%` }}
-          />
-          <span
-            className="sb-pend"
-            style={{ width: `${(status.pending / total) * 100}%` }}
-          />
-          <span
-            className="sb-fail"
-            style={{ width: `${(status.failed / total) * 100}%` }}
-          />
+          <span className="sb-ok" style={{ width: seg(status.analyzed) }} />
+          <span className="sb-pend" style={{ width: seg(status.pending) }} />
+          <span className="sb-fail" style={{ width: seg(status.failed) }} />
         </div>
         <div className="legend">
           <span>
@@ -414,55 +453,57 @@ export function ProcessingCard({
           </span>
           <span>
             <i className="sb-pend" />
-            {status.pending} pending
+            {status.pending} processing
           </span>
           <span>
             <i className="sb-fail" />
             {status.failed} failed
           </span>
         </div>
-        <p className="muted mt10">
-          {status.analysis_ready === false
-            ? 'Analysis is unavailable. Saved originals remain in the workspace.'
-            : 'Descriptions support retrieval; answers still need evidence review.'}
-        </p>
         <div className="kv two">
           <div>
-            <small>Average sample analysis</small>
+            <small>Model</small>
+            <b>{status.model || '—'}</b>
+          </div>
+          <div>
+            <small>Avg. per frame</small>
             <b>
-              {status.average_analysis_ms !== null
+              {status.average_analysis_ms
                 ? `${(status.average_analysis_ms / 1000).toFixed(1)}s`
                 : '—'}
             </b>
           </div>
-          <div>
-            <small>Stored samples</small>
-            <b>{bytes(status.stored_bytes)}</b>
-          </div>
         </div>
+        <div className="track">
+          <span
+            className="track-fill soft"
+            style={{ width: `${Math.min(100, used * 100)}%` }}
+          />
+        </div>
+        <Row className="muted xs">
+          <span>
+            <HardDrive />
+            {bytes(status.stored_bytes)} stored
+          </span>
+          <span>{bytes(status.storage_limit_bytes)} limit</span>
+        </Row>
         {status.failed > 0 && (
-          <Btn
-            className="mt18"
-            onClick={() => void retry()}
-            disabled={busy || disabled}
-          >
-            <RefreshCw />
-            {busy ? 'Retrying…' : `Retry ${status.failed} failed samples`}
-          </Btn>
+          <Row className="mt18">
+            <span className="muted xs">
+              Originals are kept when analysis fails.
+            </span>
+            <Btn onClick={onRetry}>
+              <RefreshCw />
+              Retry {status.failed}
+            </Btn>
+          </Row>
         )}
-        {error && (
-          <p className="warn" role="alert">
-            {error}
-          </p>
-        )}
-        <a className="text-btn" href="/workspace#usage">
-          Usage &amp; processing details <ArrowUpRight />
-        </a>
       </Card>
     </Cell>
   );
 }
 
+// Latest capture with filmstrip ----------------------------------------
 export function LatestCard({
   records,
   zone,
@@ -473,55 +514,61 @@ export function LatestCard({
   records: Recording[];
   zone?: string;
   index: number;
-  onOpen: (record: Recording) => void;
+  onOpen: (r: Recording) => void;
   arriving?: string | null;
 }) {
-  const frames = records.filter(
-    (record) => record.kind === 'frame' && record.media_url,
-  );
-  const [selected, setSelected] = useState<string | null>(null);
-  const current = frames.find((frame) => frame.id === selected) || frames[0];
+  const frames = records.filter((r) => r.kind === 'frame' && r.media_url);
+  const [sel, setSel] = useState(0);
+  const cur = frames[sel];
   return (
-    <Cell label="Latest capture" index={index}>
+    <Cell label="Latest capture" link index={index}>
       <Card className="card-photo" data-card="moments">
-        {current ? (
+        {cur ? (
           <>
             <button
               type="button"
-              className={`photo ${current.id === arriving ? 'is-arriving' : ''}`}
-              data-frame={current.id}
-              onClick={() => onOpen(current)}
-              aria-label="Open latest original photo"
+              className={`photo ${cur.id === arriving ? 'is-arriving' : ''}`}
+              data-frame={cur.id}
+              onClick={() => onOpen(cur)}
             >
-              <img src={current.media_url} alt="Original camera sample" />
+              <img src={cur.media_url} alt={cur.summary || 'Latest frame'} />
             </button>
             <div className="photo-foot">
               <div>
-                <div className="card-title">{recordedWhen(current, zone)}</div>
-                <div className="muted">
-                  {current.summary || 'Saved original; description not ready.'}
+                <div className="card-title">
+                  {sel === 0 ? 'Just now' : hm(cur.captured_at, zone)}
                 </div>
-                <small className="muted">Automatic caption · unverified</small>
+                <div className="muted">
+                  {cur.summary ||
+                    (cur.status === 'pending'
+                      ? 'Analyzing\u2026'
+                      : 'Evidence saved')}
+                </div>
               </div>
+              <span className="muted xs">
+                {cur.confidence
+                  ? `${Math.round(cur.confidence * 100)}% sure`
+                  : ''}
+              </span>
             </div>
             <div className="strip">
-              {frames.slice(0, 6).map((frame) => (
+              {frames.slice(0, 6).map((f, i) => (
                 <button
-                  key={frame.id}
                   type="button"
-                  className={frame.id === current.id ? 'is-sel' : ''}
-                  onClick={() => setSelected(frame.id)}
-                  aria-label={`Select photo ${recordedWhen(frame, zone)}`}
+                  key={f.id}
+                  className={i === sel ? 'is-sel' : ''}
+                  onClick={() => setSel(i)}
+                  aria-label={hm(f.captured_at, zone)}
                 >
-                  <img src={frame.media_url} alt="" loading="lazy" />
+                  <img src={f.media_url} alt="" loading="lazy" />
                 </button>
               ))}
             </div>
           </>
         ) : (
           <div className="board-empty tall">
-            <Aperture />
-            <span>No saved photos yet. Start recording on your phone.</span>
+            <Mic />
+            <span>No frames yet. Connect the necklace.</span>
           </div>
         )}
       </Card>
@@ -529,87 +576,238 @@ export function LatestCard({
   );
 }
 
+// Questions Rose asked (from /answers) ----------------------------------
 export function QuestionsCard({
   answers,
   zone,
   index,
-  onOpen,
 }: {
   answers: Answer[];
   zone?: string;
   index: number;
-  onOpen: (record: Recording) => void;
 }) {
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(answers[0]?.id ?? null);
   return (
     <Cell label="Questions" index={index}>
       <Card>
         <Row>
-          <span className="card-title">Recent questions</span>
-          <Bell className="icon-muted" />
+          <span className="card-title">Rose asked</span>
+          <span className="muted xs">{answers.length} today</span>
         </Row>
         <ul className="qa-list">
-          {answers.slice(0, 4).map((answer) => (
-            <li key={answer.id} className={open === answer.id ? 'open' : ''}>
+          {answers.slice(0, 4).map((a) => (
+            <li key={a.id} className={open === a.id ? 'open' : ''}>
               <button
                 type="button"
-                onClick={() => setOpen(open === answer.id ? null : answer.id)}
-                aria-label={`Read answer: ${answer.question}`}
-                aria-expanded={open === answer.id}
+                onClick={() => setOpen(open === a.id ? null : a.id)}
               >
+                <span className={`mode ${a.mode}`}>
+                  {a.mode === 'wearable' ? <Mic /> : <Sparkles />}
+                </span>
                 <span className="q">
-                  <b>{answer.question}</b>
+                  <b>{a.question}</b>
                   <small>
-                    {hm(answer.created_at, zone)} · {answerState(answer)}
+                    {hm(a.created_at, zone)} ·{' '}
+                    {a.grounded ? 'from recordings' : 'no evidence found'}
                   </small>
                 </span>
               </button>
-              {open === answer.id && (
-                <AnswerDetail answer={answer} onOpen={onOpen} />
-              )}
+              <p className="a">{a.answer.replace(/\[[0-9a-f-]{36}\]/g, '')}</p>
             </li>
           ))}
-          {!answers.length && (
-            <li className="none">
-              No questions yet. Ask about something you recorded.
-            </li>
-          )}
+          {!answers.length && <li className="none">No questions yet.</li>}
         </ul>
       </Card>
     </Cell>
   );
 }
 
-export function DataCard({ status, index }: { status: Status; index: number }) {
+// Sleep & steps trends ----------------------------------------------------
+export function TrendsCard({ index }: { index: number }) {
+  const [metric, setMetric] = useState<'steps' | 'sleep'>('sleep');
+  const vals = metric === 'sleep' ? WEEK_SLEEP : WEEK_STEPS;
+  const max = Math.max(...vals),
+    avg = vals.reduce((a, b) => a + b, 0) / vals.length;
   return (
-    <Cell label="Your data" index={index}>
+    <Cell label="Trends" index={index}>
       <Card>
         <Row>
-          <span className="card-title">Saved in your workspace</span>
-          <HardDrive className="icon-muted" />
+          <span className="card-title">Past week</span>
+          <div className="mini-seg">
+            <button
+              type="button"
+              className={metric === 'sleep' ? 'is-active' : ''}
+              onClick={() => setMetric('sleep')}
+            >
+              Sleep
+            </button>
+            <button
+              type="button"
+              className={metric === 'steps' ? 'is-active' : ''}
+              onClick={() => setMetric('steps')}
+            >
+              Steps
+            </button>
+          </div>
+        </Row>
+        <div className="big-num">
+          {avg.toFixed(1)}
+          <small>{metric === 'sleep' ? 'h avg' : 'km avg'}</small>
+        </div>
+        <div className="bars">
+          {vals.map((v, i) => (
+            <div
+              key={i}
+              className={i === 5 ? 'is-sel' : ''}
+              style={
+                { '--h': `${(v / max) * 100}%`, '--i': i } as CSSProperties
+              }
+            >
+              <i />
+              <span>{'MTWTFSS'[i]}</span>
+            </div>
+          ))}
+        </div>
+        <p className="muted xs mt10">
+          {metric === 'sleep'
+            ? 'Friday was short. She napped after lunch.'
+            : 'Most steps on Saturday: the garden and a walk with Priya.'}
+        </p>
+      </Card>
+    </Cell>
+  );
+}
+
+// Notes to Rose ---------------------------------------------------------
+export function NotesCard({ index }: { index: number }) {
+  const [notes, setNotes] = useState([
+    {
+      who: 'Priya',
+      text: 'Mom, soup is in the fridge. Two minutes in the microwave.',
+      when: '7:50 AM',
+    },
+  ]);
+  const [text, setText] = useState('');
+  return (
+    <Cell label="Notes to Rose" index={index}>
+      <Card>
+        <div className="card-title mb14">Leave a note</div>
+        <form
+          className="note-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const t = text.trim();
+            if (!t) return;
+            setNotes([
+              {
+                who: 'You',
+                text: t,
+                when: new Date().toLocaleTimeString([], {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                }),
+              },
+              ...notes,
+            ]);
+            setText('');
+          }}
+        >
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={2}
+            placeholder="It shows on her dashboard and can be read aloud."
+            aria-label="Note to Rose"
+          />
+          <Row>
+            <span className="muted xs">Read aloud when she asks</span>
+            <Btn type="submit" disabled={!text.trim()}>
+              <Send />
+              Send
+            </Btn>
+          </Row>
+        </form>
+        <ul className="notes">
+          {notes.map((n, i) => (
+            <li key={i}>
+              <p className="serif sm">{n.text}</p>
+              <span className="tag">
+                {n.who} · {n.when}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </Cell>
+  );
+}
+
+// Care team ----------------------------------------------------------------
+export function CareTeamCard({ index }: { index: number }) {
+  return (
+    <Cell label="Care team" index={index}>
+      <Card>
+        <div className="card-title mb14">Who helps</div>
+        <ul className="stories">
+          {PEOPLE.map((p) => (
+            <li key={p.name}>
+              <div className="story static">
+                <Avatar src={p.img} />
+                <span>
+                  <b>{p.name}</b>
+                  <small>
+                    {p.role} · {p.note}
+                  </small>
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </Cell>
+  );
+}
+
+// Privacy & data ------------------------------------------------------------
+export function DataCard({ status, index }: { status: Status; index: number }) {
+  return (
+    <Cell label="Privacy" index={index}>
+      <Card>
+        <Row>
+          <span className="card-title">Her data</span>
+          <span className="status-dot ok">
+            {status.provider === 'ollama' ? 'Local AI' : status.provider}
+          </span>
         </Row>
         <p className="muted mt10">
-          Keep original recordings and inspect the sources behind each answer.
-          Analysis and review can use connected AI services.
+          Frames and audio stay on the home server. Nothing leaves the house
+          unless you export it.
         </p>
-        <div className="kv two">
+        <div className="kv two mt18">
           <div>
-            <small>Samples saved</small>
+            <small>Recordings</small>
             <b>{status.received.toLocaleString()}</b>
           </div>
           <div>
-            <small>Server storage free</small>
+            <small>Free space</small>
             <b>{bytes(status.free_bytes)}</b>
           </div>
         </div>
-        <div className="workspace-links mt18">
+        <Row className="mt18">
           <a className="btn" href="/api/export">
-            <Download /> Export metadata
+            <Download />
+            Export metadata
           </a>
-          <a className="btn ghost" href="/workspace#usage">
-            Storage &amp; usage <ArrowUpRight />
+          <a className="btn ghost" href="/workspace">
+            <ArrowUpRight />
+            Workspace
           </a>
-        </div>
+        </Row>
+        <p className="muted xs mt10">
+          <Trash2 />
+          Deleting a recording removes its original, index entry and any answers
+          built on it.
+        </p>
       </Card>
     </Cell>
   );
