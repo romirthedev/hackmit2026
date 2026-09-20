@@ -1,24 +1,21 @@
 'use client';
-/* oxlint-disable next/no-img-element -- frames come from the authenticated local media route */
+/* oxlint-disable next/no-img-element, next/no-html-link-for-pages -- local media and full navigation into phone capture */
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
+  ArrowUpRight,
   CarFront,
   Check,
   Clock,
   Footprints,
   Image as ImageIcon,
   MessageCircle,
-  Pause,
   Phone,
   Pill,
-  Play,
   Search,
   Siren,
-  SkipBack,
-  SkipForward,
 } from 'lucide-react';
-import type { Recording, Status } from '@/lib/api';
-import { Avatar, Btn, Card, Cell, Row, hm, pad } from './primitives';
+import type { Recording } from '@/lib/api';
+import { Avatar, Btn, Card, Cell, Row, hm } from './primitives';
 import { DAYS, MEDS, PEOPLE, PINS, WEEK_STEPS } from './demo-data';
 
 const FILL: Record<string, string> = {
@@ -27,91 +24,33 @@ const FILL: Record<string, string> = {
   amber: 'c-amber',
 };
 
-// Your clip (music-card pattern) ------------------------------------
-export function ClipCard({
-  status,
-  online,
-  onPause,
-  index,
-}: {
-  status: Status;
-  online: boolean;
-  onPause: (p: boolean) => void;
-  index: number;
-}) {
-  const [rec, setRec] = useState(6 * 3600 + 12 * 60 + 4);
-  const recording = online && !status.paused;
-  useEffect(() => {
-    if (!recording) return;
-    const t = setInterval(() => setRec((r) => r + 1), 1000);
-    return () => clearInterval(t);
-  }, [recording]);
-  const h = Math.floor(rec / 3600),
-    m = Math.floor((rec % 3600) / 60),
-    s = rec % 60;
-  const dev = status.devices[0];
-  const sub = !online
-    ? 'Not connected'
-    : status.paused
-      ? 'Paused · tap to resume'
-      : 'Recording · cardigan';
+// Phone capture, in the original compact device card ----------------
+export function PhoneCard({ index }: { index: number }) {
   return (
-    <Cell label="Your clip" index={index}>
-      <Card>
+    <Cell label="Your iPhone" index={index}>
+      <Card className="phone-device-card">
         <div className="media-row">
-          <div className="device">
-            <span className="device-lens" />
-            <span
-              className={`device-led ${!online ? 'off' : status.paused ? 'amber' : ''}`}
-            />
-          </div>
-          <div className="media-meta">
-            <div className="card-title">Rewind clip</div>
-            <div className="muted">{sub}</div>
-            <div className="transport">
-              <button
-                type="button"
-                className="tbtn"
-                aria-label="Back 30 seconds"
-                onClick={() => setRec((r) => Math.max(0, r - 30))}
-              >
-                <SkipBack />
-              </button>
-              <button
-                type="button"
-                className="tbtn tbtn-solid"
-                aria-label={status.paused ? 'Resume' : 'Pause'}
-                onClick={() => onPause(!status.paused)}
-              >
-                {status.paused ? <Play /> : <Pause />}
-              </button>
-              <button
-                type="button"
-                className="tbtn"
-                aria-label="Forward 30 seconds"
-                onClick={() => setRec((r) => r + 30)}
-              >
-                <SkipForward />
-              </button>
+          <div className="iphone-art" aria-hidden="true">
+            <div className="iphone-body">
+              <span className="iphone-island" />
+              <span className="iphone-battery">
+                <i />
+              </span>
+              <span className="iphone-wallpaper" />
+              <span className="iphone-home" />
             </div>
           </div>
+          <div className="media-meta">
+            <div className="card-title">iPhone</div>
+            <div className="muted">Ready when you are</div>
+            <a className="btn sm phone-open" href="/phone/">
+              Open phone <ArrowUpRight />
+            </a>
+          </div>
         </div>
-        <div className="track">
-          <span
-            className="track-fill"
-            style={{ width: `${(rec / (8 * 3600)) * 100}%` }}
-          />
+        <div className="phone-device-footer muted xs">
+          Camera &amp; microphone · one tap to record
         </div>
-        <Row className="muted xs tabular">
-          <span>
-            {h}:{pad(m)}:{pad(s)}
-          </span>
-          <span>
-            {dev
-              ? `${Math.round((dev.state.free_sd_bytes / 32e9) * 100)}% card free`
-              : '78% battery'}
-          </span>
-        </Row>
       </Card>
     </Cell>
   );
@@ -391,14 +330,24 @@ export function PeopleCard({
 export function MemoryLogCard({
   records,
   zone,
+  now,
   index,
 }: {
   records: Recording[];
   zone?: string;
+  now: number;
   index: number;
 }) {
   const [q, setQ] = useState('');
-  const items = records.filter((r) => r.summary || r.transcript).slice(0, 5);
+  const localDay = (time: number) =>
+    new Date(time * 1000).toLocaleDateString('en-CA', { timeZone: zone });
+  const today = localDay(now);
+  const todaysRecords = records.filter(
+    (r) => localDay(r.captured_at) === today,
+  );
+  const items = todaysRecords
+    .filter((r) => r.summary || r.transcript)
+    .slice(0, 5);
   const shown = items.filter(
     (r) =>
       !q ||
@@ -418,7 +367,7 @@ export function MemoryLogCard({
       <Card>
         <Row>
           <span className="card-title">
-            Today <span className="cnt">{records.length} moments</span>
+            Today <span className="cnt">{todaysRecords.length} moments</span>
           </span>
           <label className={`search ${q ? 'open' : ''}`}>
             <Search />
@@ -440,7 +389,7 @@ export function MemoryLogCard({
               <p>{r.summary || r.transcript}</p>
               {r.kind === 'frame' && r.media_url && i === 1 && (
                 <div className="stack">
-                  {records
+                  {todaysRecords
                     .filter((x) => x.kind === 'frame' && x.media_url)
                     .slice(0, 3)
                     .map((x) => (
@@ -452,7 +401,9 @@ export function MemoryLogCard({
           ))}
         </ul>
         {!shown.length && (
-          <p className="muted xs empty">Nothing matches yet.</p>
+          <p className="muted xs empty">
+            {q ? 'No matching moments.' : 'No moments saved today.'}
+          </p>
         )}
       </Card>
     </Cell>
@@ -525,7 +476,7 @@ export function MomentsCard({
         <Row>
           <span>
             <div className="card-title">Moments</div>
-            <div className="muted">Captured by your clip</div>
+            <div className="muted">Captured by your iPhone</div>
           </span>
           <span className="muted xs">
             {frames.length} {frames.length === 1 ? 'frame' : 'frames'}

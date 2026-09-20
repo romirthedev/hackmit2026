@@ -176,7 +176,7 @@ try {
       const ticket = await pair(page, route, true);
       await page.getByRole("heading").first().waitFor();
       if (route === "/") {
-        await page.getByText("Rewind clip", { exact: true }).waitFor();
+        await page.getByText("iPhone", { exact: true }).waitFor();
         await page.getByText("On the way", { exact: true }).waitFor();
       }
       await noInventedData(page); await noOverflow(page);

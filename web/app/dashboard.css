@@ -121,6 +121,16 @@ html.rw-light body { background: #fbfbfb; }
 .rw .device-led.amber { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: none; }
 .rw .device-led.off { background: #c7c7cc; box-shadow: none; animation: none; }
 .rw .media-meta { flex: 1; min-width: 0; padding-top: 2px; }
+.rw .phone-device-card .media-row { align-items: center; gap: 16px; }
+.rw .iphone-art { width: 76px; height: 106px; display: grid; place-items: center; flex: none; }
+.rw .iphone-body { position: relative; width: 53px; height: 101px; border: 3px solid #343840; border-radius: 14px; overflow: hidden; background: linear-gradient(155deg, #bbcbd8, #dfebf0 47%, #637f99); box-shadow: 0 0 0 1px #9a9da2, 0 9px 16px -8px #667582; }
+.rw .iphone-island { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); width: 18px; height: 5px; border-radius: 6px; background: #20252d; z-index: 2; }
+.rw .iphone-battery { position: absolute; right: 4px; top: 6px; width: 6px; height: 3px; padding: .5px; border: .5px solid #475363; border-radius: 1px; z-index: 2; }
+.rw .iphone-battery i { display: block; width: 75%; height: 100%; border-radius: .5px; background: #475363; }
+.rw .iphone-wallpaper { position: absolute; width: 96px; height: 96px; left: -48px; top: 28px; border-radius: 50%; background: linear-gradient(130deg, #eff8f6, #a6c6d9 58%, #5e7799); box-shadow: 28px 28px 0 7px rgba(223,236,240,.75); }
+.rw .iphone-home { position: absolute; width: 18px; height: 2px; bottom: 4px; left: 50%; transform: translateX(-50%); border-radius: 4px; background: rgba(255,255,255,.85); }
+.rw .phone-open { display: inline-flex; margin-top: 13px; white-space: nowrap; text-decoration: none; }
+.rw .phone-device-footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); line-height: 1.5; }
 .rw .transport { display: flex; gap: 6px; margin-top: 12px; margin-left: -8px; }
 .rw .track { height: 3px; border-radius: 2px; background: #ececef; margin-top: 22px; overflow: hidden; }
 .rw .track-fill { display: block; height: 100%; border-radius: 2px; background: #6b6b70; transition: width 1s linear; }

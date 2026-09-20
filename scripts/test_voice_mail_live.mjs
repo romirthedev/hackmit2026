@@ -48,7 +48,7 @@ try{
  const phoneLink=await api('/pairing',{method:'POST'});assert.equal(phoneLink.direct,true);assert.equal(phoneLink.expires_at,null);assert.equal(phoneLink.ticket,undefined);
  dashboard=await context.newPage();dashboard.on('pageerror',e=>report.errors.push(e.message));
  await dashboard.goto(origin+'/');
- await dashboard.getByText('Rewind clip',{exact:true}).waitFor();
+ await dashboard.getByText('iPhone',{exact:true}).waitFor();
  await dashboard.getByText('On the way',{exact:true}).waitFor();
  await dashboard.getByRole('heading',{name:'Ask',exact:true}).waitFor();
  assert.equal(await dashboard.locator('.grid .cell').count(),13);

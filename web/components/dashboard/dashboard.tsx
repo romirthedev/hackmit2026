@@ -26,7 +26,7 @@ import { Arrivals } from './arrivals';
 import { hm } from './primitives';
 import {
   ActivityCard,
-  ClipCard,
+  PhoneCard,
   HelpCard,
   MedsCard,
   MemoryLogCard,
@@ -164,9 +164,6 @@ export function Dashboard() {
   const greet =
     hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const zone = rw.status.timezone;
-  const since = rw.records.length
-    ? hm(rw.records[rw.records.length - 1].captured_at, zone)
-    : null;
 
   // Which caretaker cards belong to which filter. Cards can live in several.
   const care: [Filter[], ReactNode][] = [
@@ -247,7 +244,13 @@ export function Dashboard() {
     [['all', 'health'], <NotesCard key="notes" index={8} />],
     [
       ['memory'],
-      <MemoryLogCard key="log" index={9} records={rw.records} zone={zone} />,
+      <MemoryLogCard
+        key="log"
+        index={9}
+        records={rw.records}
+        zone={zone}
+        now={rw.now}
+      />,
     ],
     [['memory'], <WhereCard key="where" index={10} />],
     [
@@ -344,11 +347,7 @@ export function Dashboard() {
         {!mounted ? null : mode === 'rose' ? (
           <div className="greeting">
             <h1>{greet}, Rose</h1>
-            <p>
-              {rw.online && !rw.status.paused
-                ? `Your clip has been listening${since ? ` since ${since}` : ''}.`
-                : 'Your clip is resting. Everything you saved is still here.'}
-            </p>
+            <p>Your day, remembered. Record a moment from your iPhone.</p>
           </div>
         ) : (
           <div className="greeting care">
@@ -379,12 +378,7 @@ export function Dashboard() {
 
         {!mounted ? null : mode === 'rose' ? (
           <div className="grid" key={gridKey}>
-            <ClipCard
-              index={0}
-              status={rw.status}
-              online={rw.online}
-              onPause={rw.setPaused}
-            />
+            <PhoneCard index={0} />
             <AskCard
               index={1}
               ask={rw.ask}
@@ -396,7 +390,12 @@ export function Dashboard() {
             <WhereCard index={3} />
             <TodayCard index={4} />
             <PeopleCard index={5} />
-            <MemoryLogCard index={6} records={rw.records} zone={zone} />
+            <MemoryLogCard
+              index={6}
+              records={rw.records}
+              zone={zone}
+              now={rw.now}
+            />
             <NoteCard index={7} />
             <MomentsCard
               index={8}
