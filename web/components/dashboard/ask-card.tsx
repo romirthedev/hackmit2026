@@ -1,10 +1,11 @@
 'use client';
 /* oxlint-disable next/no-html-link-for-pages -- open the recording page with a full navigation */
-import { useRef, useState } from 'react';
-import { ArrowUp, Mic, CornerDownRight } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUp, Mic, CornerDownRight, Volume2, VolumeX } from 'lucide-react';
 import { Card, Cell } from './primitives';
-import { AnswerDetail } from './answer-detail';
+import { AnswerDetail, isReviewedAnswer } from './answer-detail';
 import type { Answer, Recording } from '@/lib/api';
+import { useSpeechPlayback } from '@/lib/use-speech-playback';
 
 export function AskCard({
   ask,
@@ -29,10 +30,36 @@ export function AskCard({
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [sound, setSound] = useState(true);
+  const [visibilityEpoch, setVisibilityEpoch] = useState(0);
+  const voice = useSpeechPlayback();
+  const { speak, cancel } = voice;
+  const attempted = useRef(new Set<string>());
   const pending = useRef(false);
   const answer = submitted
-    ? (answers.find((item) => item.id === submitted.id) ?? null)
+    ? (answers.find((item) => item.id === submitted.id) ?? submitted)
     : null;
+  useEffect(() => {
+    const changed = () => setVisibilityEpoch((epoch) => epoch + 1);
+    document.addEventListener('visibilitychange', changed);
+    return () => document.removeEventListener('visibilitychange', changed);
+  }, []);
+  useEffect(() => {
+    if (
+      !answer ||
+      !isReviewedAnswer(answer) ||
+      attempted.current.has(answer.id) ||
+      document.hidden
+    )
+      return;
+    // A rejected playback stays available for an explicit retry, rather than
+    // being attempted again on every answer poll.
+    attempted.current.add(answer.id);
+    if (sound && !disabled) void speak(answer.answer);
+  }, [answer, sound, disabled, speak, visibilityEpoch]);
+  useEffect(() => {
+    if (disabled) cancel();
+  }, [disabled, cancel]);
   const state =
     busy || answer?.mode === 'checking'
       ? 'thinking'
@@ -45,6 +72,7 @@ export function AskCard({
     pending.current = true;
     setBusy(true);
     setError('');
+    if (sound) void speak("I'll check that.");
     try {
       setSubmitted(await ask(question));
       setText('');
@@ -95,6 +123,48 @@ export function AskCard({
             </button>
           </div>
         </form>
+        <div className="recall-voice-controls">
+          <button
+            type="button"
+            className="voice-action"
+            aria-label="Spoken answers"
+            aria-pressed={sound}
+            disabled={disabled}
+            onClick={() => {
+              setSound(!sound);
+              if (sound) voice.cancel();
+              else void voice.speak('Voice is on.');
+            }}
+          >
+            {sound ? <Volume2 /> : <VolumeX />}
+            Voice {sound ? 'on' : 'off'}
+          </button>
+          <button
+            type="button"
+            className="voice-action"
+            disabled={disabled}
+            onClick={() => {
+              setSound(true);
+              void voice.speak('Voice is on.');
+            }}
+          >
+            Test voice
+          </button>
+          {voice.speaking && <output>Speaking</output>}
+        </div>
+        {voice.speechError && (
+          <div className="voice-error" role="alert">
+            <p>{voice.speechError}</p>
+            <button
+              className="voice-action"
+              type="button"
+              disabled={disabled}
+              onClick={() => void voice.retry()}
+            >
+              Retry voice
+            </button>
+          </div>
+        )}
         {!submitted && !text && (
           <div className="recall-prompts" aria-label="Question suggestions">
             {['Where did I leave my keys?', 'What did we talk about?'].map(
@@ -126,7 +196,9 @@ export function AskCard({
         </div>
         {(answer || error) && (
           <div className="ask-body">
-            {answer && <AnswerDetail answer={answer} onOpen={onOpen} />}
+            {answer && (
+              <AnswerDetail answer={answer} onOpen={onOpen} playback={voice} />
+            )}
             {error && (
               <p role="alert" className="ask-error">
                 {error}

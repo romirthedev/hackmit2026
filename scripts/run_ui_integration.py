@@ -26,6 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--client-dir", type=Path, default=root / "web/dist/client")
     parser.add_argument("--node", default=shutil.which("node"))
+    parser.add_argument("--script", type=Path, default=root / "scripts/test_ui_integration.mjs")
     args = parser.parse_args()
     client = args.client_dir.resolve()
     for page in ("index.html", "phone.html", "workspace.html"):
@@ -110,7 +111,7 @@ def main():
                     env["REWIND_TEST_CHROME"] = os.environ["REWIND_TEST_CHROME"]
                 print(f"Testing built UI against isolated API at {url}", flush=True)
                 result = subprocess.run(
-                    [args.node, str(root / "scripts/test_ui_integration.mjs")], cwd=root, env=env
+                    [args.node, str(args.script.resolve())], cwd=root, env=env
                 )
                 return result.returncode
             finally:

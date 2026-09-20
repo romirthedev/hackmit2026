@@ -94,3 +94,39 @@ passed against the rebuilt app, with only empty-state and offline-message
 selectors adapted to the new presentation. TypeScript, frontend lint, and the
 phone auth/capture regression also passed. Nine phone states were inspected at
 320 and 390 pixels, with no overflow or JavaScript errors.
+
+## Voice playback repair
+
+The dashboard now has a voice toggle, Test voice, reviewed-answer autoplay for
+newly submitted questions, and manual Read aloud controls. Recording or enabling
+voice on the phone starts a short utterance directly inside the user gesture,
+before camera permission or network work. Native speech failures and a five-second
+start timeout produce a visible error and an explicit retry.
+
+Both clients retain the active utterance and distinguish actual start/end events
+from merely queuing speech. Phone conversation and reminder delivery is recorded
+only after playback completes. Pending requests prevent overlapping polls from
+repeating speech; manual and automatic readings share the same checked answer.
+Failed requests use exact attempt identity, including when two queued messages
+have identical text. Drafts and pre-existing answer history remain silent.
+Dashboard answers arriving in a hidden tab wait until it becomes visible;
+interrupted playback can be retried. Authentication expiry cancels speech.
+
+All nine existing integration scenarios and eight new voice scenarios passed
+with no JavaScript or unexpected console errors. The isolated API harness supports
+`--script scripts/test_voice_playback.mjs`. Controlled browser speech events
+exercise review gating, blocked audio, a real five-second no-start timeout,
+explicit retry, duplicate prevention, hidden-tab arrival, and expired sessions.
+The manual/automatic duplicate and hidden-tab loss regressions were reproduced
+against the previous build before checking the fixes. Direct PhoneCapture checks
+also cover disposal, stale callbacks, native exceptions, and identical queued
+text. No live model or personal recording is used by these fixtures.
+
+A separate check used unmodified native Chrome synthesis on this Mac through the
+actual built dashboard and phone Test voice controls. Both emitted start and end
+events; the browser exposed 180 installed voices. This confirms local engine
+playback events, not acoustic output on the user's phone. The resulting desktop
+and narrow phone layouts were inspected without horizontal overflow. Build,
+TypeScript, and scoped frontend lint passed. The backend was not changed or
+restarted. The live API still reported analysis unavailable, independently of
+voice playback; new model answers require the ASUS connection to recover.

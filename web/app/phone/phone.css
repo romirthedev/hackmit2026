@@ -395,6 +395,27 @@
 .rw.ph .ask-bar {
   margin-top: 13px;
 }
+.rw.ph .ph-voice-controls {
+  display: flex;
+  gap: 14px;
+  margin-top: 3px;
+}
+.rw.ph .ph-voice-controls button {
+  min-height: 44px;
+  color: var(--blue);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.rw.ph .ph-speech-error {
+  padding: 10px;
+  border: 1px solid #dec8bd;
+  border-radius: 8px;
+  color: #7a3b33;
+  background: #f5e9e2;
+  font-size: 12px;
+  line-height: 1.6;
+}
 .rw.ph .ask-input,
 .rw.ph .ask-input:focus-within {
   height: 50px;

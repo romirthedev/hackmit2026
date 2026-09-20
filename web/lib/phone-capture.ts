@@ -15,7 +15,14 @@ export type CaptureState = {
   originalBytes: number;
   voice: VoiceActivity;
   speaking: boolean;
+  speechError: string;
+  speechRetryAvailable: boolean;
   previewing: boolean;
+};
+type SpeechRequest = {
+  text: string;
+  resolve: (played: boolean) => void;
+  result?: Promise<boolean>;
 };
 export type Snapshot = { url: string; width: number; height: number };
 type Chunk = {
@@ -150,6 +157,8 @@ export class PhoneCapture {
     originalBytes: 0,
     voice: 'off',
     speaking: false,
+    speechError: '',
+    speechRetryAvailable: false,
     previewing: false,
   };
   private stream: MediaStream | null = null;
@@ -172,7 +181,12 @@ export class PhoneCapture {
   private pumping = false;
   private disposed = false;
   private speaking = false;
-  private speechQueue: string[] = [];
+  private speechQueue: SpeechRequest[] = [];
+  private activeSpeech: SpeechRequest | null = null;
+  // Safari may release an utterance that has no JavaScript owner before it ends.
+  private activeUtterance: SpeechSynthesisUtterance | null = null;
+  private lastFailedSpeech: string | null = null;
+  private lastFailedRequest: SpeechRequest | null = null;
   private speechGeneration = 0;
   private speechTimer: ReturnType<typeof setTimeout> | null = null;
   private uploadError = '';
@@ -678,12 +692,7 @@ export class PhoneCapture {
   }
   toggleQuestion() {
     if (!this.state.recording) return;
-    if (this.speaking) {
-      this.speechGeneration++;
-      this.speechQueue = [];
-      this.speaking = false;
-      window.speechSynthesis.cancel();
-    }
+    if (this.speaking) this.silenceSpeech();
     this.update({ question: !this.state.question, error: '' });
     if (this.audioTimer) clearTimeout(this.audioTimer);
     if (this.audio?.state === 'recording') this.audio.stop();
@@ -909,70 +918,187 @@ export class PhoneCapture {
       this.pumping = false;
     }
   }
-  speak(text: string) {
-    if (!('speechSynthesis' in window) || this.disposed) return;
-    this.speechQueue.push(text);
-    if (!this.speaking && this.state.voice !== 'hearing') this.playSpeech();
+  get failedSpeechText() {
+    return this.lastFailedSpeech;
+  }
+  isFailedSpeech(result: Promise<boolean>) {
+    return this.lastFailedRequest?.result === result;
+  }
+  speak(text: string): Promise<boolean> {
+    return this.enqueueSpeech(text);
+  }
+  // Call directly inside a click handler, before any await or camera prompt.
+  testVoice(): Promise<boolean> {
+    return this.speakFromGesture('Voice is on.');
+  }
+  retrySpeech(): Promise<boolean> {
+    return this.speakFromGesture(this.lastFailedSpeech || 'Voice is on.');
+  }
+  speakFromGesture(text: string): Promise<boolean> {
+    this.silenceSpeech();
+    return this.enqueueSpeech(text, true);
+  }
+  private enqueueSpeech(text: string, fromGesture = false): Promise<boolean> {
+    if (this.disposed || !text.trim()) return Promise.resolve(false);
+    if (
+      !('speechSynthesis' in window) ||
+      typeof SpeechSynthesisUtterance === 'undefined'
+    ) {
+      const result = Promise.resolve(false);
+      this.lastFailedRequest = { text, resolve: () => {}, result };
+      this.lastFailedSpeech = text;
+      this.update({
+        speechError:
+          'This browser cannot play spoken answers. You can still read answers below.',
+        speechRetryAvailable: true,
+      });
+      return result;
+    }
+    let request!: SpeechRequest;
+    const result = new Promise<boolean>((resolve) => {
+      request = { text, resolve };
+      this.speechQueue.push(request);
+      if (!this.speaking && (fromGesture || this.state.voice !== 'hearing'))
+        this.playSpeech(fromGesture);
+    });
+    request.result = result;
+    return result;
   }
   silenceSpeech() {
     this.speechGeneration++;
-    this.speechQueue = [];
     if (this.speechTimer) clearTimeout(this.speechTimer);
     this.speechTimer = null;
-    window.speechSynthesis?.cancel();
+    const active = this.activeSpeech;
+    this.activeSpeech = null;
+    this.activeUtterance = null;
+    active?.resolve(false);
+    this.speechQueue.splice(0).forEach((request) => request.resolve(false));
+    try {
+      window.speechSynthesis?.cancel();
+    } catch {
+      // Cancellation must still release listening and settle every request.
+    }
     this.speaking = false;
     this.update({ speaking: false });
     this.voice?.suppress(false);
     this.beginAudio();
   }
-  private playSpeech() {
-    if (this.state.voice === 'hearing') return;
-    const text = this.speechQueue.shift();
-    if (!text || this.disposed) {
+  private playSpeech(fromGesture = false) {
+    if (!fromGesture && this.state.voice === 'hearing') return;
+    const request = this.speechQueue.shift();
+    if (!request || this.disposed) {
+      request?.resolve(false);
       this.speaking = false;
       this.update({ speaking: false });
       this.voice?.suppress(false);
       this.beginAudio();
       return;
     }
+    this.activeSpeech = request;
+    // Suppress the analyzer before asking the browser to play, including while
+    // it is starting. The full original recorder keeps the microphone audio.
     this.speaking = true;
-    this.update({ speaking: true });
     this.voice?.suppress(true);
     const generation = this.speechGeneration;
     if (this.audioTimer) clearTimeout(this.audioTimer);
     if (this.audio?.state === 'recording') this.audio.stop();
-    const utterance = new SpeechSynthesisUtterance(
-      text.replace(/\[[0-9a-f-]{36}\]/g, ''),
-    );
+    let started = false;
     let finished = false;
-    const resume = () => {
-      if (finished) return;
+    const finish = (played: boolean, message = '') => {
+      if (finished || generation !== this.speechGeneration) return;
       finished = true;
       if (this.speechTimer) clearTimeout(this.speechTimer);
       this.speechTimer = null;
-      if (generation === this.speechGeneration) this.playSpeech();
+      this.activeSpeech = null;
+      this.activeUtterance = null;
+      if (!played) {
+        this.lastFailedSpeech = request.text;
+        this.lastFailedRequest = request;
+        this.speechGeneration++;
+        this.speechQueue.splice(0).forEach((queued) => queued.resolve(false));
+        try {
+          window.speechSynthesis.cancel();
+        } catch {
+          // The error below remains actionable even when native cancel fails.
+        }
+        this.speaking = false;
+        this.update({
+          speaking: false,
+          speechError: message,
+          speechRetryAvailable: true,
+        });
+        this.voice?.suppress(false);
+        this.beginAudio();
+      } else {
+        if (this.lastFailedSpeech === request.text) {
+          this.lastFailedSpeech = null;
+          this.lastFailedRequest = null;
+        }
+        this.update({
+          speaking: false,
+          speechError: '',
+          speechRetryAvailable: !!this.lastFailedSpeech,
+        });
+      }
+      request.resolve(played);
+      if (played) this.playSpeech();
     };
-    utterance.onend = resume;
-    utterance.onerror = resume;
-    this.speechTimer = setTimeout(
-      () => {
-        window.speechSynthesis.cancel();
-        resume();
-      },
-      Math.min(90000, Math.max(15000, text.length * 100)),
-    );
-    window.speechSynthesis.speak(utterance);
+    try {
+      const utterance = new SpeechSynthesisUtterance(
+        request.text.replace(/\[[0-9a-f-]{36}\]/g, ''),
+      );
+      this.activeUtterance = utterance;
+      utterance.lang = navigator.language || 'en-US';
+      utterance.rate = 1;
+      utterance.volume = 1;
+      utterance.onstart = () => {
+        if (finished || generation !== this.speechGeneration) return;
+        started = true;
+        if (this.speechTimer) clearTimeout(this.speechTimer);
+        this.update({ speaking: true, speechError: '' });
+        this.speechTimer = setTimeout(
+          () =>
+            finish(
+              false,
+              'Voice playback stopped before finishing. Tap Retry voice to try again.',
+            ),
+          Math.min(90000, Math.max(15000, request.text.length * 100)),
+        );
+      };
+      utterance.onend = () =>
+        finish(
+          started,
+          'Voice playback did not start. Tap Retry voice and check your phone’s media volume.',
+        );
+      utterance.onerror = (event) =>
+        finish(
+          false,
+          event.error === 'not-allowed'
+            ? 'Your browser blocked voice. Tap Retry voice and check your phone’s media volume.'
+            : `Voice could not play (${event.error || 'playback error'}). Tap Retry voice to try again.`,
+        );
+      this.speechTimer = setTimeout(
+        () =>
+          finish(
+            false,
+            'Voice did not start within 5 seconds. Tap Retry voice and check your phone’s media volume.',
+          ),
+        5000,
+      );
+      window.speechSynthesis.resume();
+      // This stays synchronous for testVoice/retrySpeech/speakFromGesture.
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      finish(false, 'Voice could not start. Tap Retry voice to try again.');
+    }
   }
   dispose() {
     this.disposed = true;
-    this.speechGeneration++;
-    this.speechQueue = [];
-    if (this.speechTimer) clearTimeout(this.speechTimer);
+    this.silenceSpeech();
     this.stop('page_closed');
     clearInterval(this.uploadTimer);
     document.removeEventListener('visibilitychange', this.visibility);
     window.removeEventListener('pagehide', this.pagehide);
     window.removeEventListener('beforeunload', this.beforeunload);
-    window.speechSynthesis?.cancel();
   }
 }

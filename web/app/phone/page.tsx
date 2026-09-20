@@ -46,6 +46,12 @@ type OriginalRecording = {
   original_url: string | null;
   bytes: number;
 };
+type VoicePlayback = {
+  key: string;
+  text: string;
+  onPlayed: () => void;
+  answer?: { id: string; text: string };
+};
 const INITIAL: CaptureState = {
   recording: false,
   requesting: false,
@@ -59,6 +65,8 @@ const INITIAL: CaptureState = {
   originalBytes: 0,
   voice: 'off',
   speaking: false,
+  speechError: '',
+  speechRetryAvailable: false,
   previewing: false,
 };
 export default function Phone() {
@@ -86,6 +94,14 @@ export default function Phone() {
   });
   const [conversationError, setConversationError] = useState('');
   const spokenTurns = useRef(new Set<string>());
+  const ignoredTurns = useRef(new Set<string>());
+  const pendingSpeech = useRef(new Set<string>());
+  const pendingAnswerSpeech = useRef(new Set<string>());
+  const deliveredAnswerText = useRef(new Map<string, string>());
+  const failedSpeech = useRef(new Set<string>());
+  const lastFailedPlayback = useRef<
+    (VoicePlayback & { attempt: Promise<boolean> }) | null
+  >(null);
   const answerFetchVersion = useRef(0);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
@@ -94,6 +110,58 @@ export default function Phone() {
   const [sound, setSound] = useState(false);
   const soundRef = useRef(false);
   const authExpired = useRef(false);
+  const trackPlayback = useCallback(
+    (
+      entry: VoicePlayback,
+      controller: PhoneCapture,
+      result: Promise<boolean>,
+    ) => {
+      pendingSpeech.current.add(entry.key);
+      if (entry.answer) pendingAnswerSpeech.current.add(entry.answer.id);
+      void result.then((played) => {
+        pendingSpeech.current.delete(entry.key);
+        if (entry.answer) pendingAnswerSpeech.current.delete(entry.answer.id);
+        if (authExpired.current || capture.current !== controller) return;
+        if (played) {
+          failedSpeech.current.delete(entry.key);
+          if (entry.answer)
+            deliveredAnswerText.current.set(entry.answer.id, entry.answer.text);
+          entry.onPlayed();
+          if (lastFailedPlayback.current?.key === entry.key)
+            lastFailedPlayback.current = null;
+        } else if (controller.isFailedSpeech(result)) {
+          failedSpeech.current.add(entry.key);
+          lastFailedPlayback.current = { ...entry, attempt: result };
+        }
+      });
+    },
+    [],
+  );
+  const queueSpeech = useCallback(
+    (entry: VoicePlayback, fromGesture = false) => {
+      const controller = capture.current;
+      if (
+        !controller ||
+        authExpired.current ||
+        pendingSpeech.current.has(entry.key) ||
+        (entry.answer && pendingAnswerSpeech.current.has(entry.answer.id))
+      )
+        return;
+      if (
+        !fromGesture &&
+        (failedSpeech.current.has(entry.key) || controller.state.speechError)
+      )
+        return;
+      trackPlayback(
+        entry,
+        controller,
+        fromGesture
+          ? controller.speakFromGesture(entry.text)
+          : controller.speak(entry.text),
+      );
+    },
+    [trackPlayback],
+  );
   const cancelScanner = useCallback(() => {
     ++scanGeneration.current;
     if (sendRef.current) URL.revokeObjectURL(sendRef.current.photo);
@@ -166,8 +234,11 @@ export default function Phone() {
         for (const reminder of due)
           if (!reminder.seen && !announced.current.has(reminder.id)) {
             if (soundRef.current && !capture.current?.state.question) {
-              capture.current?.speak(reminder.message);
-              announced.current.add(reminder.id);
+              queueSpeech({
+                key: `reminder:${reminder.id}`,
+                text: reminder.message,
+                onPlayed: () => announced.current.add(reminder.id),
+              });
             }
           }
       } catch (problem) {
@@ -187,7 +258,7 @@ export default function Phone() {
       clearInterval(timer);
       requests.abort();
     };
-  }, [auth]);
+  }, [auth, queueSpeech]);
   useEffect(() => {
     if (auth !== true || !video.current) return;
     const controller = new PhoneCapture(video.current, setState);
@@ -220,7 +291,17 @@ export default function Phone() {
             (turn) =>
               turn.status === 'completed' &&
               turn.answer_id &&
-              !spokenTurns.current.has(`${turn.id}:${turn.response_revision}`),
+              !pendingAnswerSpeech.current.has(turn.answer_id) &&
+              !spokenTurns.current.has(
+                `${turn.id}:${turn.response_revision}`,
+              ) &&
+              !ignoredTurns.current.has(
+                `${turn.id}:${turn.response_revision}`,
+              ) &&
+              !pendingSpeech.current.has(
+                `${turn.id}:${turn.response_revision}`,
+              ) &&
+              !failedSpeech.current.has(`${turn.id}:${turn.response_revision}`),
           );
         let refreshedAnswers: Answer[] = [];
         if (newCompletedRecall) {
@@ -243,13 +324,17 @@ export default function Phone() {
             ['thinking', 'checking'].includes(turn.status)
           ) {
             const acknowledgement = `${turn.id}:ack`;
-            if (
-              !first &&
+            if (first || !soundRef.current)
+              ignoredTurns.current.add(acknowledgement);
+            else if (
               !spokenTurns.current.has(acknowledgement) &&
-              soundRef.current
+              !ignoredTurns.current.has(acknowledgement)
             )
-              capture.current?.speak('Let me check that.');
-            spokenTurns.current.add(acknowledgement);
+              queueSpeech({
+                key: acknowledgement,
+                text: 'Let me check that.',
+                onPlayed: () => spokenTurns.current.add(acknowledgement),
+              });
           }
           if (
             !turn.response ||
@@ -262,24 +347,52 @@ export default function Phone() {
           )
             continue;
           const key = `${turn.id}:${turn.response_revision}`;
+          if (first || !soundRef.current) {
+            ignoredTurns.current.add(key);
+            continue;
+          }
+          if (
+            spokenTurns.current.has(key) ||
+            ignoredTurns.current.has(key) ||
+            pendingSpeech.current.has(key) ||
+            failedSpeech.current.has(key)
+          )
+            continue;
+          if (turn.answer_id && pendingAnswerSpeech.current.has(turn.answer_id))
+            continue;
+          let checkedAnswer: Answer | undefined;
           if (
             !first &&
             turn.status === 'completed' &&
             turn.answer_id &&
             !spokenTurns.current.has(key)
           ) {
-            const checked = refreshedAnswers.find(
+            checkedAnswer = refreshedAnswers.find(
               (answer) => answer.id === turn.answer_id,
             );
             if (
-              !checked?.verification?.receipt.claims_reviewed ||
-              !['verified', 'insufficient'].includes(checked.mode)
+              !checkedAnswer?.verification?.receipt.claims_reviewed ||
+              !['verified', 'insufficient'].includes(checkedAnswer.mode)
             )
               continue;
+            // A manual read and this conversation response share one checked
+            // answer. Count a completed manual playback, never replay it on poll.
+            if (
+              deliveredAnswerText.current.get(checkedAnswer.id) ===
+              checkedAnswer.answer
+            ) {
+              spokenTurns.current.add(key);
+              continue;
+            }
           }
-          if (!first && !spokenTurns.current.has(key) && soundRef.current)
-            capture.current?.speak(turn.response);
-          spokenTurns.current.add(key);
+          queueSpeech({
+            key,
+            text: turn.response,
+            answer: checkedAnswer
+              ? { id: checkedAnswer.id, text: checkedAnswer.answer }
+              : undefined,
+            onPlayed: () => spokenTurns.current.add(key),
+          });
         }
         first = false;
       } catch (problem) {
@@ -301,7 +414,22 @@ export default function Phone() {
       clearInterval(timer);
       requests.abort();
     };
-  }, [auth]);
+  }, [auth, queueSpeech]);
+  function testVoice() {
+    soundRef.current = true;
+    setSound(true);
+    void capture.current?.testVoice();
+  }
+  function retryVoice() {
+    const controller = capture.current;
+    if (!controller || authExpired.current) return;
+    soundRef.current = true;
+    setSound(true);
+    const entry = lastFailedPlayback.current;
+    const retryMatches = entry && controller.isFailedSpeech(entry.attempt);
+    const result = controller.retrySpeech();
+    if (entry && retryMatches) trackPlayback(entry, controller, result);
+  }
   async function ask(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!question.trim() || asking) return;
@@ -326,6 +454,7 @@ export default function Phone() {
     } else {
       soundRef.current = true;
       setSound(true);
+      void capture.current?.testVoice();
       void capture.current?.start();
     }
   }
@@ -697,9 +826,11 @@ export default function Phone() {
                     aria-pressed={sound}
                     aria-label="Spoken answers and reminders"
                     onClick={() => {
-                      if (sound) capture.current?.silenceSpeech();
-                      soundRef.current = !sound;
-                      setSound(!sound);
+                      if (sound) {
+                        capture.current?.silenceSpeech();
+                        soundRef.current = false;
+                        setSound(false);
+                      } else testVoice();
                     }}
                   >
                     {sound ? <Volume2 /> : <VolumeX />}
@@ -710,6 +841,21 @@ export default function Phone() {
                     Ask about a recording or request an action on your Mac.
                   </p>
                 </div>
+                <div className="ph-voice-controls">
+                  <button type="button" onClick={testVoice}>
+                    Test voice
+                  </button>
+                  {state.speechRetryAvailable && (
+                    <button type="button" onClick={retryVoice}>
+                      Retry voice
+                    </button>
+                  )}
+                </div>
+                {state.speechError && (
+                  <p className="ph-speech-error" role="alert">
+                    {state.speechError}
+                  </p>
+                )}
                 <form className="ask-bar" autoComplete="off" onSubmit={ask}>
                   <label className={`ask-input ${question ? 'has-text' : ''}`}>
                     <input
@@ -785,7 +931,17 @@ export default function Phone() {
                           answer.verification?.receipt.claims_reviewed
                         )
                       }
-                      onClick={() => capture.current?.speak(answer.answer)}
+                      onClick={() =>
+                        queueSpeech(
+                          {
+                            key: `answer:${answer.id}`,
+                            text: answer.answer,
+                            answer: { id: answer.id, text: answer.answer },
+                            onPlayed: () => {},
+                          },
+                          true,
+                        )
+                      }
                     >
                       <Volume2 size={18} />
                     </button>

@@ -1,5 +1,17 @@
 'use client';
 import type { Answer, Recording } from '@/lib/api';
+import { Volume2, Square } from 'lucide-react';
+import {
+  useSpeechPlayback,
+  type SpeechPlayback,
+} from '@/lib/use-speech-playback';
+
+export function isReviewedAnswer(answer: Answer) {
+  return (
+    answer.verification?.receipt?.claims_reviewed === true &&
+    (answer.mode === 'verified' || answer.mode === 'insufficient')
+  );
+}
 
 export function answerState(answer: Answer) {
   const reviewed = answer.verification?.receipt?.claims_reviewed === true;
@@ -15,10 +27,14 @@ export function answerState(answer: Answer) {
 export function AnswerDetail({
   answer,
   onOpen,
+  playback,
 }: {
   answer: Answer;
   onOpen: (record: Recording) => void;
+  playback?: SpeechPlayback;
 }) {
+  const localPlayback = useSpeechPlayback();
+  const voice = playback ?? localPlayback;
   const evidence = answer.evidence || [];
   const text = answer.answer.replace(
     /\[([0-9a-f-]{36})\]/g,
@@ -35,6 +51,37 @@ export function AnswerDetail({
         {answerState(answer)}
       </span>
       <p className="answer-copy">{text || 'Waiting for an answer.'}</p>
+      <div className="answer-voice">
+        <button
+          type="button"
+          className="voice-action"
+          disabled={!isReviewedAnswer(answer) || !answer.answer}
+          aria-label={
+            voice.speaking ? 'Stop reading answer' : 'Read answer aloud'
+          }
+          onClick={() =>
+            voice.speaking ? voice.cancel() : void voice.speak(answer.answer)
+          }
+        >
+          {voice.speaking ? <Square /> : <Volume2 />}
+          {voice.speaking ? 'Stop reading' : 'Read aloud'}
+        </button>
+        {!isReviewedAnswer(answer) && (
+          <small>Voice available after review</small>
+        )}
+      </div>
+      {!playback && voice.speechError && (
+        <div className="voice-error" role="alert">
+          <p>{voice.speechError}</p>
+          <button
+            className="voice-action"
+            type="button"
+            onClick={() => void voice.retry()}
+          >
+            Retry voice
+          </button>
+        </div>
+      )}
       {evidence.length > 0 && (
         <div className="answer-sources" aria-label="Answer sources">
           {evidence.map((record, index) => (
