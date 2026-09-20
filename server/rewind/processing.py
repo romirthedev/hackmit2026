@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import dataclasses
 import hmac
 import tempfile
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from .faces import FaceEncoder
 from .models import (
     CompactObservation,
     ConversationIntent,
+    DenseObservation,
     Observation,
     RecallAnswer,
     RuleDecision,
@@ -26,7 +28,15 @@ from .visual import OpenClipEncoder
 
 SCHEMAS = {
     c.__name__: c
-    for c in (CompactObservation, ConversationIntent, Observation, RecallAnswer, RuleDecision, SearchPlan)
+    for c in (
+        CompactObservation,
+        ConversationIntent,
+        DenseObservation,
+        Observation,
+        RecallAnswer,
+        RuleDecision,
+        SearchPlan,
+    )
 }
 
 
@@ -38,6 +48,9 @@ class StructuredInput(BaseModel):
     vision: bool = False
     recall: bool = False
     max_tokens: int = Field(default=768, ge=64, le=2048)
+    include_usage: bool = False
+    image_labels: list[str] | None = Field(default=None, max_length=16)
+    cache_prompt: bool | None = None
 
 
 class AudioInput(BaseModel):
@@ -56,6 +69,12 @@ class VisualInput(BaseModel):
 
 class FaceInput(BaseModel):
     image: str = Field(min_length=1, max_length=2_800_000)
+
+
+class CompressionInput(BaseModel):
+    texts: list[str] = Field(max_length=32)
+    rate: float = Field(default=0.8, gt=0, le=1)
+    timeout_s: float = Field(default=10, gt=0, le=120)
 
 
 class PriorityGate:
@@ -171,7 +190,11 @@ def create_processing_app(settings=None, provider=None):
                     vision=body.vision,
                     recall=body.recall,
                     max_tokens=body.max_tokens,
+                    image_labels=body.image_labels,
+                    cache_prompt=body.cache_prompt,
                 )
+            if body.include_usage:
+                return {"result": result.model_dump(), "usage": p.last_usage.get() or {}}
             return result.model_dump()
 
     @app.post("/transcribe")
@@ -184,6 +207,23 @@ def create_processing_app(settings=None, provider=None):
     @app.post("/embed")
     async def embed(body: EmbedInput):
         return {"embedding": await p.embed(body.text)}
+
+    @app.post("/compress_text")
+    async def compress_text(body: CompressionInput):
+        from .compression import TextCompressor
+
+        if sum(len(text) for text in body.texts) > 80000:
+            raise HTTPException(413, "Compression text exceeds the request budget")
+        settings = s.model_copy(
+            update={
+                "compressor": "llmlingua",
+                "processing_url": "",
+                "llmlingua_rate": body.rate,
+                "compressor_timeout_s": body.timeout_s,
+            }
+        )
+        results = await TextCompressor(settings, p).many(body.texts, "remote_text")
+        return {"results": [dataclasses.asdict(result) for result in results]}
 
     @app.post("/visual")
     async def visual_embedding(body: VisualInput):

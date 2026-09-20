@@ -137,6 +137,21 @@ export type Scene = {
     captured_at: number;
   }[];
 };
+export const AUTH_REQUIRED_EVENT = 'rewind:authentication-required';
+
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export function isAuthenticationError(problem: unknown): problem is ApiError {
+  return problem instanceof ApiError && problem.status === 401;
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (!(init.body instanceof Blob) && !headers.has('Content-Type')) {
@@ -149,9 +164,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!r.ok) {
     let message = `Request failed (${r.status})`;
     try {
-      message = ((await r.json()) as { detail?: string }).detail || message;
+      const detail = ((await r.json()) as { detail?: unknown }).detail;
+      if (typeof detail === 'string' && detail) message = detail;
     } catch {}
-    throw new Error(message);
+    if (r.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+    }
+    throw new ApiError(r.status, message);
   }
   return r.json();
 }

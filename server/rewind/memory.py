@@ -13,6 +13,7 @@ import numpy as np
 from .db import event_public
 from .models import RecallAnswer, SearchPlan
 from .object_retrieval import LOCATION_IMAGE_LIMIT, location_terms, object_location_evidence
+from .prompt_packets import format_recall_packet
 from .sampled_evidence import attach_original_recordings, sample_scope_qualification
 from .temporal import (
     coverage_qualification,
@@ -25,7 +26,8 @@ from .verification import EvidenceIntegrityError, verify_source_hashes
 
 log = logging.getLogger(__name__)
 EVIDENCE_SELECT = """SELECT m.id,m.kind,m.captured_at,m.clock_quality,m.device,m.boot,m.seq,
-m.duration,m.provenance,m.status,e.summary,e.transcript,e.objects,e.tags,e.segments,e.confidence
+m.duration,m.provenance,m.status,e.summary,e.transcript,e.objects,e.tags,e.segments,e.confidence,
+e.label_mode,e.inherited_from,e.visual_similarity,e.block_delta
 FROM media m LEFT JOIN events e ON e.id=m.id"""
 
 STOP = set(
@@ -140,7 +142,7 @@ class Memory:
                     if event_id not in result:
                         result[event_id] = self.db.one(EVIDENCE_SELECT + " WHERE m.id=?", (event_id,))
                     if result[event_id]:
-                        result[event_id]["visual_similarity"] = score
+                        result[event_id]["retrieval_visual_similarity"] = score
             except Exception:
                 log.warning("Visual retrieval unavailable; text retrieval remains available", exc_info=True)
         if not query.strip():
@@ -352,6 +354,14 @@ Do not invent dates or anchor actions. Return JSON.""",
                     "clock_quality": row["clock_quality"],
                     "provenance": row.get("provenance", {}),
                 }
+                for field in ("label_mode", "inherited_from", "visual_similarity", "block_delta"):
+                    if row.get(field) is not None:
+                        item[field] = row[field]
+                if row.get("label_mode") == "inherited":
+                    item["caption_warning"] = (
+                        "Caption inherited from an earlier frame after a change gate; "
+                        "not an independent visual observation. Inspect the attached original if available."
+                    )
                 if row["clock_quality"] != "synthetic":
                     item["recorded_at"] = row["captured_at"]
                     item["recorded_at_local"] = datetime.fromtimestamp(
@@ -375,6 +385,23 @@ Do not invent dates or anchor actions. Return JSON.""",
                     item["source"] = "attached original image; inspect pixels directly"
                 context.append(item)
             try:
+                model_packet = await format_recall_packet(
+                    {
+                        "question": question,
+                        "timezone": self.s.timezone,
+                        "now": time.time(),
+                        "temporal_warning": plan_error,
+                        "recording_coverage": coverage,
+                        "evidence_scope": evidence_scope,
+                        "evidence": context,
+                        "attached_images_in_order": attached_ids,
+                    },
+                    self.s,
+                    self.provider,
+                )
+                label_options = (
+                    {"image_labels": attached_ids} if getattr(self.s, "recall_packet_compact", False) else {}
+                )
                 response = await self.provider.structured(
                     """You answer questions from recorded evidence and connected Notch sources only.
 Distinguish physical observations from calendar plans, emails, contacts and notes. A scheduled event
@@ -406,21 +433,11 @@ The evidence_scope describes what was inspected. A linked full recording has not
 answer; do not claim to have watched it. Still images may miss brief actions between samples. An event's
 absence from selected images cannot establish that it never occurred in the recording.
 If evidence cannot establish the answer, explicitly say so and set insufficient_evidence=true. Return JSON.""",
-                    json.dumps(
-                        {
-                            "question": question,
-                            "timezone": self.s.timezone,
-                            "now": time.time(),
-                            "temporal_warning": plan_error,
-                            "recording_coverage": coverage,
-                            "evidence_scope": evidence_scope,
-                            "evidence": context,
-                            "attached_images_in_order": attached_ids,
-                        }
-                    ),
+                    model_packet,
                     RecallAnswer,
                     images=image_paths,
                     recall=True,
+                    **label_options,
                 )
                 valid = set(aliases)
                 cited = set(response.evidence_ids)

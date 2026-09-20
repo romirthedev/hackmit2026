@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run real local video ingestion and recall in a NEW isolated workspace.
 
-Requires cached Ollama/Whisper/OpenCLIP weights and .[audio,video,vision].
-No mocks, external inference service, manual transcript correction or auto truth grading.
+Requires local cached weights or an explicitly configured authenticated processing service.
+No mocks, manual transcript correction or automatic truth grading.
 The API child exits on completion/failure; originals and results remain in --output.
 """
 
@@ -13,6 +13,7 @@ import json
 import os
 import platform
 import secrets
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -22,8 +23,25 @@ from pathlib import Path
 
 import av
 import httpx
+from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parents[1]
+BENCHMARK_FLAGS = {
+    "usage_ledger": True,
+    "change_gate": False,
+    "change_gate_sim": 0.97,
+    "change_gate_block": 0.06,
+    "change_gate_heartbeat_s": 30,
+    "recall_packet_compact": False,
+    "compressor": "none",
+    "compressor_aggressiveness": 0.2,
+    "llmlingua_rate": 0.8,
+    "dense_captions": False,
+    "labeler_long_side": 0,
+    "rule_gate": False,
+    "rule_gate_threshold": 0.45,
+    "cache_prompt": False,
+}
 
 
 def code_identity():
@@ -61,12 +79,45 @@ def main():
     parser.add_argument("--recall-images", type=int, default=3, choices=range(1, 17))
     parser.add_argument("--whisper-model", default="small.en")
     parser.add_argument("--fps", type=float, default=1)
+    parser.add_argument(
+        "--pace",
+        action="store_true",
+        help="Pace frame replay at source cadence; use no-audio sources for live-cadence tests",
+    )
     parser.add_argument("--visual-device", choices=["cpu", "mps", "cuda"], default="cpu")
     parser.add_argument("--text-only", action="store_true", help="Disable OpenCLIP for an ablation run")
     parser.add_argument("--timeout", type=float, default=3600, help="Maximum queue-drain seconds")
+    parser.add_argument("--variant", default="R0")
+    parser.add_argument(
+        "--processing-env", type=Path, help="Read only processing URL/token from a private dotenv file"
+    )
+    parser.add_argument("--verify", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--skip-recall", action="store_true", help="Frame-only ablation, not a question-accuracy run"
+    )
+    parser.add_argument(
+        "--reuse-ingest",
+        type=Path,
+        help="Completed baseline run; copy originals/captions to a fresh workspace and measure recall only",
+    )
+    parser.add_argument("--manifest-sha256", help="Digest of the previously frozen paired manifest")
+    parser.add_argument(
+        "--timeline-start", type=float, help="Explicit shared synthetic timestamp for paired runs"
+    )
+    for name, default in BENCHMARK_FLAGS.items():
+        options = {"default": default}
+        if isinstance(default, bool):
+            options["action"] = argparse.BooleanOptionalAction
+        else:
+            options["type"] = type(default)
+        if name == "compressor":
+            options["choices"] = ["none", "bear2", "llmlingua"]
+        parser.add_argument("--" + name.replace("_", "-"), **options)
     args = parser.parse_args()
     if not 2048 <= args.context <= 131072:
         parser.error("context must be between 2048 and 131072")
+    if args.timeline_start is not None and not 0 < args.timeline_start < time.time():
+        parser.error("timeline start must be a positive past Unix timestamp")
     video, plan, output = args.video.resolve(), args.plan.resolve(), args.output.resolve()
     if output.exists():
         parser.error("--output must be a new directory; existing evaluations are never overwritten")
@@ -111,9 +162,53 @@ def main():
         REWIND_WHISPER_COMPUTE="int8",
         REWIND_ELASTIC_URL="",
         REWIND_TEST_LOGIN_CODE="",
+        REWIND_PUBLIC_URL="",
+        REWIND_NOTCH_URL="",
+        REWIND_NOTCH_CONTROL_URL="",
+        REWIND_PROCESSING_URL="",
+        REWIND_PROCESSING_TOKEN="",
+        REWIND_COOKIE_SECURE="false",
+        REWIND_CODEX_VERIFY=str(args.verify).lower(),
+        REWIND_COMPACT_OBSERVATIONS="true",
+        REWIND_OBSERVATION_MAX_TOKENS="128",
+        REWIND_USAGE_VARIANT=args.variant,
+        REWIND_MIN_FREE_GB="0",
     )
+    if args.processing_env:
+        private = dotenv_values(args.processing_env)
+        for key in ("REWIND_PROCESSING_URL", "REWIND_PROCESSING_TOKEN"):
+            env[key] = private.get(key) or ""
+        if not all(env[key] for key in ("REWIND_PROCESSING_URL", "REWIND_PROCESSING_TOKEN")):
+            parser.error("processing env needs an authenticated REWIND_PROCESSING_URL and TOKEN")
+    flags = {name: getattr(args, name) for name in BENCHMARK_FLAGS}
+    for name, value in flags.items():
+        env["REWIND_" + name.upper()] = str(value).lower() if isinstance(value, bool) else str(value)
     url = f"http://127.0.0.1:{port}"
-    recording_start = time.time() - duration - 60
+    recording_start = args.timeline_start or time.time() - duration - 60
+    if args.reuse_ingest:
+        baseline = args.reuse_ingest.resolve()
+        old_environment = json.loads((baseline / "environment.json").read_text())
+        if old_environment["source_sha256"] != hashlib.sha256(video.read_bytes()).hexdigest():
+            parser.error("Reused captions must belong to the exact same source bytes")
+        recording_start = old_environment["timeline_start"]
+        previous = baseline / "workspace"
+        target = output / "workspace"
+        shutil.copytree(
+            previous, target, ignore=shutil.ignore_patterns("*.sqlite3", "*.sqlite3-wal", "*.sqlite3-shm")
+        )
+        with (
+            sqlite3.connect(f"file:{previous / 'rewind.sqlite3'}?mode=ro", uri=True) as source_db,
+            sqlite3.connect(target / "rewind.sqlite3") as target_db,
+        ):
+            source_db.backup(target_db)
+            tables = {r[0] for r in target_db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ("answer_reviews", "answers", "usage", "usage_events"):
+                if table in tables:
+                    target_db.execute("DELETE FROM " + table)
+            for media_id, media_path in target_db.execute("SELECT id,path FROM media").fetchall():
+                relative = Path(media_path).relative_to(previous)
+                target_db.execute("UPDATE media SET path=? WHERE id=?", (str(target / relative), media_id))
+        shutil.copy2(baseline / "import.jsonl", output / "import.jsonl")
     (output / "environment.json").write_text(
         json.dumps(
             {
@@ -127,10 +222,22 @@ def main():
                 "context": args.context,
                 "recall_max_images": args.recall_images,
                 "fps": args.fps,
+                "paced_frame_replay": args.pace,
                 "visual_device": args.visual_device,
                 "visual_enabled": not args.text_only,
                 "timeline_start": recording_start,
                 "clock": "synthetic",
+                "source_sha256": hashlib.sha256(video.read_bytes()).hexdigest(),
+                "source_duration_seconds": duration,
+                "plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+                "manifest_sha256": args.manifest_sha256,
+                "variant": args.variant,
+                "flags": flags,
+                "codex_verify": args.verify,
+                "skip_recall": args.skip_recall,
+                "reuse_ingest": str(args.reuse_ingest) if args.reuse_ingest else None,
+                "remote_processing": bool(env["REWIND_PROCESSING_URL"]),
+                "measurement_note": "Offline bulk import, not sustained live capture; inference_seconds is summed call latency, not measured GPU utilization.",
                 "packages": {
                     name: importlib.metadata.version(name) for name in ["av", "numpy", "faster-whisper"]
                 },
@@ -173,25 +280,27 @@ def main():
                 else:
                     raise RuntimeError("Evaluation API startup timed out")
                 started = time.monotonic()
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(ROOT / "scripts/import_video.py"),
-                        str(video),
-                        "--server",
-                        url,
-                        "--start",
-                        str(recording_start),
-                        "--synthetic-clock",
-                        "--fps",
-                        str(args.fps),
-                        "--manifest",
-                        str(output / "import.jsonl"),
-                    ],
-                    cwd=ROOT,
-                    env=env,
-                    check=True,
-                )
+                if not args.reuse_ingest:
+                    subprocess.run(
+                        [
+                            sys.executable,
+                            str(ROOT / "scripts/import_video.py"),
+                            str(video),
+                            "--server",
+                            url,
+                            "--start",
+                            str(recording_start),
+                            "--synthetic-clock",
+                            "--fps",
+                            str(args.fps),
+                            "--manifest",
+                            str(output / "import.jsonl"),
+                            *(["--pace"] if args.pace else []),
+                        ],
+                        cwd=ROOT,
+                        env=env,
+                        check=True,
+                    )
                 while True:
                     response = client.get("/api/status")
                     response.raise_for_status()
@@ -209,12 +318,35 @@ def main():
                             "SELECT kind,COUNT(*) count,AVG(analysis_ms) mean_ms,MIN(analysis_ms) min_ms,MAX(analysis_ms) max_ms FROM media GROUP BY kind"
                         )
                     ]
+                    # Original evidence remains local; no blob/vector payloads in this report.
+                    event_columns = [
+                        r[1] for r in db.execute("PRAGMA table_info(events)") if r[1] != "embedding"
+                    ]
+                    observations = [
+                        dict(row)
+                        for row in db.execute(
+                            "SELECT " + ",".join(event_columns) + " FROM events ORDER BY captured_at"
+                        )
+                    ]
+                    (output / "observations.json").write_text(json.dumps(observations, indent=2) + "\n")
+                    delays = [
+                        r[0]
+                        for r in db.execute(
+                            "SELECT e.created_at-m.received_at FROM events e JOIN media m ON m.id=e.id ORDER BY e.created_at-m.received_at"
+                        )
+                    ]
                 (output / "ingest-metrics.json").write_text(
                     json.dumps(
                         {
                             "seconds": time.monotonic() - started,
                             "status": status,
                             "jobs": jobs,
+                            "frames_per_minute": sum(j["count"] for j in jobs if j["kind"] == "frame")
+                            * 60
+                            / (time.monotonic() - started),
+                            "upload_to_event_seconds": delays,
+                            "capture_to_result_seconds": None,
+                            "capture_latency_note": "Synthetic historical clock; upload-to-event delay is not live capture latency.",
                         },
                         indent=2,
                     )
@@ -230,20 +362,43 @@ def main():
                     ),
                     flush=True,
                 )
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(ROOT / "scripts/evaluate_recall.py"),
-                        str(plan),
-                        "--server",
-                        url,
-                        "--output",
-                        str(output / "answers.json"),
-                    ],
-                    cwd=ROOT,
-                    env=env,
-                    check=True,
-                )
+                if not args.skip_recall:
+                    subprocess.run(
+                        [
+                            sys.executable,
+                            str(ROOT / "scripts/evaluate_recall.py"),
+                            str(plan),
+                            "--server",
+                            url,
+                            "--output",
+                            str(output / "answers.json"),
+                            *(["--wait-review"] if args.verify else []),
+                        ],
+                        cwd=ROOT,
+                        env=env,
+                        check=True,
+                    )
+                summary = client.get("/api/usage/summary")
+                summary.raise_for_status()
+                (output / "usage-summary.json").write_text(json.dumps(summary.json(), indent=2) + "\n")
+                with sqlite3.connect(output / "workspace/rewind.sqlite3") as db:
+                    db.row_factory = sqlite3.Row
+                    tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    for table in ("usage", "gate_decisions"):
+                        if table in tables:
+                            rows = [dict(row) for row in db.execute("SELECT * FROM " + table)]
+                            (output / (table + ".json")).write_text(json.dumps(rows, indent=2) + "\n")
+                complete = {
+                    "pipeline_completed": not status["failed"] and not status["visual_index"]["failed"],
+                    "failed_media": status["failed"],
+                    "failed_visual_index": status["visual_index"]["failed"],
+                    "quality_graded": False,
+                }
+                (output / "completion.json").write_text(json.dumps(complete, indent=2) + "\n")
+                if not complete["pipeline_completed"]:
+                    raise RuntimeError(
+                        "Processing failures retained in the run artifacts; this is not a complete baseline"
+                    )
                 print(
                     f"Review raw answers and original evidence in {output}; truth is not automatically graded."
                 )

@@ -15,6 +15,8 @@ import {
 import Login from '@/components/login';
 import {
   api,
+  AUTH_REQUIRED_EVENT,
+  isAuthenticationError,
   type Answer,
   type Status,
   type ConversationState,
@@ -77,26 +79,46 @@ export default function Phone() {
   const [view, setView] = useState<'record' | 'context' | 'computer'>('record');
   const [sound, setSound] = useState(false);
   const soundRef = useRef(false);
+  const authExpired = useRef(false);
   useEffect(() => {
     soundRef.current = sound;
   }, [sound]);
   useEffect(() => {
+    const requireAuthentication = () => {
+      // A stale successful request must never reopen the recorder after a 401.
+      // Login reloads the page after a successful pairing, resetting this latch.
+      authExpired.current = true;
+      ++answerFetchVersion.current;
+      setAuth(false);
+    };
+    window.addEventListener(AUTH_REQUIRED_EVENT, requireAuthentication);
+    return () =>
+      window.removeEventListener(AUTH_REQUIRED_EVENT, requireAuthentication);
+  }, []);
+  useEffect(() => {
+    if (auth === false || authExpired.current) return;
     if (window.location.hash.startsWith('#connect=')) {
       // oxlint-disable-next-line react/react-compiler -- Route an explicit pairing link into its redemption screen.
       setAuth(false);
       return;
     }
     let alive = true;
+    let polling = false;
+    const requests = new AbortController();
     const poll = async () => {
+      if (polling || !alive || authExpired.current) return;
+      polling = true;
       try {
         const answerVersion = ++answerFetchVersion.current;
         const [next, recent, due, recorded] = await Promise.all([
-          api<Status>('/status'),
-          api<Answer[]>('/answers'),
-          api<Reminder[]>('/context/reminders'),
-          api<OriginalRecording[]>('/continuous-recordings?limit=3'),
+          api<Status>('/status', { signal: requests.signal }),
+          api<Answer[]>('/answers', { signal: requests.signal }),
+          api<Reminder[]>('/context/reminders', { signal: requests.signal }),
+          api<OriginalRecording[]>('/continuous-recordings?limit=3', {
+            signal: requests.signal,
+          }),
         ]);
-        if (!alive) return;
+        if (!alive || authExpired.current) return;
         setAuth(true);
         setStatus(next);
         if (answerVersion === answerFetchVersion.current) setAnswers(recent);
@@ -111,9 +133,13 @@ export default function Phone() {
             }
           }
       } catch (problem) {
-        if (alive && /access key|401/.test(String(problem))) setAuth(false);
-        else if (alive)
+        if (alive && isAuthenticationError(problem)) {
+          authExpired.current = true;
+          setAuth(false);
+        } else if (alive && !requests.signal.aborted && !authExpired.current)
           setError('Connection interrupted. Reconnecting to your memory…');
+      } finally {
+        polling = false;
       }
     };
     void poll();
@@ -121,8 +147,9 @@ export default function Phone() {
     return () => {
       alive = false;
       clearInterval(timer);
+      requests.abort();
     };
-  }, []);
+  }, [auth]);
   useEffect(() => {
     if (auth !== true || !video.current) return;
     const controller = new PhoneCapture(video.current, setState);
@@ -137,12 +164,15 @@ export default function Phone() {
     let alive = true;
     let polling = false;
     let first = true;
+    const requests = new AbortController();
     const poll = async () => {
-      if (polling) return;
+      if (polling || !alive || authExpired.current) return;
       polling = true;
       try {
-        const next = await api<ConversationState>('/conversation/state');
-        if (!alive) return;
+        const next = await api<ConversationState>('/conversation/state', {
+          signal: requests.signal,
+        });
+        if (!alive || authExpired.current) return;
         setConversation(next);
         setConversationError('');
         const newCompletedRecall =
@@ -156,8 +186,10 @@ export default function Phone() {
         let refreshedAnswers: Answer[] = [];
         if (newCompletedRecall) {
           ++answerFetchVersion.current;
-          refreshedAnswers = await api<Answer[]>('/answers');
-          if (!alive) return;
+          refreshedAnswers = await api<Answer[]>('/answers', {
+            signal: requests.signal,
+          });
+          if (!alive || authExpired.current) return;
           // Invalidate slower dashboard polls so a draft cannot replace the
           // checked card while its completed response is being spoken.
           ++answerFetchVersion.current;
@@ -211,8 +243,11 @@ export default function Phone() {
           spokenTurns.current.add(key);
         }
         first = false;
-      } catch {
-        if (alive)
+      } catch (problem) {
+        if (alive && isAuthenticationError(problem)) {
+          authExpired.current = true;
+          setAuth(false);
+        } else if (alive && !requests.signal.aborted && !authExpired.current)
           setConversationError(
             'Voice requests are reconnecting. Saved speech will retry.',
           );
@@ -225,6 +260,7 @@ export default function Phone() {
     return () => {
       alive = false;
       clearInterval(timer);
+      requests.abort();
     };
   }, [auth]);
   async function ask(event: React.SyntheticEvent<HTMLFormElement>) {

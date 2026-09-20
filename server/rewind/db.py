@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS events (
  model TEXT NOT NULL, created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_time ON events(captured_at);
+CREATE TABLE IF NOT EXISTS gate_decisions (
+ id TEXT PRIMARY KEY, created_at REAL NOT NULL, stage TEXT NOT NULL,
+ media_id TEXT NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+ rule_id TEXT, decision TEXT NOT NULL, reason TEXT NOT NULL,
+ inherited_from TEXT, similarity REAL, block_delta REAL,
+ metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_gate_media ON gate_decisions(media_id,stage);
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(id UNINDEXED,summary,transcript,tags);
 CREATE TRIGGER IF NOT EXISTS events_insert AFTER INSERT ON events BEGIN
  INSERT INTO events_fts(id,summary,transcript,tags) VALUES(new.id,new.summary,new.transcript,new.tags);
@@ -76,7 +84,16 @@ class Database:
             columns = {r[1] for r in c.execute("PRAGMA table_info(media)")}
             if "provenance" not in columns:
                 c.execute("ALTER TABLE media ADD COLUMN provenance TEXT NOT NULL DEFAULT '{}'")
-            c.execute("PRAGMA user_version=2")
+            event_columns = {r[1] for r in c.execute("PRAGMA table_info(events)")}
+            for name, definition in (
+                ("label_mode", "TEXT NOT NULL DEFAULT 'legacy'"),
+                ("inherited_from", "TEXT"),
+                ("visual_similarity", "REAL"),
+                ("block_delta", "REAL"),
+            ):
+                if name not in event_columns:
+                    c.execute(f"ALTER TABLE events ADD COLUMN {name} {definition}")
+            c.execute("PRAGMA user_version=3")
 
     @contextmanager
     def connect(self):

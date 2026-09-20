@@ -25,6 +25,9 @@ def main():
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--after", type=float, help="Restrict to one evaluation recording interval")
     parser.add_argument("--before", type=float, help="Restrict to one evaluation recording interval")
+    parser.add_argument(
+        "--wait-review", action="store_true", help="Wait for the real Codex review when enabled"
+    )
     args = parser.parse_args()
     env = dotenv_values(Path(__file__).resolve().parents[1] / ".env")
     token = os.environ.get("REWIND_ADMIN_TOKEN") or env.get("REWIND_ADMIN_TOKEN")
@@ -52,12 +55,30 @@ def main():
             started = time.monotonic()
             question = item["question"] if isinstance(item, dict) else item
             result = {"question": question}
+            if isinstance(item, dict):
+                result.update({key: item[key] for key in ("id", "criterion", "unanswerable") if key in item})
             try:
                 response = client.post(
                     "/api/ask", json={"question": question, "after": args.after, "before": args.before}
                 )
                 response.raise_for_status()
                 result["response"] = response.json()
+                result["draft_seconds"] = round(time.monotonic() - started, 3)
+                if args.wait_review and result["response"].get("mode") == "checking":
+                    result["draft_response"] = result["response"]
+                    deadline = time.monotonic() + args.timeout
+                    while time.monotonic() < deadline:
+                        reviewed = client.get("/api/answers")
+                        reviewed.raise_for_status()
+                        current = next(
+                            (a for a in reviewed.json() if a["id"] == result["response"]["id"]), None
+                        )
+                        if current and current.get("mode") != "checking":
+                            result["response"] = current
+                            break
+                        time.sleep(0.5)
+                    else:
+                        result["review_timeout"] = True
                 answer = result["response"]
                 evidence = answer.get("evidence", [])
                 ids = {event["id"] for event in evidence}

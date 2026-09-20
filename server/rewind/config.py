@@ -18,6 +18,27 @@ class Settings(BaseSettings):
     processing_token: str = ""
     compact_observations: bool = False
     observation_max_tokens: int = Field(128, ge=128, le=2048)
+    usage_ledger: bool = False
+    usage_variant: str = Field("control", max_length=100)
+    change_gate: bool = False
+    change_gate_sim: float = Field(0.97, ge=0, le=1)
+    change_gate_block: float = Field(0.06, ge=0, le=1)
+    change_gate_heartbeat_s: float = Field(30, gt=0, le=300)
+    recall_packet_compact: bool = False
+    compressor: Literal["none", "bear2", "llmlingua"] = "none"
+    compressor_aggressiveness: float = Field(0.2, gt=0, lt=1)
+    compressor_timeout_s: float = Field(10, gt=0, le=120)
+    ttc_api_key: str = ""
+    llmlingua_model: str = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+    llmlingua_rate: float = Field(0.8, gt=0, le=1)
+    dense_captions: bool = False
+    labeler_long_side: int = Field(0, ge=0, le=1920)
+    rule_gate: bool = False
+    rule_gate_threshold: float = Field(0.45, ge=-1, le=1)
+    cache_prompt: bool = False
+    usage_input_per_million_usd: float = Field(0.40, ge=0)
+    usage_cached_input_per_million_usd: float = Field(0.10, ge=0)
+    usage_output_per_million_usd: float = Field(1.60, ge=0)
     codex_verify: bool = False
     codex_binary: str = "/Applications/ChatGPT.app/Contents/Resources/codex"
     codex_verify_timeout: float = Field(120, ge=10, le=600)

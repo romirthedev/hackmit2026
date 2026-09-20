@@ -1,0 +1,363 @@
+{
+  "schema_version": 1,
+  "frozen_at_unix": 1789863733.77964,
+  "purpose": "Paired pre-run token-savings benchmark; same originals and questions, new database for every variant.",
+  "limitations": [
+    "No 20\u201330 minute quiet or 10-minute busy real recording is available. Do not extrapolate observed savings to a day.",
+    "Public source questions have been used for prior model debugging; they are fixed but not newly held out.",
+    "Object recall is a frozen synonym-string proxy, separately reported from factual question grading.",
+    "Do not call model self-confidence, citation resolution, or review agreement ground-truth accuracy."
+  ],
+  "clips": [
+    {
+      "id": "daylife",
+      "cohort": "short_real_video",
+      "path": "data/daylife-eval/breakfast-pov.mp4",
+      "sha256": "03b82f243750de109ca56856313f65ef109c4be8ee604caffb801bd92bdabfe5",
+      "duration_seconds": 30.063397,
+      "fps": 1,
+      "source_url": "https://www.youtube.com/watch?v=SzZ6KcqlAgY&t=60s",
+      "criteria_origin": {
+        "path": "docs/evaluations/daylife-pov-plan.json",
+        "sha256": "3641021dfa21e3a70b49c5b88180b6ecf6a968ace4dea1e4d86fa956cfaaafa6",
+        "note": "Existing prewritten source-review criteria; human authorship not independently verified."
+      },
+      "questions": [
+        {
+          "id": "daylife-q1",
+          "question": "What food was being assembled on the counter?",
+          "criterion": "Describes open breakfast sandwiches/bread halves with yellow cheese slices. Cites visible frame evidence; does not invent eggs or other ingredients not shown on the bread.",
+          "unanswerable": false
+        },
+        {
+          "id": "daylife-q2",
+          "question": "Where was the squeeze bottle put after it was used?",
+          "criterion": "Places the pale bottle horizontally on the upper stainless shelf above the work area, to the right, with frame evidence. Does not say it stayed there after the excerpt.",
+          "unanswerable": false
+        },
+        {
+          "id": "daylife-q3",
+          "question": "What color were the squeeze bottle's cap and the slices placed on the bread?",
+          "criterion": "Red cap and yellow slices, backed by visible frame evidence.",
+          "unanswerable": false
+        },
+        {
+          "id": "daylife-q4",
+          "question": "Was the squeeze bottle used before or after the yellow slices were placed on the bread?",
+          "criterion": "Says bottle use came before placing yellow cheese slices; cites frames whose offsets support the ordering. An uncertainty warning is acceptable; reversed order is not.",
+          "unanswerable": false
+        },
+        {
+          "id": "daylife-q6",
+          "question": "Where did the person put their keys?",
+          "criterion": "States the excerpt does not establish this; no invented location.",
+          "unanswerable": true
+        },
+        {
+          "id": "daylife-q7",
+          "question": "What time did the person's work shift begin?",
+          "criterion": "States the shift start is not established; never substitutes synthetic import time or clip time.",
+          "unanswerable": true
+        }
+      ],
+      "excluded_original_question_indices_zero_based": [
+        4
+      ],
+      "keyframe_annotation": "Agent visual annotation before token benchmark; not independent human labels.",
+      "keyframes": [
+        {
+          "offset_seconds": 0,
+          "objects": {
+            "glove": [
+              "glove",
+              "gloved"
+            ],
+            "wrapper": [
+              "wrapper",
+              "paper"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 10,
+          "objects": {
+            "bread": [
+              "bread",
+              "bun",
+              "bagel",
+              "sandwich"
+            ],
+            "tray": [
+              "tray"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 18,
+          "objects": {
+            "bottle": [
+              "bottle"
+            ],
+            "shelf": [
+              "shelf",
+              "shelves"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 22,
+          "objects": {
+            "cheese": [
+              "cheese"
+            ],
+            "glove": [
+              "glove",
+              "gloved"
+            ]
+          }
+        }
+      ],
+      "erratum": "docs/evaluations/daylife-pov-erratum.json; invalidated tongs criterion excluded."
+    },
+    {
+      "id": "outdoor",
+      "cohort": "short_real_video",
+      "path": "data/open-video-eval/heldout-8s.mp4",
+      "sha256": "7be7358dcc647d8a3debc4b13d8eb2fbe1a9734d9cfc13e719fee908d803e94a",
+      "duration_seconds": 8.0,
+      "fps": 1,
+      "source_url": "https://github.com/opencv/opencv/blob/4.x/samples/data/vtest.avi",
+      "criteria_origin": {
+        "path": "docs/evaluations/heldout-video-plan.json",
+        "sha256": "0e7e92e70dfa81f355832ce9a75867baae9b683c57ec7cae857061d1041e0eee",
+        "note": "Existing prewritten source-review criteria; human authorship not independently verified."
+      },
+      "questions": [
+        {
+          "id": "outdoor-q1",
+          "question": "What are the people doing in this recording?",
+          "criterion": "Says people are walking outdoors along/across a paved road or path, with a frame citation.",
+          "unanswerable": false
+        },
+        {
+          "id": "outdoor-q2",
+          "question": "What object is standing on three legs on the grass in the foreground?",
+          "criterion": "Identifies the tripod and cites a frame; does not invent the make of the camera.",
+          "unanswerable": false
+        },
+        {
+          "id": "outdoor-q3",
+          "question": "What color is the van parked near the building?",
+          "criterion": "Says white and cites a frame.",
+          "unanswerable": false
+        },
+        {
+          "id": "outdoor-q4",
+          "question": "What did the people say to each other?",
+          "criterion": "States speech cannot be established from these recordings; does not invent dialogue.",
+          "unanswerable": true
+        },
+        {
+          "id": "outdoor-q5",
+          "question": "What time did these people leave home?",
+          "criterion": "States departure time is not established; does not use the synthetic import time.",
+          "unanswerable": true
+        }
+      ],
+      "excluded_original_question_indices_zero_based": [],
+      "keyframe_annotation": "Agent visual annotation before token benchmark; not independent human labels.",
+      "keyframes": [
+        {
+          "offset_seconds": 0,
+          "objects": {
+            "tripod": [
+              "tripod"
+            ],
+            "van": [
+              "van"
+            ],
+            "person": [
+              "person",
+              "people",
+              "pedestrian",
+              "man",
+              "men"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 6,
+          "objects": {
+            "tripod": [
+              "tripod"
+            ],
+            "van": [
+              "van"
+            ],
+            "person": [
+              "person",
+              "people",
+              "pedestrian",
+              "man",
+              "men"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "small-object",
+      "cohort": "synthetic_localized_change",
+      "path": "data/token-benchmark/small-object.mp4",
+      "sha256": "763cf3a5c5119f8dd7f29b7f39a92d5c6d7b6c66185735f512f58e55bf75e1f3",
+      "duration_seconds": 40,
+      "fps": 1,
+      "construction": "640x480 fixed gray background, brown rectangle, blue circle. A 32x32 red square appears at t=10, moves right at t=20, disappears at t=30. Not a real quiet room.",
+      "keyframe_annotation": "Deterministic generator specification, not human labels.",
+      "keyframes": [
+        {
+          "offset_seconds": 0,
+          "objects": {
+            "blue circle": [
+              "blue circle",
+              "blue circular",
+              "blue disk",
+              "blue disc"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 9,
+          "objects": {
+            "blue circle": [
+              "blue circle",
+              "blue circular",
+              "blue disk",
+              "blue disc"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 10,
+          "objects": {
+            "blue circle": [
+              "blue circle",
+              "blue circular",
+              "blue disk",
+              "blue disc"
+            ],
+            "red square": [
+              "red square",
+              "red rectangular",
+              "red rectangle"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 19,
+          "objects": {
+            "blue circle": [
+              "blue circle",
+              "blue circular",
+              "blue disk",
+              "blue disc"
+            ],
+            "red square": [
+              "red square",
+              "red rectangular",
+              "red rectangle"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 20,
+          "objects": {
+            "blue circle": [
+              "blue circle",
+              "blue circular",
+              "blue disk",
+              "blue disc"
+            ],
+            "red square": [
+              "red square",
+              "red rectangular",
+              "red rectangle"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 29,
+          "objects": {
+            "blue circle": [
+              "blue circle",
+              "blue circular",
+              "blue disk",
+              "blue disc"
+            ],
+            "red square": [
+              "red square",
+              "red rectangular",
+              "red rectangle"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 30,
+          "objects": {
+            "blue circle": [
+              "blue circle",
+              "blue circular",
+              "blue disk",
+              "blue disc"
+            ]
+          }
+        },
+        {
+          "offset_seconds": 39,
+          "objects": {
+            "blue circle": [
+              "blue circle",
+              "blue circular",
+              "blue disk",
+              "blue disc"
+            ]
+          }
+        }
+      ],
+      "questions": [
+        {
+          "id": "small-object-q1",
+          "question": "What color was the small square that appeared?",
+          "criterion": "Red, supported by an original frame between offsets 10 and 29 seconds.",
+          "unanswerable": false
+        },
+        {
+          "id": "small-object-q2",
+          "question": "Which direction did the small red square move?",
+          "criterion": "To the right; supports ordering with frames from 10\u201319 and 20\u201329 seconds.",
+          "unanswerable": false
+        },
+        {
+          "id": "small-object-q3",
+          "question": "Was the red square visible at the end of the recording?",
+          "criterion": "No, the final sampled frames from 30\u201339 seconds lack it. Do not generalize beyond the recording.",
+          "unanswerable": false
+        },
+        {
+          "id": "small-object-q4",
+          "question": "Who owns the blue circle?",
+          "criterion": "Ownership cannot be established from the recording.",
+          "unanswerable": true
+        }
+      ]
+    }
+  ],
+  "primary_real_questions": 11,
+  "synthetic_questions": 4,
+  "grading": {
+    "question_pass": null,
+    "citation_relevance": null,
+    "author": null,
+    "requirement": "Explicit post-run source review against frozen criteria; leave unknowns null. Label agent grading as agent grading."
+  }
+}

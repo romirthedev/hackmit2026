@@ -4,6 +4,7 @@ import hmac
 import io
 import ipaddress
 import json
+import math
 import os
 import re
 import secrets
@@ -33,6 +34,7 @@ from .people import PeopleMemory, people_router
 from .providers import Provider
 from .recordings import recording_bytes, recording_router
 from .storage import retained_bytes
+from .usage import UsageLedger
 from .verification import Verifier
 from .visual import VisualIndex
 from .worker import Worker
@@ -69,7 +71,8 @@ def create_app(settings=None, provider=None):
     db = Database(s.data_dir)
     media_dir = (s.data_dir / "media").resolve()
     media_dir.mkdir(exist_ok=True)
-    p = provider or Provider(s)
+    usage = UsageLedger(db, s)
+    p = provider or Provider(s, usage=usage)
     visual = VisualIndex(db, s, remote=p)
     context = NotchContext(db, s)
     verifier = Verifier(db, s) if s.codex_verify else None
@@ -193,10 +196,17 @@ def create_app(settings=None, provider=None):
     app.state.verifier = verifier
     app.state.computer = computer
     app.state.people = people
+    app.state.usage = usage
     app.state.conversation = conversation
     app.include_router(conversation_router(conversation, admin, ingestion_lock))
     app.include_router(recording_router(db, s, admin, ingestion_lock))
     app.include_router(people_router(people, admin))
+
+    @app.get("/api/usage/summary", dependencies=[Depends(admin)])
+    async def usage_summary(since: float = 0):
+        if not math.isfinite(since) or since < 0:
+            raise HTTPException(422, "since must be a finite nonnegative timestamp")
+        return await asyncio.to_thread(usage.summary, since)
 
     @app.get("/api/computer/state", dependencies=[Depends(admin)])
     async def computer_state():

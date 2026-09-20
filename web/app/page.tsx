@@ -40,6 +40,7 @@ import { WorkspaceTabsList } from '@/components/workspace-navigation';
 import { Brand } from '@/components/brand';
 import { BrowserPairing } from '@/components/browser-pairing';
 import { ContextPanel } from '@/components/context-panel';
+import { UsageCard } from '@/components/usage-card';
 import { MemoryCommand } from '@/components/memory-command';
 import { MemoryComposer } from '@/components/memory-composer';
 import { MemoryLibrary } from '@/components/memory-library';
@@ -1163,6 +1164,7 @@ export default function Home() {
             </TabsContent>
             <TabsContent value="system">
               <div className="system-grid">
+                <UsageCard />
                 <BrowserPairing />
                 <ContextPanel />
                 <Card className="card">

@@ -140,7 +140,7 @@ def test_schema_one_upgrade_preserves_recordings(context):
         connection.execute("PRAGMA user_version=1")
     upgraded = Database(app.state.settings.data_dir)
     assert upgraded.one("SELECT * FROM media WHERE id=?", (event_id,)) == old
-    assert upgraded.one("PRAGMA user_version")["user_version"] == 2
+    assert upgraded.one("PRAGMA user_version")["user_version"] == 3
 
 
 def test_visual_similarity_cannot_establish_temporal_anchor(context):

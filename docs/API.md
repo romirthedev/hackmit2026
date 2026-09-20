@@ -46,6 +46,7 @@ Content-Type: image/jpeg
 |---|---|---|
 | GET | `/health` | Minimal unauthenticated liveness |
 | GET | `/status` | Capture, queue, storage, device and error counts |
+| GET | `/usage/summary?since=0` | Authenticated runtime token ledger, unknown counters, estimates and illustrative cloud equivalent; see [measurement semantics](TOKEN-LEDGER.md) |
 | GET | `/provider` | Configured local model availability |
 | POST | `/capture/pause` | `{paused: true/false}` for the next device heartbeat |
 | GET | `/recordings?before=…&limit=60` | Originals and processing state, newest first |

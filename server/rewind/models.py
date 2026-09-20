@@ -31,6 +31,14 @@ class CompactObservation(BaseModel):
     tags: list[str] = Field(max_length=6)
 
 
+class DenseObservation(BaseModel):
+    scene: str = Field(max_length=160)
+    objects: list[str] = Field(max_length=8)
+    people: int = Field(ge=0, le=1000)
+    action: str = Field(max_length=120)
+    text_visible: str = Field(max_length=220)
+
+
 class RecallAnswer(BaseModel):
     answer: str = Field(
         max_length=8000, description="Plain-language answer to the user's question, not a source ID"

@@ -1,7 +1,9 @@
 """Local inference wire formats; images remain in their supplied order."""
 
 
-def chat_request(api, model, messages, schema, *, think=False, context=16384, max_tokens=2048):
+def chat_request(
+    api, model, messages, schema, *, think=False, context=16384, max_tokens=2048, cache_prompt=False
+):
     if api == "ollama":
         return "/api/chat", {
             "model": model,
@@ -36,7 +38,7 @@ def chat_request(api, model, messages, schema, *, think=False, context=16384, ma
         "stream": False,
         "temperature": 0,
         "max_tokens": max_tokens,
-        "cache_prompt": False,
+        "cache_prompt": cache_prompt,
         "chat_template_kwargs": {"enable_thinking": think},
         "response_format": {"type": "json_schema", "json_schema": {"name": "result", "schema": schema}},
     }

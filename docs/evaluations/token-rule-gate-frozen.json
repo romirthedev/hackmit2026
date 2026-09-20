@@ -1,0 +1,16 @@
+{
+  "created": "2026-09-19",
+  "kind": "synthetic text-only rule/observation fixtures; not photographic ground truth",
+  "scope": "Tests relevance gating and downstream rule decisions given fixed observations, not visual perception or live warning reliability.",
+  "frozen_before_inference": true,
+  "pairs": [
+    {"id":"cup-present","rule":"Tell me if a cup is on the table.","summary":"A blue cup rests on the wooden table.","tags":["cup","table"],"expected":true,"category":"positive lexical cue"},
+    {"id":"cup-negated","rule":"Tell me if a cup is on the table.","summary":"The blue cup is not on the table; it is on the kitchen counter.","tags":["cup","counter"],"expected":false,"category":"negation"},
+    {"id":"stove-on","rule":"Notify me if the stove is on.","summary":"The stove's power indicator reads ON and a visible gas flame burns under a pot.","tags":["stove","flame","pot"],"expected":true,"category":"positive lexical cue"},
+    {"id":"stove-off","rule":"Notify me if the stove is on.","summary":"The stove's indicator reads OFF. Its control knobs point to OFF.","tags":["stove","off"],"expected":false,"category":"explicit opposite state"},
+    {"id":"visitor-entry","rule":"Notify me when someone enters the room.","summary":"A visitor comes through the doorway into the indoor space.","tags":["visitor","doorway"],"expected":true,"category":"positive semantic cue without shared object noun"},
+    {"id":"entry-unknown","rule":"Notify me when someone enters the room.","summary":"The room is empty in this image. No entry or departure action was observed.","tags":["room"],"expected":false,"category":"absence cannot establish an event"},
+    {"id":"liquid-spill","rule":"Alert me if a drink spills.","summary":"Liquid has just splashed out of the knocked-over mug onto the counter.","tags":["liquid","mug","counter"],"expected":true,"category":"positive semantic cue without shared object noun"},
+    {"id":"unrelated-chair","rule":"Notify me if the stove is on.","summary":"A red chair stands beside a closed bookcase in an office.","tags":["chair","bookcase","office"],"expected":false,"category":"irrelevant scene; no inference about a hidden appliance"}
+  ]
+}

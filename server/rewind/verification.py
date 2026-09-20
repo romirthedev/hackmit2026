@@ -7,6 +7,7 @@ agreement is a recorded assessment of supplied sources, never a proof of truth.
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import signal
@@ -19,6 +20,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .sampled_evidence import sample_scope_qualification
 from .temporal import coverage_qualification
+from .usage import UsageLedger, number
+
+log = logging.getLogger(__name__)
 
 
 class Review(BaseModel):
@@ -141,11 +145,20 @@ class CodexRunner:
                     thread = next(
                         (x.get("thread_id") for x in lines if x.get("type") == "thread.started"), None
                     )
+                    usage = next(
+                        (
+                            line.get("usage")
+                            for line in reversed(lines)
+                            if line.get("type") == "turn.completed"
+                        ),
+                        None,
+                    )
                     return final, {
                         "model": model,
                         "thread_id": thread,
                         "seconds": round(time.monotonic() - start, 3),
                         "result": final.model_dump(),
+                        "usage": usage,
                     }
                 finally:
                     if proc.returncode is None:
@@ -197,6 +210,7 @@ class Verifier:
     def __init__(self, db, settings, runner=None):
         self.db, self.s = db, settings
         self.runner = runner or CodexRunner(settings)
+        self.usage = UsageLedger(db, settings) if settings.usage_ledger else None
         with db.connect() as c:
             c.execute("""CREATE TABLE IF NOT EXISTS answer_reviews (
                 answer_id TEXT PRIMARY KEY REFERENCES answers(id) ON DELETE CASCADE,
@@ -250,6 +264,39 @@ class Verifier:
             else:
                 await asyncio.sleep(0.5)
 
+    async def review(self, model, prompt, images, schema, answer_id):
+        started = time.monotonic()
+        audit = None
+        try:
+            result, audit = await self.runner.run(model, prompt, images, schema)
+            return result, audit
+        finally:
+            if self.usage:
+                usage = (audit or {}).get("usage") or {}
+                self.record_usage(
+                    {
+                        "stage": "verify",
+                        "backend": "codex_cloud",
+                        "model": model,
+                        "status": "success" if audit else "error",
+                        "media_id": None,
+                        "prompt_tokens": number(usage.get("input_tokens")),
+                        "completion_tokens": number(usage.get("output_tokens")),
+                        "cache_hit_tokens": number(usage.get("cached_input_tokens")),
+                        "wall_ms": (time.monotonic() - started) * 1000,
+                        "metadata": {
+                            "answer_id": answer_id,
+                            "billing": "ChatGPT login; no actual per-token invoice available",
+                        },
+                    }
+                )
+
+    def record_usage(self, event):
+        try:
+            self.usage.record(event)
+        except Exception:
+            log.warning("Review usage recording failed", exc_info=False)
+
     async def process(self, row):
         packet = json.loads(row["packet"])
         receipt = {
@@ -301,7 +348,9 @@ class Verifier:
             prompt = INSTRUCTIONS + "\nAssess candidate Qwen: supported, unsupported, or uncertain. "
             prompt += "If unsupported, provide a corrected answer only when evidence establishes one. Otherwise explicitly abstain.\n"
             prompt += json.dumps({**evidence_data, "candidate": packet["candidate"]})
-            astra, audit = await self.runner.run("gpt-6-astra", prompt, packet["images"], Review)
+            astra, audit = await self.review(
+                "gpt-6-astra", prompt, packet["images"], Review, row["answer_id"]
+            )
             receipt["reviews"].append(audit)
             if astra.verdict == "supported":
                 final = {
@@ -318,7 +367,9 @@ class Verifier:
                 sol_prompt += json.dumps(
                     {**evidence_data, "qwen": packet["candidate"], "astra": astra.model_dump()}
                 )
-                sol, audit = await self.runner.run("gpt-5.6-sol", sol_prompt, packet["images"], TieBreak)
+                sol, audit = await self.review(
+                    "gpt-5.6-sol", sol_prompt, packet["images"], TieBreak, row["answer_id"]
+                )
                 receipt["reviews"].append(audit)
                 if sol.winner == "qwen":
                     final = packet["candidate"]

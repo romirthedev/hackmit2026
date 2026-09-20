@@ -43,6 +43,11 @@ def main():
         "--synthetic-clock", action="store_true", help="Start is an import timeline, not known capture time"
     )
     parser.add_argument("--fps", type=float, default=1, help="Sampling rate; 0 uploads every decoded frame")
+    parser.add_argument(
+        "--pace",
+        action="store_true",
+        help="Replay frame uploads at source cadence; audio still uploads after frames",
+    )
     parser.add_argument("--clip-seconds", type=int, default=30, choices=range(1, 61), metavar="1..60")
     parser.add_argument(
         "--manifest", type=Path, help="JSONL audit manifest (overwritten on each resumable run)"
@@ -71,11 +76,14 @@ def main():
     manifest.parent.mkdir(parents=True, exist_ok=True)
     counts = {"frame": 0, "audio": 0}
     with manifest.open("w") as audit, httpx.Client(timeout=60) as client:
-        audit.write(json.dumps({"import": config, "boot": boot}) + "\n")
+        audit.write(json.dumps({"import": config, "boot": boot, "paced_frame_replay": args.pace}) + "\n")
+        replay_started = time.monotonic()
         for sample in itertools.chain(
             video_samples(args.video, args.fps, args.clip_seconds),
             audio_samples(args.video, args.clip_seconds),
         ):
+            if args.pace and sample.kind == "frame":
+                time.sleep(max(0, sample.offset - (time.monotonic() - replay_started)))
             metadata = {
                 "source_sha256": digest,
                 "source_offset": sample.offset,
@@ -106,6 +114,7 @@ def main():
                         "sequence": sample.sequence,
                         **metadata,
                         "payload_sha256": hashlib.sha256(sample.data).hexdigest(),
+                        "upload_elapsed_seconds": time.monotonic() - replay_started,
                         **receipt,
                     }
                 )
