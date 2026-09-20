@@ -14,7 +14,8 @@ import {
   Search,
   Siren,
 } from 'lucide-react';
-import type { Recording } from '@/lib/api';
+import { PhoneBattery } from '@/components/phone-battery';
+import type { Recording, Status } from '@/lib/api';
 import { Avatar, Btn, Card, Cell, Row, hm } from './primitives';
 import { DAYS, MEDS, PEOPLE, PINS, WEEK_STEPS } from './demo-data';
 
@@ -25,7 +26,21 @@ const FILL: Record<string, string> = {
 };
 
 // Phone capture, in the original compact device card ----------------
-export function PhoneCard({ index }: { index: number }) {
+export function PhoneCard({
+  index,
+  status,
+  now,
+}: {
+  index: number;
+  status: Status;
+  now: number;
+}) {
+  const phone = status.phone;
+  const fresh = !!phone && now - phone.last_seen < 45;
+  const battery =
+    fresh && typeof phone?.battery === 'number' ? phone.battery : null;
+  const charging =
+    fresh && typeof phone?.charging === 'boolean' ? phone.charging : null;
   return (
     <Cell label="Your iPhone" index={index}>
       <Card className="phone-device-card">
@@ -34,7 +49,7 @@ export function PhoneCard({ index }: { index: number }) {
             <div className="iphone-body">
               <span className="iphone-island" />
               <span className="iphone-battery">
-                <i />
+                <i style={{ width: battery === null ? '0%' : `${battery}%` }} />
               </span>
               <span className="iphone-wallpaper" />
               <span className="iphone-home" />
@@ -42,7 +57,10 @@ export function PhoneCard({ index }: { index: number }) {
           </div>
           <div className="media-meta">
             <div className="card-title">iPhone</div>
-            <div className="muted">Ready when you are</div>
+            <div className="muted">
+              {fresh ? 'Phone connected' : 'Ready when you are'}
+            </div>
+            <PhoneBattery battery={battery} charging={charging} />
             <a className="btn sm phone-open" href="/phone/">
               Open phone <ArrowUpRight />
             </a>

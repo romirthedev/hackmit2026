@@ -71,6 +71,7 @@ export function useRewind() {
   const polling = useRef<Promise<void> | null>(null);
   const requests = useRef(new Set<AbortController>());
   const seen = useRef<Set<string> | null>(null);
+  const resetAt = useRef<number | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const lock = useCallback(() => {
@@ -126,6 +127,13 @@ export function useRewind() {
           version !== revision.current
         )
           return;
+        const cleared = status.history_cleared_before || 0;
+        if (resetAt.current !== null && cleared !== resetAt.current) {
+          // Another view cleared memory: drop open evidence and pending voice too.
+          window.location.reload();
+          return;
+        }
+        resetAt.current = cleared;
         const timestamp = Date.now() / 1000;
         setSnapshot({
           status,

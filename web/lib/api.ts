@@ -90,6 +90,11 @@ export type Device = {
   };
 };
 export type Status = {
+  phone?: {
+    last_seen: number;
+    battery: number | null;
+    charging: boolean | null;
+  } | null;
   browser_open_access?: boolean;
   history_cleared_before?: number;
   received: number;

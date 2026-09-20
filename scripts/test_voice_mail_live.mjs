@@ -52,7 +52,7 @@ try{
  await dashboard.getByText('iPhone',{exact:true}).waitFor();
  await dashboard.getByText('On the way',{exact:true}).waitFor();
  await dashboard.getByRole('heading',{name:'Ask',exact:true}).waitFor();
- assert.equal(await dashboard.locator('.grid .cell').count(),13);
+ assert.equal(await dashboard.locator('.grid .cell').count(),15);
  assert.equal(await dashboard.locator('[data-card="calendar"]').count(),1);
  assert.equal(await dashboard.locator('[data-card="notes"]').count(),1);
  assert.equal(await dashboard.getByText('Demo widgets',{exact:true}).count(),0);

@@ -9,6 +9,7 @@ import {
   type ScanDocument,
 } from '@/lib/api';
 import Login from '@/components/login';
+import { MemoryReset } from '@/components/memory-reset';
 import { demoStatus } from './demo-data';
 import '@/app/mail.css';
 import {
@@ -294,6 +295,7 @@ export function Dashboard() {
           <span className="rw-brand-time">{clock}</span>
         </a>
         <div className="top-right">
+          <MemoryReset />
           {rw.connection !== 'live' && (
             <span className={`conn ${rw.connection}`}>
               <i />
@@ -336,7 +338,10 @@ export function Dashboard() {
             <span>{sourceError || rw.error}</span>
             <button
               type="button"
-              onClick={() => rw.reload()}
+              onClick={() => {
+                setSourceError('');
+                void rw.reload();
+              }}
               aria-label="Dismiss"
             >
               <X />
@@ -378,7 +383,7 @@ export function Dashboard() {
 
         {!mounted ? null : mode === 'rose' ? (
           <div className="grid" key={gridKey}>
-            <PhoneCard index={0} />
+            <PhoneCard index={0} status={rw.status} now={rw.now} />
             <AskCard
               index={1}
               ask={rw.ask}
@@ -387,6 +392,37 @@ export function Dashboard() {
               disabled={rw.connection !== 'live'}
             />
             <OnTheWayCard index={2} />
+            {live.status && (
+              <section
+                className="mail-widgets dashboard-mail"
+                aria-label="Calendar and notes"
+              >
+                <CalendarCard
+                  index={12}
+                  scans={rw.scans}
+                  pending={pendingMail}
+                  landedId={landedId}
+                  reminders={rw.reminders}
+                  graph={rw.graph}
+                  zone={zone}
+                  arriving={arriving}
+                  disabled={rw.connection !== 'live'}
+                  onOpen={setOpenScan}
+                  onDocument={(id) => void openDocument(id)}
+                  onSeen={rw.reminderSeen}
+                />
+                <LettersCard
+                  index={13}
+                  scans={rw.scans}
+                  pending={pendingMail}
+                  landedId={landedId}
+                  graph={rw.graph}
+                  arriving={arriving}
+                  onOpen={setOpenScan}
+                  onDocument={(id) => void openDocument(id)}
+                />
+              </section>
+            )}
             <WhereCard index={3} />
             <TodayCard index={4} />
             <PeopleCard index={5} />
@@ -413,36 +449,44 @@ export function Dashboard() {
           <div className="grid" key={gridKey}>
             {care
               .filter(([tags]) => tags.includes(filter))
+              .slice(0, 2)
+              .map(([, node]) => node)}
+            {live.status && (
+              <section
+                className="mail-widgets dashboard-mail"
+                aria-label="Calendar and notes"
+              >
+                <CalendarCard
+                  index={12}
+                  scans={rw.scans}
+                  pending={pendingMail}
+                  landedId={landedId}
+                  reminders={rw.reminders}
+                  graph={rw.graph}
+                  zone={zone}
+                  arriving={arriving}
+                  disabled={rw.connection !== 'live'}
+                  onOpen={setOpenScan}
+                  onDocument={(id) => void openDocument(id)}
+                  onSeen={rw.reminderSeen}
+                />
+                <LettersCard
+                  index={13}
+                  scans={rw.scans}
+                  pending={pendingMail}
+                  landedId={landedId}
+                  graph={rw.graph}
+                  arriving={arriving}
+                  onOpen={setOpenScan}
+                  onDocument={(id) => void openDocument(id)}
+                />
+              </section>
+            )}
+            {care
+              .filter(([tags]) => tags.includes(filter))
+              .slice(2)
               .map(([, node]) => node)}
           </div>
-        )}
-        {live.status && (
-          <section className="mail-widgets" aria-label="Calendar and notes">
-            <CalendarCard
-              index={12}
-              scans={rw.scans}
-              pending={pendingMail}
-              landedId={landedId}
-              reminders={rw.reminders}
-              graph={rw.graph}
-              zone={zone}
-              arriving={arriving}
-              disabled={rw.connection !== 'live'}
-              onOpen={setOpenScan}
-              onDocument={(id) => void openDocument(id)}
-              onSeen={rw.reminderSeen}
-            />
-            <LettersCard
-              index={13}
-              scans={rw.scans}
-              pending={pendingMail}
-              landedId={landedId}
-              graph={rw.graph}
-              arriving={arriving}
-              onOpen={setOpenScan}
-              onDocument={(id) => void openDocument(id)}
-            />
-          </section>
         )}
       </main>
 

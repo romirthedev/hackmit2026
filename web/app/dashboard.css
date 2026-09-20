@@ -54,18 +54,18 @@ html.rw-light body { background: #fbfbfb; }
 .rw .seg-thumb { position: absolute; top: 3px; left: 3px; bottom: 3px; width: calc(50% - 3px); border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.08), 0 3px 8px -3px rgba(0,0,0,0.15); transition: transform 0.45s var(--ease); }
 
 /* Page ------------------------------------------------------------- */
-.rw .page { max-width: 1080px; margin: 0 auto; padding: 40px 24px 110px; }
-.rw .greeting { margin: 0 0 40px; }
+.rw .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 72px; }
+.rw .greeting { margin: 0 0 26px; }
 .rw .greeting h1 { font-size: calc(22px * var(--fs)); font-weight: 600; letter-spacing: -0.015em; }
 .rw .greeting p { color: var(--muted); margin-top: 2px; }
 .rw .greeting.care { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
 .rw .rw-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 14px; background: #fff1f0; color: #8a2a24; margin-bottom: 24px; font-size: 13px; }
 .rw .rw-banner .lucide { width: 16px; height: 16px; }
 
-.rw .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 48px; row-gap: 60px; align-items: start; }
+.rw .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 28px; row-gap: 28px; align-items: start; }
 .rw .cell.wide { grid-column: span 2; }
-@media (max-width: 980px) { .rw .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 32px; row-gap: 44px; } }
-@media (max-width: 600px) { .rw .grid { grid-template-columns: 1fr; row-gap: 36px; } .rw .cell.wide { grid-column: auto; } .rw .page { padding: 24px 16px 80px; } .rw .topbar { padding: 16px 16px 0; } .rw .rw-brand-time { display: none; } }
+@media (max-width: 980px) { .rw .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; row-gap: 24px; } }
+@media (max-width: 600px) { .rw .grid { grid-template-columns: 1fr; row-gap: 24px; } .rw .cell.wide { grid-column: auto; } .rw .page { padding: 24px 16px 80px; } .rw .topbar { padding: 16px 16px 0; } .rw .rw-brand-time { display: none; } }
 
 .rw .cell, .rw .cell-wrap > .cell { opacity: 0; transform: translateY(10px); animation: rise 0.9s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 60ms); }
 .rw .label { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); margin: 0 0 12px 1px; }
@@ -450,3 +450,24 @@ html.rw-light body { background: #fbfbfb; }
 .rw .is-arriving img { opacity: 0; }
 
 .rw .ask-bar > .gbtn { flex-shrink: 0; }
+
+.rw .dashboard-mail { grid-column: 1 / -1; margin-top: 0; gap: 28px; }
+.rw .cell, .rw .cell-wrap { min-width: 0; }
+@media (max-width: 600px) { .rw .dashboard-mail { gap: 24px; } }
+
+.rw .memory-link { color: var(--muted); font-size: 13px; text-decoration: none; cursor: pointer; padding: 8px 4px; border-radius: 6px; }
+.rw .memory-link:hover { color: var(--ink); background: #efeff1; }
+.rw .memory-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.memory-confirm { position: fixed; display: block; margin: 0; inset: auto; top: 50%; left: 50%; width: min(440px, calc(100vw - 32px)); max-width: 440px; max-height: calc(100dvh - 48px); overflow: auto; border: 1px solid #e6e6eb; border-radius: 22px; padding: 24px; background: #fff; color: #242429; box-shadow: 0 24px 80px #0003; text-align: left; }
+.memory-confirm h2 { font-size: 21px; font-weight: 600; margin-bottom: 14px; }
+.memory-confirm p { color: #55565e; font-size: 14px; line-height: 1.55; margin-bottom: 12px; }
+.memory-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.memory-confirm-actions button { padding: 10px 22px; border-radius: 12px; background: #eeeef2; min-height: 44px; }
+.memory-confirm-actions .memory-confirm-ok { background: #bd3535; color: #fff; }
+.memory-reset-error { color: #a22; }
+.rw .phone-power { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.rw .phone-power svg { width: 20px; height: 20px; }
+.rw .phone-power.is-low { color: #b52d2d; }
+.rw .media-meta .phone-power { margin-top: 5px; }
+.rw.ph .ph-status { display: flex; align-items: flex-end; flex-direction: column; gap: 5px; }
+@media (max-width: 400px) { .rw .topbar { flex-wrap: wrap; gap: 12px; } .rw .top-right { gap: 8px; } }

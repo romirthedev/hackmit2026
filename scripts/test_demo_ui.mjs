@@ -28,7 +28,7 @@ async function fits(page){
 }
 try{
  await dashboard.goto(origin);await dashboard.getByRole('tab',{name:'Rose',exact:true}).waitFor();await settled(dashboard);
- assert.equal(await dashboard.locator('#pairing-code').count(),0);assert.equal(await dashboard.getByText('Demo widgets',{exact:true}).count(),0);assert.equal(await dashboard.locator('.grid .cell').count(),13);
+ assert.equal(await dashboard.locator('#pairing-code').count(),0);assert.equal(await dashboard.getByText('Demo widgets',{exact:true}).count(),0);assert.equal(await dashboard.locator('.grid .cell').count(),15);
  await dashboard.screenshot({path:path.join(out,'dashboard.png'),fullPage:true});
  for(const width of [1440,1280,1024,768,390,320]){
   await dashboard.setViewportSize({width,height:1000});await fits(dashboard);

@@ -19,6 +19,8 @@ import {
   X,
 } from 'lucide-react';
 import Login from '@/components/login';
+import { MemoryReset } from '@/components/memory-reset';
+import { PhoneBattery, usePhoneBattery } from '@/components/phone-battery';
 import {
   api,
   AUTH_REQUIRED_EVENT,
@@ -138,6 +140,7 @@ export default function Phone() {
   const reduce = useReducedMotion();
   const announced = useRef(new Set<string>());
   const [auth, setAuth] = useState<boolean | null>(null);
+  const power = usePhoneBattery(auth === true);
   const [state, setState] = useState(INITIAL);
   const [status, setStatus] = useState<Status | null>(null);
   const [answers, setAnswers] = useState<Answer[]>([]);
@@ -164,6 +167,7 @@ export default function Phone() {
   const [sound, setSound] = useState(false);
   const soundRef = useRef(false);
   const authExpired = useRef(false);
+  const resetAt = useRef<number | null>(null);
   const trackPlayback = useCallback(
     (
       entry: VoicePlayback,
@@ -279,6 +283,13 @@ export default function Phone() {
           }),
         ]);
         if (!alive || authExpired.current) return;
+        const cleared = next.history_cleared_before || 0;
+        if (resetAt.current !== null && cleared !== resetAt.current) {
+          capture.current?.stop();
+          window.location.reload();
+          return;
+        }
+        resetAt.current = cleared;
         setAuth(true);
         setStatus(next);
         if (answerVersion === answerFetchVersion.current) setAnswers(recent);
@@ -641,11 +652,17 @@ export default function Phone() {
             rewind<span className="rw-brand-period">.</span>
             <span className="rw-brand-time">{clock}</span>
           </a>
-          <span className="ph-memory" title="Items saved on the server">
-            <Cloud />
-            <b className="tabular">{status?.received ?? 0}</b>
-            <span className="sr-only"> saved items</span>
-          </span>
+          <div className="ph-status">
+            <PhoneBattery {...power} />
+            <MemoryReset
+              className="ph-memory"
+              beforeClear={() => capture.current?.stop()}
+            >
+              <Cloud />
+              <span>Memory</span>
+              <b className="tabular">{status?.received ?? 0}</b>
+            </MemoryReset>
+          </div>
         </header>
         <main className="ph-page mode-rose">
           {(state.error || error || conversationError) && (

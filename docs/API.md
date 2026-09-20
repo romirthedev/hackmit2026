@@ -54,6 +54,8 @@ Content-Type: image/jpeg
 | GET | `/events/{id}` | Full evidence metadata |
 | GET | `/media/{id}` | Authenticated original bytes and audio range support |
 | DELETE | `/media/{id}` | Remove original/index/derived answers and invalidate scene cache |
+| DELETE | `/memory` | Requires `{confirm: true}`. Clears local recordings, scans, answers, people, conversation history, monitoring rules and connected context; disables context sync. Keeps account settings and pairing. Returns `history_cleared_before`; older offline uploads receive 410. Busy writes/processing return 409 without clearing. External source apps remain unchanged. |
+| POST | `/phone/heartbeat` | Browser-authenticated `{battery: 0..100 or null, charging: boolean or null}`. Updates phone freshness and optional battery telemetry. Unsupported browsers report null, never an estimated percentage. |
 | POST | `/ask` | `{question, after?, before?}` → answer, evidence, mode, grounded flag |
 | GET | `/answers` | Recent typed/wearable/browser voice answers |
 | POST | `/retry` | Requeue failed jobs; originals remain untouched |

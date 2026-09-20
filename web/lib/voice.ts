@@ -461,22 +461,32 @@ export class VoiceClient {
   }
 }
 
-// Record one utterance from a tapped microphone: stops after ~1.2 s of
-// silence or 15 s, whichever comes first. Resolves with the clip.
+// Separate finishing (submit the clip) from cancellation (discard it).
 export async function recordUtterance(
   onLevel?: (level: number) => void,
   signal?: AbortSignal,
+  finishSignal?: AbortSignal,
 ): Promise<Blob | null> {
-  if (!navigator.mediaDevices?.getUserMedia || signal?.aborted) return null;
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true },
-  });
-  if (signal?.aborted) {
-    stream.getTracks().forEach((track) => track.stop());
-    return null;
-  }
-  let context: AudioContext | null = null;
+  if (signal?.aborted) return null;
+  if (!navigator.mediaDevices?.getUserMedia)
+    throw new Error(
+      'Microphone access needs HTTPS or localhost. Open the secure Rewind link.',
+    );
+  if (typeof MediaRecorder === 'undefined')
+    throw new Error('This browser cannot record audio. Try Safari or Chrome.');
+  // Resume during the tap, before the permission prompt loses user activation.
+  const context = new AudioContext();
+  const resumed = context.resume();
+  let stream: MediaStream | null = null;
   try {
+    await resumed;
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+    });
+    if (signal?.aborted || finishSignal?.aborted) return null;
+    if (context.state !== 'running') await context.resume();
+    if (context.state !== 'running')
+      throw new Error('Microphone audio is paused. Tap the orb to try again.');
     const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(
       (type) => MediaRecorder.isTypeSupported(type),
     );
@@ -484,17 +494,17 @@ export async function recordUtterance(
       stream,
       mime ? { mimeType: mime } : undefined,
     );
-    context = new AudioContext();
-    await context.resume();
     const source = context.createMediaStreamSource(stream);
     const analyser = context.createAnalyser();
-    analyser.fftSize = 512;
+    analyser.fftSize = 2048;
     source.connect(analyser);
-    const data = new Uint8Array(analyser.fftSize);
+    const data = new Float32Array(analyser.fftSize);
     const parts: Blob[] = [];
-    let spoke = false,
-      quiet = 0;
-    const started = Date.now();
+    let voiced = 0,
+      quietSince = 0,
+      noise = 0.002;
+    const started = performance.now();
+    let previous = started;
     return await new Promise<Blob | null>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout>;
       const stop = () => {
@@ -503,6 +513,7 @@ export async function recordUtterance(
       const clean = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', stop);
+        finishSignal?.removeEventListener('abort', stop);
       };
       recorder.ondataavailable = (event) => {
         if (event.data.size) parts.push(event.data);
@@ -513,31 +524,45 @@ export async function recordUtterance(
       };
       recorder.onstop = () => {
         clean();
+        // An explicit finish submits quiet speech too; the transcriber decides
+        // whether it contains words. Cancellation never uploads anything.
         resolve(
-          parts.length && spoke && !signal?.aborted
-            ? new Blob(parts, { type: (mime || 'audio/webm').split(';')[0] })
+          parts.length &&
+            !signal?.aborted &&
+            (voiced >= 180 ||
+              (finishSignal?.aborted && performance.now() - started >= 250))
+            ? new Blob(parts, {
+                type: recorder.mimeType || mime || parts[0].type,
+              })
             : null,
         );
       };
       signal?.addEventListener('abort', stop, { once: true });
+      finishSignal?.addEventListener('abort', stop, { once: true });
       recorder.start(250);
       const tick = () => {
         if (recorder.state !== 'recording') return;
-        analyser.getByteTimeDomainData(data);
+        analyser.getFloatTimeDomainData(data);
         let sum = 0;
-        for (const sample of data) sum += ((sample - 128) / 128) ** 2;
+        for (const sample of data) sum += sample * sample;
         const level = Math.sqrt(sum / data.length);
         onLevel?.(level);
-        if (level > 0.03) {
-          spoke = true;
-          quiet = 0;
-        } else if (spoke) quiet += 60;
-        const elapsed = Date.now() - started;
+        const now = performance.now();
+        if (level > Math.max(0.008, noise * 3)) {
+          voiced += Math.min(now - previous, 100);
+          quietSince = 0;
+        } else {
+          if (!voiced) noise = noise * 0.98 + level * 0.02;
+          if (!quietSince) quietSince = now;
+        }
+        previous = now;
+        const elapsed = now - started;
         if (
           signal?.aborted ||
-          (spoke && quiet >= 1200) ||
-          elapsed > 15000 ||
-          (!spoke && elapsed > 6000)
+          finishSignal?.aborted ||
+          (voiced >= 180 && quietSince && now - quietSince >= 1200) ||
+          elapsed >= 20000 ||
+          (!voiced && elapsed >= 8000)
         )
           stop();
         else timer = setTimeout(tick, 60);
@@ -545,7 +570,7 @@ export async function recordUtterance(
       tick();
     });
   } finally {
-    stream.getTracks().forEach((track) => track.stop());
-    await context?.close().catch(() => {});
+    stream?.getTracks().forEach((track) => track.stop());
+    await context.close().catch(() => {});
   }
 }

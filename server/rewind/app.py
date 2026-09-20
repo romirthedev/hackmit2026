@@ -14,6 +14,7 @@ import uuid
 import wave
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -27,7 +28,7 @@ from .config import Settings
 from .context import ContextScopes, NotchContext
 from .conversation import Conversation, conversation_router
 from .db import Database, event_public
-from .history import require_current_capture
+from .history import clear_memory, require_current_capture
 from .memory import Memory
 from .models import AskRequest, RuleRequest, VideoProvenance
 from .pairing import BrowserPairing
@@ -56,6 +57,15 @@ class PairBrowser(BaseModel):
 
 class Pause(BaseModel):
     paused: bool
+
+
+class ClearMemory(BaseModel):
+    confirm: Literal[True]
+
+
+class PhoneHeartbeat(BaseModel):
+    battery: int | None = Field(default=None, ge=0, le=100)
+    charging: bool | None = None
 
 
 class Heartbeat(BaseModel):
@@ -96,6 +106,7 @@ def create_app(settings=None, provider=None):
     voice = Voice(s, p, memory)
     conversation.voice = voice
     ingestion_lock = asyncio.Lock()
+    active_writes = set()
     pairing = BrowserPairing(db, s.admin_token)
 
     # Signed stateless session, with expiration; admin API key is never put in a cookie.
@@ -251,7 +262,14 @@ def create_app(settings=None, provider=None):
 
     @app.middleware("http")
     async def headers(request, call_next):
-        response = await call_next(request)
+        tracked = request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path != "/api/memory"
+        identifier = id(request)
+        if tracked:
+            active_writes.add(identifier)
+        try:
+            response = await call_next(request)
+        finally:
+            active_writes.discard(identifier)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
@@ -312,6 +330,7 @@ def create_app(settings=None, provider=None):
         totals["provider"] = s.provider
         totals["browser_open_access"] = s.browser_open_access
         totals["history_cleared_before"] = db.setting("history_cleared_before", 0)
+        totals["phone"] = db.setting("phone_status")
         totals["processing_host"] = "ASUS via Tailscale" if s.processing_url else "server"
         totals["analysis_ready"] = s.provider != "disabled" and (await p.ready() if s.processing_url else True)
         totals["verification_enabled"] = s.codex_verify
@@ -417,6 +436,28 @@ def create_app(settings=None, provider=None):
             "reachable": s.provider == "openai" and bool(s.openai_api_key),
             "models": [s.openai_model] if s.provider == "openai" else [],
         }
+
+    @app.post("/api/phone/heartbeat", dependencies=[Depends(admin)])
+    async def phone_heartbeat(body: PhoneHeartbeat):
+        db.set_setting("phone_status", {"last_seen": time.time(), **body.model_dump()})
+        return {"ok": True}
+
+    @app.delete("/api/memory", dependencies=[Depends(admin)])
+    async def reset_memory(body: ClearMemory):
+        async with ingestion_lock, context.lock:
+            if active_writes or scans.tasks or computer.lock.locked() or db.one("SELECT id FROM media WHERE status='processing'") or db.one(
+                "SELECT id FROM visual_index WHERE status='processing'"
+            ) or db.one("SELECT id FROM conversation_turns WHERE status IN ('transcribing','routing','thinking','acting','awaiting_permission')"):
+                raise HTTPException(409, "Memory is still in use. Stop recording and wait for the current request to finish, then press OK again.")
+            if verifier and db.one("SELECT answer_id FROM answer_reviews WHERE status='checking'"):
+                raise HTTPException(409, "An evidence check is still running. Wait for it to finish, then press OK again.")
+            if s.elastic_url:
+                raise HTTPException(409, "Disconnect the external search mirror before clearing memory.")
+            # No awaits between the busy check and reset: background jobs cannot
+            # claim a new row or finish an old request during this transaction.
+            cutoff = time.time()
+            clear_memory(db, s.data_dir, cutoff)
+            return {"cleared": True, "history_cleared_before": cutoff}
 
     @app.post("/api/device/heartbeat", dependencies=[Depends(device)])
     async def heartbeat(body: Heartbeat):

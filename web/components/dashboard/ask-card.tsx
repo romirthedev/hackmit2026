@@ -1,7 +1,7 @@
 'use client';
 /* oxlint-disable next/no-html-link-for-pages -- open the recording page with a full navigation */
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Mic, Volume2, VolumeX } from 'lucide-react';
+import { ArrowUp, Mic, Square, Volume2, VolumeX } from 'lucide-react';
 import { Orb } from './orb';
 import { Card, Cell } from './primitives';
 import { AnswerDetail, isReviewedAnswer } from './answer-detail';
@@ -32,6 +32,8 @@ export function AskCard({
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
   const microphone = useRef<AbortController | null>(null);
+  const finishRecording = useRef<AbortController | null>(null);
+  const [hearing, setHearing] = useState(false);
   useEffect(() => () => microphone.current?.abort(), []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -52,7 +54,7 @@ export function AskCard({
   useEffect(() => {
     if (
       !answer ||
-      !isReviewedAnswer(answer) ||
+      (!isReviewedAnswer(answer) && answer.mode !== 'no_evidence') ||
       attempted.current.has(answer.id) ||
       document.hidden
     )
@@ -60,20 +62,28 @@ export function AskCard({
     // A rejected playback stays available for an explicit retry, rather than
     // being attempted again on every answer poll.
     attempted.current.add(answer.id);
-    if (sound && !disabled) void speak(answer.answer);
+    if (sound && !disabled)
+      void speak(
+        answer.mode === 'no_evidence'
+          ? "I couldn't find recorded evidence to answer that. Try recording a moment first."
+          : answer.answer,
+      );
   }, [answer, sound, disabled, speak, visibilityEpoch]);
   useEffect(() => {
-    if (disabled) cancel();
+    if (disabled) {
+      cancel();
+      microphone.current?.abort();
+    }
   }, [disabled, cancel]);
   const state = listening
     ? 'listening'
-    : busy || answer?.mode === 'checking'
+    : busy || hearing || answer?.mode === 'checking'
       ? 'thinking'
       : answer
         ? 'answer'
         : 'idle';
   async function go(question = text.trim()) {
-    if (!question || pending.current || disabled) return;
+    if (!question || pending.current || disabled || listening) return;
     pending.current = true;
     setBusy(true);
     setError('');
@@ -90,29 +100,41 @@ export function AskCard({
   }
   async function listen() {
     if (listening) {
-      microphone.current?.abort();
+      finishRecording.current?.abort();
       return;
     }
-    if (pending.current || disabled) return;
+    if (pending.current || microphone.current || disabled) return;
     const controller = new AbortController();
     microphone.current = controller;
+    const finish = new AbortController();
+    finishRecording.current = finish;
     setListening(true);
     setError('');
     try {
-      voice.unlock();
       voice.cancel();
-      const clip = await recordUtterance(undefined, controller.signal);
+      voice.unlock();
+      const clip = await recordUtterance(
+        undefined,
+        controller.signal,
+        finish.signal,
+      );
+      setListening(false);
       if (controller.signal.aborted) return;
       if (!clip) throw new Error("I didn't hear anything. Please try again.");
+      setHearing(true);
       const heard = await api<Heard>('/voice/hear?wake=false', {
         method: 'POST',
         headers: { 'Content-Type': clip.type },
         body: clip,
-        signal: controller.signal,
+        signal: AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(45000),
+        ]),
       });
       if (controller.signal.aborted) return;
       if (!heard.question)
         throw new Error("I couldn't hear that clearly. Please try again.");
+      setHearing(false);
       setText(heard.question);
       await go(heard.question);
     } catch (problem) {
@@ -120,6 +142,8 @@ export function AskCard({
         setError(problem instanceof Error ? problem.message : String(problem));
     } finally {
       microphone.current = null;
+      finishRecording.current = null;
+      setHearing(false);
       setListening(false);
     }
   }
@@ -131,22 +155,24 @@ export function AskCard({
           <span className="dim">
             <span className="live" />
             {listening
-              ? 'Listening…'
-              : busy
-                ? 'Finding evidence'
-                : answer?.mode === 'checking'
-                  ? 'Checking evidence'
-                  : disabled
-                    ? 'Reconnect to ask'
-                    : 'Ready'}
+              ? 'Listening… tap to send'
+              : hearing
+                ? 'Transcribing…'
+                : busy
+                  ? 'Finding evidence'
+                  : answer?.mode === 'checking'
+                    ? 'Checking evidence'
+                    : disabled
+                      ? 'Reconnect to ask'
+                      : 'Ready'}
           </span>
         </div>
         <button
           type="button"
           className="orb-stage"
-          aria-label={listening ? 'Stop listening' : 'Ask by voice'}
+          aria-label={listening ? 'Finish and send question' : 'Ask by voice'}
           aria-pressed={listening}
-          disabled={busy || disabled}
+          disabled={busy || hearing || disabled}
           onClick={() => void listen()}
         >
           <Orb state={state} />
@@ -173,6 +199,7 @@ export function AskCard({
           autoComplete="off"
           onSubmit={(event) => {
             event.preventDefault();
+            voice.unlock();
             void go();
           }}
         >
@@ -180,12 +207,12 @@ export function AskCard({
             type="button"
             className={`gbtn gbtn-round ${listening ? 'is-live' : ''}`}
             aria-label={
-              listening ? 'Cancel recording question' : 'Record a question'
+              listening ? 'Finish and send question' : 'Record a question'
             }
-            disabled={busy || disabled}
+            disabled={busy || hearing || disabled}
             onClick={() => void listen()}
           >
-            <Mic />
+            {listening ? <Square fill="currentColor" /> : <Mic />}
           </button>
           <label className={`ask-input ${text ? 'has-text' : ''}`}>
             <input
@@ -193,14 +220,16 @@ export function AskCard({
               onChange={(event) => setText(event.target.value)}
               placeholder={placeholder}
               aria-label="Ask about your recordings"
-              disabled={busy || disabled}
+              disabled={busy || hearing || listening || disabled}
               maxLength={2000}
             />
             <button
               type="submit"
               className="send"
               aria-label="Send question"
-              disabled={busy || disabled || !text.trim()}
+              disabled={
+                busy || hearing || listening || disabled || !text.trim()
+              }
             >
               <ArrowUp />
             </button>
