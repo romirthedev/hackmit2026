@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
   ArrowLeft,
   ArrowUp,
@@ -12,7 +13,12 @@ import {
   Volume2,
 } from 'lucide-react';
 import Login from '@/components/login';
-import { api, type Answer, type Status } from '@/lib/api';
+import {
+  api,
+  type Answer,
+  type Status,
+  type ConversationState,
+} from '@/lib/api';
 import { PhoneCapture, type CaptureState } from '@/lib/phone-capture';
 import { ComputerPanel } from '@/components/computer-panel';
 import { ContextPanel } from '@/components/context-panel';
@@ -45,6 +51,8 @@ const INITIAL: CaptureState = {
   startedAt: 0,
   finalizing: false,
   originalBytes: 0,
+  voice: 'off',
+  speaking: false,
 };
 export default function Phone() {
   const video = useRef<HTMLVideoElement>(null);
@@ -56,6 +64,13 @@ export default function Phone() {
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [originals, setOriginals] = useState<OriginalRecording[]>([]);
+  const [conversation, setConversation] = useState<ConversationState>({
+    status: 'listening',
+    turns: [],
+  });
+  const [conversationError, setConversationError] = useState('');
+  const spokenTurns = useRef(new Set<string>());
+  const answerFetchVersion = useRef(0);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
@@ -72,9 +87,9 @@ export default function Phone() {
       return;
     }
     let alive = true;
-    let first = true;
     const poll = async () => {
       try {
+        const answerVersion = ++answerFetchVersion.current;
         const [next, recent, due, recorded] = await Promise.all([
           api<Status>('/status'),
           api<Answer[]>('/answers'),
@@ -84,7 +99,7 @@ export default function Phone() {
         if (!alive) return;
         setAuth(true);
         setStatus(next);
-        setAnswers(recent);
+        if (answerVersion === answerFetchVersion.current) setAnswers(recent);
         setReminders(due);
         setOriginals(recorded);
         setError('');
@@ -95,19 +110,6 @@ export default function Phone() {
               announced.current.add(reminder.id);
             }
           }
-        if (
-          !first &&
-          recent[0] &&
-          recent[0].mode !== 'checking' &&
-          !announced.current.has(recent[0].id) &&
-          soundRef.current &&
-          !capture.current?.state.question
-        )
-          capture.current?.speak(recent[0].answer);
-        recent
-          .filter((answer) => answer.mode !== 'checking')
-          .forEach((answer) => announced.current.add(answer.id));
-        first = false;
       } catch (problem) {
         if (alive && /access key|401/.test(String(problem))) setAuth(false);
         else if (alive)
@@ -130,25 +132,112 @@ export default function Phone() {
       capture.current = null;
     };
   }, [auth]);
+  useEffect(() => {
+    if (auth !== true) return;
+    let alive = true;
+    let polling = false;
+    let first = true;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const next = await api<ConversationState>('/conversation/state');
+        if (!alive) return;
+        setConversation(next);
+        setConversationError('');
+        const newCompletedRecall =
+          !first &&
+          next.turns.some(
+            (turn) =>
+              turn.status === 'completed' &&
+              turn.answer_id &&
+              !spokenTurns.current.has(`${turn.id}:${turn.response_revision}`),
+          );
+        let refreshedAnswers: Answer[] = [];
+        if (newCompletedRecall) {
+          ++answerFetchVersion.current;
+          refreshedAnswers = await api<Answer[]>('/answers');
+          if (!alive) return;
+          // Invalidate slower dashboard polls so a draft cannot replace the
+          // checked card while its completed response is being spoken.
+          ++answerFetchVersion.current;
+          // Commit the checked label before handing the response to speech.
+          flushSync(() => setAnswers(refreshedAnswers));
+        }
+        for (const turn of [...next.turns].sort(
+          (a, b) => a.created_at - b.created_at,
+        )) {
+          if (
+            turn.transcript &&
+            ['thinking', 'checking'].includes(turn.status)
+          ) {
+            const acknowledgement = `${turn.id}:ack`;
+            if (
+              !first &&
+              !spokenTurns.current.has(acknowledgement) &&
+              soundRef.current
+            )
+              capture.current?.speak('Let me check that.');
+            spokenTurns.current.add(acknowledgement);
+          }
+          if (
+            !turn.response ||
+            ![
+              'completed',
+              'clarification',
+              'awaiting_permission',
+              'error',
+            ].includes(turn.status)
+          )
+            continue;
+          const key = `${turn.id}:${turn.response_revision}`;
+          if (
+            !first &&
+            turn.status === 'completed' &&
+            turn.answer_id &&
+            !spokenTurns.current.has(key)
+          ) {
+            const checked = refreshedAnswers.find(
+              (answer) => answer.id === turn.answer_id,
+            );
+            if (
+              !checked?.verification?.receipt.claims_reviewed ||
+              !['verified', 'insufficient'].includes(checked.mode)
+            )
+              continue;
+          }
+          if (!first && !spokenTurns.current.has(key) && soundRef.current)
+            capture.current?.speak(turn.response);
+          spokenTurns.current.add(key);
+        }
+        first = false;
+      } catch {
+        if (alive)
+          setConversationError(
+            'Voice requests are reconnecting. Saved speech will retry.',
+          );
+      } finally {
+        polling = false;
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 1250);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [auth]);
   async function ask(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!question.trim() || asking) return;
     setAsking(true);
     setError('');
     try {
-      const answer = await api<Answer>('/ask', {
+      await api('/conversation/text', {
         method: 'POST',
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ id: crypto.randomUUID(), text: question }),
       });
-      setAnswers((previous) => [
-        answer,
-        ...previous.filter((old) => old.id !== answer.id),
-      ]);
       setQuestion('');
-      if (answer.mode !== 'checking') {
-        if (sound) capture.current?.speak(answer.answer);
-        announced.current.add(answer.id);
-      }
     } catch (problem) {
       setError(String(problem));
     } finally {
@@ -175,7 +264,11 @@ export default function Phone() {
           className={sound ? 'sound-on' : ''}
           aria-pressed={sound}
           aria-label="Spoken answers and reminders"
-          onClick={() => setSound(!sound)}
+          onClick={() => {
+            if (sound) capture.current?.silenceSpeech();
+            soundRef.current = !sound;
+            setSound(!sound);
+          }}
         >
           <Volume2 size={20} />
         </button>
@@ -267,7 +360,11 @@ export default function Phone() {
           disabled={state.requesting || state.finalizing}
           onClick={() => {
             if (state.recording) capture.current?.stop();
-            else void capture.current?.start();
+            else {
+              soundRef.current = true;
+              setSound(true);
+              void capture.current?.start();
+            }
           }}
         >
           {state.recording ? (
@@ -332,30 +429,50 @@ export default function Phone() {
               ))}
           </details>
         )}
-        {(state.error || error) && (
+        {(state.error || error || conversationError) && (
           <p className="phone-error" role="alert">
-            {state.error || error}
+            {state.error || error || conversationError}
           </p>
         )}
         <section className="phone-ask">
-          <h2>A question on your mind?</h2>
-          <button
-            className={'phone-voice ' + (state.question ? 'listening' : '')}
-            disabled={!state.recording}
-            onClick={() => capture.current?.toggleQuestion()}
+          <h2>Just talk to me.</h2>
+          <output
+            className={
+              'phone-voice ' + (state.voice === 'hearing' ? 'listening' : '')
+            }
+            aria-live="polite"
           >
-            {state.question ? <Square size={19} /> : <Mic size={21} />}
-            {state.question ? 'Done — answer my question' : 'Ask aloud'}
-          </button>
-          {!state.recording && (
-            <p className="phone-fine">
-              Start recording to ask aloud, or type below.
-            </p>
-          )}
+            <Mic size={21} />
+            {state.speaking
+              ? 'Speaking · listening resumes afterward'
+              : state.voice === 'hearing'
+                ? 'I’m listening…'
+                : conversation.status === 'awaiting_permission'
+                  ? 'Waiting for your reply'
+                  : [
+                        'queued',
+                        'transcribing',
+                        'routing',
+                        'thinking',
+                        'checking',
+                      ].includes(conversation.status)
+                    ? 'Thinking about your request…'
+                    : conversation.status === 'acting'
+                      ? 'Working on your Mac…'
+                      : state.recording && state.voice === 'listening'
+                        ? 'Listening for questions and requests'
+                        : state.voice === 'unavailable'
+                          ? 'Voice unavailable · type below'
+                          : 'Press Record, then speak naturally'}
+          </output>
+          <p className="phone-fine">
+            Ask about your day or tell me what to do on your Mac. Pause when
+            you’re done; no extra button is needed.
+          </p>
           <form onSubmit={ask}>
             <input
-              aria-label="Ask about your day"
-              placeholder="Where did I leave my glasses?"
+              aria-label="Type a question or request"
+              placeholder="Or type a question or Mac request…"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               maxLength={2000}
@@ -367,9 +484,27 @@ export default function Phone() {
               <ArrowUp size={22} />
             </button>
           </form>
-          {asking && (
-            <output>Looking through your moments and connections…</output>
-          )}
+          {asking && <output>Sending your request…</output>}
+          {conversation.turns
+            .filter(
+              (turn) =>
+                turn.status !== 'ignored' &&
+                (!turn.answer_id ||
+                  !answers.some((answer) => answer.id === turn.answer_id)),
+            )
+            .slice(-3)
+            .reverse()
+            .map((turn) => (
+              <article className="phone-answer" key={turn.id}>
+                <h3>{turn.transcript || 'Hearing your words…'}</h3>
+                <p>
+                  {turn.response ||
+                    (turn.status === 'acting'
+                      ? 'Notch is working on your Mac…'
+                      : 'Working on your request…')}
+                </p>
+              </article>
+            ))}
           {answers.slice(0, 3).map((answer) => (
             <article className="phone-answer" key={answer.id}>
               <h3>{answer.question}</h3>
@@ -381,21 +516,29 @@ export default function Phone() {
                 <small>
                   {answer.mode === 'checking'
                     ? 'Waiting for Codex review'
-                    : answer.mode === 'verified'
-                      ? 'Checked against sources by ' +
-                        (answer.verification?.receipt.reviews
-                          ?.map((r) => r.model)
-                          .join(' → ') || 'Codex')
-                      : answer.mode === 'insufficient' &&
-                          answer.verification?.receipt.claims_reviewed
-                        ? 'Sources checked · evidence is incomplete'
-                        : answer.grounded
-                        ? `${answer.evidence.length} sources cited`
-                        : 'Evidence incomplete'}
+                    : answer.mode === 'legacy_unverified'
+                      ? 'Earlier answer · not checked'
+                      : answer.mode === 'verified'
+                        ? 'Checked against sources by ' +
+                          (answer.verification?.receipt.reviews
+                            ?.map((r) => r.model)
+                            .join(' → ') || 'Codex')
+                        : answer.mode === 'insufficient' &&
+                            answer.verification?.receipt.claims_reviewed
+                          ? 'Sources checked · evidence is incomplete'
+                          : answer.grounded
+                            ? `${answer.evidence.length} sources cited`
+                            : 'Evidence incomplete'}
                 </small>
                 <button
                   aria-label="Read answer aloud"
-                  disabled={answer.mode === 'checking'}
+                  disabled={
+                    !(
+                      answer.mode === 'verified' ||
+                      (answer.mode === 'insufficient' &&
+                        answer.verification?.receipt.claims_reviewed)
+                    )
+                  }
                   onClick={() => capture.current?.speak(answer.answer)}
                 >
                   <Volume2 size={18} />

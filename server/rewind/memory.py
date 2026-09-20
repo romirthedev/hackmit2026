@@ -12,6 +12,7 @@ import numpy as np
 
 from .db import event_public
 from .models import RecallAnswer, SearchPlan
+from .object_retrieval import LOCATION_IMAGE_LIMIT, location_terms, object_location_evidence
 from .sampled_evidence import attach_original_recordings, sample_scope_qualification
 from .temporal import (
     coverage_qualification,
@@ -206,11 +207,32 @@ Do not invent dates or anchor actions. Return JSON.""",
             evidence, coverage = await asyncio.to_thread(self.day_evidence, after, before)
         else:
             evidence = await self.search(query, after, before, 18)
+        if source_media:
+            # A spoken question is a request, not corroborating evidence for
+            # its own presuppositions. Keep later frames; do not cut the clock
+            # at the utterance's start while the phone is still recording.
+            evidence = [row for row in evidence if row["id"] != source_media]
+            anchor = [row for row in anchor if row["id"] != source_media]
+        location_frames = []
+        if not overview and (object_words := location_terms(question)):
+            location_frames = await asyncio.to_thread(
+                object_location_evidence,
+                self.db,
+                EVIDENCE_SELECT,
+                object_words,
+                evidence,
+                after if after is not None else 0,
+                before if before is not None else time.time() + 5,
+            )
+            if location_frames:
+                # Keep visually adjacent source originals, not just the most
+                # recent object instance or unrelated freshly uploaded views.
+                evidence = location_frames + [row for row in evidence if row["kind"] != "frame"][:2]
         # Questions can inspect freshly received originals before background labels
         # finish. This is especially important when capture is ahead of indexing.
         fresh = (
             []
-            if overview
+            if overview or location_frames
             else [
                 event_public(row)
                 for row in self.db.all(
@@ -251,8 +273,12 @@ Do not invent dates or anchor actions. Return JSON.""",
             )
         if overview:
             neighbors = [row for row in neighbors if row["clock_quality"] not in {None, "synthetic"}]
-        unique = {r["id"]: r for r in (evidence if overview else evidence[:6]) + neighbors + anchor}
-        evidence = list(unique.values())[: 24 if overview else 12]
+        unique = {
+            r["id"]: r
+            for r in (evidence if overview or location_frames else evidence[:6]) + neighbors + anchor
+            if r["id"] != source_media
+        }
+        evidence = list(unique.values())[: 24 if overview else 16 if location_frames else 12]
         if self.context:
             evidence += self.context.search(question, limit=6)
         # Captions/transcripts must not smuggle a changed original back into the
@@ -280,19 +306,29 @@ Do not invent dates or anchor actions. Return JSON.""",
         else:
             # Short model-facing references avoid long UUID copying failures. The server alone
             # translates labels back to immutable recording IDs after strict validation.
-            aliases = {f"E{i + 1}": row["id"] for i, row in enumerate(evidence)}
-            inverse = {event_id: label for label, event_id in aliases.items()}
             frames = [row for row in evidence if row["kind"] == "frame"]
             chosen = []
+            image_limit = (
+                12 if overview else LOCATION_IMAGE_LIMIT if location_frames else self.s.recall_max_images
+            )
             for row in frames:
-                if not any(
-                    row.get("boot") == old.get("boot") and abs(row["captured_at"] - old["captured_at"]) < 2
+                if location_frames or not any(
+                    row.get("device") == old.get("device")
+                    and row.get("boot") == old.get("boot")
+                    and abs(row["captured_at"] - old["captured_at"]) < 2
                     for old in chosen
                 ):
                     chosen.append(row)
-                if len(chosen) == (12 if overview else self.s.recall_max_images):
+                if len(chosen) == image_limit:
                     break
-            chosen.sort(key=lambda row: (row["device"], row["boot"], row["captured_at"]))
+            chosen.sort(key=lambda row: (row["captured_at"], row["device"], row["boot"]))
+            # Bind E1..En to image order, then assign remaining text-only sources.
+            # Labels created before sorting made image 3 differ from E3, an
+            # avoidable source of citation errors for models and reviewers.
+            chosen_ids = {row["id"] for row in chosen}
+            evidence = chosen + [row for row in evidence if row["id"] not in chosen_ids]
+            aliases = {f"E{i + 1}": row["id"] for i, row in enumerate(evidence)}
+            inverse = {event_id: label for label, event_id in aliases.items()}
             image_paths, attached_ids = [], []
             for row in chosen:
                 media = originals.get(row["id"])
@@ -355,6 +391,12 @@ Recording timestamps only locate a recorded sample; they do not establish when a
 A synthetic clock is an import timeline and provides no historical wall-clock evidence. Never invent exact quotes;
 transcripts are automatic and may contain mistakes. Say "last observed" for object locations, never assume
 an occluded object stayed there. Do not claim perfect recall or identify a speaker by voice/appearance.
+For object-location questions, compare visually distinctive instances and their same-recording continuity.
+The newest image of an object is not necessarily the same instance shown earlier. The word "my" in the
+question does not establish identity or ownership. If the referent is ambiguous, offer a useful conditional
+location using its visible description ("If you mean the [description], it was last seen [location]") when
+the images support that observation; distinguish other instances. Do not invent a placement action from
+a stationary view or demand proof of legal ownership before describing an observed object's location.
 Distinguish what was observed from inference. Mention ambiguous temporal anchors and approximate device clocks.
 When recording_coverage is supplied, summarize only available samples across the requested interval.
 It does not establish complete recording or everything the person did. Mention missing periods and pending

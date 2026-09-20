@@ -1,6 +1,14 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ConversationIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["memory", "computer", "ignore", "clarify"]
+    directed_request: bool
+    resolved_request: str = Field(max_length=1600)
+    clarification: str = Field(max_length=350)
 
 
 class ObjectObservation(BaseModel):

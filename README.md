@@ -1,11 +1,16 @@
 # REWIND
 
 **Phone-first personal memory, connected to Notch.** Scan a QR code, tap Record,
-and clip the phone to your chest. Ask about recorded moments and connected
+and clip the phone to your chest. Then speak naturally to ask about recorded moments and connected
 notes, emails, appointments, friends, and family in one workspace. Read the
 [user-confirmed product brief](docs/PRODUCT-VISION.md) and the
 [phone and Notch setup](docs/PHONE-NOTCH.md). The existing ESP32 camera is an
 additional capture input.
+
+The [hands-free phone path](docs/HANDS-FREE.md) automatically detects questions
+and Notch computer requests after Record, checks memory answers, and speaks replies.
+Full video/audio originals are retained alongside the one-frame-per-second analysis
+stream. Current measured response times and device limitations are documented there.
 
 **This is an implemented prototype, not a guarantee of perfect recall.** All received frames get their own AI job, including identical frames. The default capture rate is 1 JPEG/second, not 30 fps video. Events outside the camera view, missed captures, unclear speech, power loss, and model errors cannot be reconstructed reliably. Originals, processing failures, queue depth, device errors, and timestamp quality remain visible.
 

@@ -63,6 +63,21 @@ export type Answer = {
     };
   } | null;
 };
+export type ConversationTurn = {
+  id: string;
+  transcript: string;
+  response: string;
+  response_revision: number;
+  status: string;
+  kind: string | null;
+  answer_id?: string | null;
+  created_at: number;
+};
+export type ConversationState = {
+  status: string;
+  turns: ConversationTurn[];
+  error?: string | null;
+};
 export type Device = {
   id: string;
   last_seen: number;

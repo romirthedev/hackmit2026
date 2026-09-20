@@ -202,7 +202,7 @@
   border-radius: 15px;
   background: #24182e;
   color: #dbc1ef;
-  cursor: pointer;
+  cursor: default;
 }
 .phone-voice.listening {
   background: #512641;

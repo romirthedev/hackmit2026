@@ -1,4 +1,6 @@
 // Original chunks are persisted before upload. Retries keep the same sequence and bytes.
+import { VoiceActivityCapture, type VoiceActivity } from './voice-activity';
+
 export type CaptureState = {
   recording: boolean;
   requesting: boolean;
@@ -10,12 +12,14 @@ export type CaptureState = {
   startedAt: number;
   finalizing: boolean;
   originalBytes: number;
+  voice: VoiceActivity;
+  speaking: boolean;
 };
 type Chunk = {
   id: string;
   boot: string;
   seq: number;
-  kind: 'frame' | 'audio' | 'video' | 'recording_end';
+  kind: 'frame' | 'audio' | 'video' | 'recording_end' | 'conversation_audio';
   at: number;
   blob: Blob;
   intent: 'memory' | 'question';
@@ -140,11 +144,14 @@ export class PhoneCapture {
     startedAt: 0,
     finalizing: false,
     originalBytes: 0,
+    voice: 'off',
+    speaking: false,
   };
   private stream: MediaStream | null = null;
   private wake: WakeLockSentinel | null = null;
   private audio: MediaRecorder | null = null;
   private original: MediaRecorder | null = null;
+  private voice: VoiceActivityCapture | null = null;
   private releaseCaptureLease: (() => void) | null = null;
   private endReason: EndReason = 'stopped';
   private audioTimer: ReturnType<typeof setTimeout> | null = null;
@@ -157,6 +164,7 @@ export class PhoneCapture {
   private speaking = false;
   private speechQueue: string[] = [];
   private speechGeneration = 0;
+  private speechTimer: ReturnType<typeof setTimeout> | null = null;
   private uploadError = '';
   private persist = Promise.resolve();
   private ready: Promise<void>;
@@ -215,6 +223,35 @@ export class PhoneCapture {
       return;
     this.update({ requesting: true, error: '' });
     try {
+      try {
+        this.voice = new VoiceActivityCapture(
+          (blob, at) =>
+            this.enqueue('conversation_audio', blob, at, 'question', {
+              boot: this.boot,
+              seq: this.seq.audio++,
+            }),
+          (voice) => {
+            this.update({ voice });
+            if (
+              voice === 'listening' &&
+              !this.speaking &&
+              this.speechQueue.length
+            )
+              this.playSpeech();
+          },
+          () => {
+            this.update({
+              voice: 'unavailable',
+              error:
+                'Voice listening was interrupted. Your recording is still saved; you can type a request below.',
+            });
+            this.beginAudio();
+          },
+        );
+      } catch {
+        this.voice = null;
+        this.update({ voice: 'unavailable' });
+      }
       await this.ready;
       await database();
       await this.acquireCaptureLease();
@@ -267,6 +304,24 @@ export class PhoneCapture {
       );
       this.update({ recording: true, startedAt: Date.now(), originalBytes: 0 });
       await this.beginOriginal();
+      const voice = this.voice;
+      if (voice && this.stream) {
+        try {
+          // A response may already be speaking while Record is opening the
+          // camera or restarting. The new microphone analyzer must inherit it.
+          voice.suppress(this.speaking);
+          await voice.start(this.stream);
+        } catch {
+          voice.stop();
+          this.voice = null;
+          if (this.state.recording)
+            this.update({
+              voice: 'unavailable',
+              error:
+                'This browser could not start hands-free listening. Your recording is still saved; type a request below.',
+            });
+        }
+      }
       try {
         if ('wakeLock' in navigator) {
           this.wake = await navigator.wakeLock.request('screen');
@@ -300,6 +355,9 @@ export class PhoneCapture {
   stop(reason: EndReason = 'stopped') {
     this.endReason = reason;
     this.update({ recording: false, question: false });
+    this.voice?.stop();
+    this.voice = null;
+    this.update({ voice: 'off' });
     if (this.frameTimer) clearTimeout(this.frameTimer);
     if (this.audioTimer) clearTimeout(this.audioTimer);
     if (this.audio?.state === 'recording') this.audio.stop();
@@ -474,7 +532,8 @@ export class PhoneCapture {
       !this.stream ||
       !this.state.recording ||
       this.speaking ||
-      this.audio?.state === 'recording'
+      this.audio?.state === 'recording' ||
+      (this.voice && this.state.voice !== 'unavailable')
     )
       return;
     const mime = [
@@ -627,9 +686,12 @@ export class PhoneCapture {
           pending.slice(i, i + 2).map(async (item) => {
             const recording =
               item.kind === 'video' || item.kind === 'recording_end';
-            const url = recording
-              ? `/api/continuous-recordings/${item.boot}/${item.kind === 'video' ? `chunks/${item.seq}` : 'finish'}`
-              : '/api/ingest/' + item.kind;
+            const url =
+              item.kind === 'conversation_audio'
+                ? '/api/conversation/audio'
+                : recording
+                  ? `/api/continuous-recordings/${item.boot}/${item.kind === 'video' ? `chunks/${item.seq}` : 'finish'}`
+                  : '/api/ingest/' + item.kind;
             const response = await fetch(url, {
               method: 'POST',
               headers: {
@@ -683,33 +745,62 @@ export class PhoneCapture {
   speak(text: string) {
     if (!('speechSynthesis' in window) || this.disposed) return;
     this.speechQueue.push(text);
-    if (!this.speaking) this.playSpeech();
+    if (!this.speaking && this.state.voice !== 'hearing') this.playSpeech();
+  }
+  silenceSpeech() {
+    this.speechGeneration++;
+    this.speechQueue = [];
+    if (this.speechTimer) clearTimeout(this.speechTimer);
+    this.speechTimer = null;
+    window.speechSynthesis?.cancel();
+    this.speaking = false;
+    this.update({ speaking: false });
+    this.voice?.suppress(false);
+    this.beginAudio();
   }
   private playSpeech() {
+    if (this.state.voice === 'hearing') return;
     const text = this.speechQueue.shift();
     if (!text || this.disposed) {
       this.speaking = false;
+      this.update({ speaking: false });
+      this.voice?.suppress(false);
       this.beginAudio();
       return;
     }
     this.speaking = true;
+    this.update({ speaking: true });
+    this.voice?.suppress(true);
     const generation = this.speechGeneration;
     if (this.audioTimer) clearTimeout(this.audioTimer);
     if (this.audio?.state === 'recording') this.audio.stop();
     const utterance = new SpeechSynthesisUtterance(
       text.replace(/\[[0-9a-f-]{36}\]/g, ''),
     );
+    let finished = false;
     const resume = () => {
+      if (finished) return;
+      finished = true;
+      if (this.speechTimer) clearTimeout(this.speechTimer);
+      this.speechTimer = null;
       if (generation === this.speechGeneration) this.playSpeech();
     };
     utterance.onend = resume;
     utterance.onerror = resume;
+    this.speechTimer = setTimeout(
+      () => {
+        window.speechSynthesis.cancel();
+        resume();
+      },
+      Math.min(90000, Math.max(15000, text.length * 100)),
+    );
     window.speechSynthesis.speak(utterance);
   }
   dispose() {
     this.disposed = true;
     this.speechGeneration++;
     this.speechQueue = [];
+    if (this.speechTimer) clearTimeout(this.speechTimer);
     this.stop('page_closed');
     clearInterval(this.uploadTimer);
     document.removeEventListener('visibilitychange', this.visibility);

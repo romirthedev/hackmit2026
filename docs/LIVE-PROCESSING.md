@@ -89,7 +89,7 @@ ignored `data/codex-live-review-probe/`.
 
 ## Actual Notch computer control
 
-The paired phone's **Your computer** tab invokes the full copied Notch app,
+The paired phone's directed speech and **Your computer** tab invoke the full copied Notch app,
 not the read-only context bridge. The narrow API exposes command, state, cancel,
 and a decision for one exact pending permission UUID. Commands use durable request
 IDs; a retry after uncertain delivery cannot repeat the action. Native commands

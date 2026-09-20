@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from .recording_integrity import fingerprint, fragments_status, verified_fragment
+from .storage import retained_bytes
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS continuous_recordings (
@@ -162,10 +163,7 @@ def recording_router(db, settings, admin, ingestion_lock=None):
                     return {"saved": True, "duplicate": True, "sha256": digest}
                 if row and row["expected_chunks"] is not None and sequence >= row["expected_chunks"]:
                     raise HTTPException(409, "Fragment exceeds the finalized recording length")
-                total = c.execute(
-                    "SELECT (SELECT COALESCE(SUM(bytes),0) FROM media) + "
-                    "(SELECT COALESCE(SUM(bytes),0) FROM recording_chunks)"
-                ).fetchone()[0]
+                total = retained_bytes(db, c)
                 if (
                     total + len(data) > settings.max_storage_gb * 1e9
                     or shutil.disk_usage(directory).free - len(data) < settings.min_free_gb * 1e9

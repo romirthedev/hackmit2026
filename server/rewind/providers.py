@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import re
 import time
 from pathlib import Path
 
@@ -66,6 +67,23 @@ class Provider:
         max_tokens=768,
     ):
         attachments = ([image] if image else []) + (images or [])
+        labels = None
+        if attachments:
+            try:
+                evidence_packet = json.loads(content)
+            except (ValueError, TypeError):
+                evidence_packet = None
+            if isinstance(evidence_packet, dict) and "attached_images_in_order" in evidence_packet:
+                labels = evidence_packet["attached_images_in_order"]
+                if (
+                    not isinstance(labels, list)
+                    or len(labels) != len(attachments)
+                    or not all(
+                        isinstance(label, str) and re.fullmatch(r"E[1-9][0-9]*", label) for label in labels
+                    )
+                    or len(set(labels)) != len(labels)
+                ):
+                    raise ValueError("Original-image labels do not match the supplied originals")
         if self.s.provider == "disabled":
             raise RuntimeError("AI provider disabled; recordings remain queued until a model is configured.")
         if self.s.processing_url:
@@ -86,7 +104,9 @@ class Provider:
             if not self.s.openai_api_key:
                 raise RuntimeError("REWIND_OPENAI_API_KEY is missing")
             parts = [{"type": "input_text", "text": content}]
-            for attachment in attachments:
+            for i, attachment in enumerate(attachments):
+                if labels:
+                    parts.append({"type": "input_text", "text": f"Original image source {labels[i]}."})
                 parts.append(
                     {
                         "type": "input_image",
@@ -132,7 +152,11 @@ class Provider:
                 messages.extend(
                     {
                         "role": "user",
-                        "content": f"Attached image {i + 1} in the supplied image order.",
+                        "content": (
+                            f"Original image source {labels[i]}. Cite this exact source label for its pixels."
+                            if labels
+                            else f"Attached image {i + 1} in the supplied image order."
+                        ),
                         "images": [base64.b64encode(path.read_bytes()).decode()],
                     }
                     for i, path in enumerate(attachments)
@@ -141,6 +165,8 @@ class Provider:
             else:
                 msg = {"role": "user", "content": content}
                 if attachments:
+                    if labels:
+                        msg["content"] = f"Original image source {labels[0]}.\n" + content
                     msg["images"] = [base64.b64encode(attachments[0].read_bytes()).decode()]
                 messages.append(msg)
             path, payload = chat_request(

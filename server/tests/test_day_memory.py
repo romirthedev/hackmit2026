@@ -133,7 +133,7 @@ async def test_focused_question_retains_relevance_and_normal_image_budget(worksp
     db, settings, provider = workspace
     for i in range(12):
         add_frame(workspace, 1000 + i * 3600, summary="Glasses on a shelf")
-    result = await Memory(db, provider, settings).ask("Where did I leave my glasses today?")
+    result = await Memory(db, provider, settings).ask("What color were my glasses today?")
     assert len(provider.calls[0][2]) == settings.recall_max_images
     assert provider.calls[0][1]["recording_coverage"] is None
     assert "recording_coverage" not in result

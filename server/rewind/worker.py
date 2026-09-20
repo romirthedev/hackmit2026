@@ -26,8 +26,8 @@ class Worker:
         with self.db.connect() as c:
             c.execute("BEGIN IMMEDIATE")
             row = c.execute(
-                """SELECT * FROM media WHERE (status='queued' AND retry_at<=?) OR
-                (status='processing' AND lease_until<?) ORDER BY intent='question' DESC, captured_at LIMIT 1""",
+                """SELECT * FROM media WHERE intent!='conversation' AND ((status='queued' AND retry_at<=?) OR
+                (status='processing' AND lease_until<?)) ORDER BY intent='question' DESC, captured_at LIMIT 1""",
                 (now, now),
             ).fetchone()
             if row is None:

@@ -10,6 +10,12 @@ stays awake and captures her surroundings and conversations. She can ask a
 question at any time, by voice or text, and receive an answer grounded in what
 was recorded and what her connected sources establish.
 
+After Record, speaking is the interaction: no separate Ask button or computer-mode
+button is needed for a direct request. The app detects utterances, answers aloud,
+and resolves follow-ups from checked conversation history. Speech captured from
+other conversations, quotations, or a television is evidence, not permission to
+operate the Mac. Ambiguous requests should elicit a spoken clarification.
+
 The same workspace initializes her digital context through **Notch**, specifically
 `https://github.com/romirthedev/notch`. Its memory graph connects emails,
 appointments, friends, family, notes, and physical moments. The phone capture
@@ -68,7 +74,8 @@ is an optional additional input.
 ## Acceptance scenarios
 
 1. A fresh phone scans a one-use QR link, opens the workspace, and records with
-   one tap after normal camera/microphone permissions.
+   one tap after normal camera/microphone permissions. Subsequent directed speech
+   automatically becomes a question or a Notch request, with spoken responses.
 2. A recording continues with the screen awake; switching away or an interrupted
    camera produces a visible paused state. Saved uploads survive a reload.
 3. A question retrieves original physical evidence and relevant Notch sources,

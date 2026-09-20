@@ -13,11 +13,21 @@ from pydantic import BaseModel, Field
 
 from .config import Settings
 from .faces import FaceEncoder
-from .models import CompactObservation, Observation, RecallAnswer, RuleDecision, SearchPlan
+from .models import (
+    CompactObservation,
+    ConversationIntent,
+    Observation,
+    RecallAnswer,
+    RuleDecision,
+    SearchPlan,
+)
 from .providers import Provider
 from .visual import OpenClipEncoder
 
-SCHEMAS = {c.__name__: c for c in (CompactObservation, Observation, RecallAnswer, RuleDecision, SearchPlan)}
+SCHEMAS = {
+    c.__name__: c
+    for c in (CompactObservation, ConversationIntent, Observation, RecallAnswer, RuleDecision, SearchPlan)
+}
 
 
 class StructuredInput(BaseModel):

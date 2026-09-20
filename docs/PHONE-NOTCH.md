@@ -83,8 +83,9 @@ or Notch capability keys.
 
 ## Capture, questions, and reminders
 
-The phone saves one JPEG per second and independently decodable ten-second
-audio clips. Originals enter IndexedDB before upload; two uploads run concurrently.
+The phone saves continuous video/audio originals, one JPEG per second, and
+independently decodable speech utterances. Originals enter IndexedDB before upload;
+two uploads run concurrently, with speech requests prioritized.
 Retries keep the original stream ID, sequence, and bytes. A 150 MiB local queue
 limit pauses recording visibly. Reloading preserves completed queued chunks;
 the currently unfinished audio clip can be lost if the browser is terminated.
@@ -97,10 +98,12 @@ on the actual phone before a long session. See
 [MDN wake lock](https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API)
 and [camera requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia).
 
-Ask aloud routes up to 30 seconds of question audio separately; typed questions
-use the same recall service. Speaker playback pauses ambient audio recording
-to avoid recording its own answer. Camera capture continues. Original images,
-audio, and digital source text can be opened under an answer.
+After Record, a pause in speech submits the utterance automatically. Directed
+questions use evidence-grounded recall; direct Mac requests go to the actual Notch
+agent. Typed requests use the same router. Speaker playback pauses request routing
+to avoid hearing its own answer; full camera/audio recording continues. Original
+images, audio, and digital source text can be opened under an answer. See
+[HANDS-FREE.md](HANDS-FREE.md) for measured end-to-end tests and current limits.
 
 Notch notes retain wikilinks and topic nodes. Exact unique contact email matches
 connect people to mail/calendar; explicit related-person names connect contacts

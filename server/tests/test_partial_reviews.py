@@ -3,7 +3,7 @@ import json
 import pytest
 from rewind.memory import Memory
 from rewind.models import RecallAnswer, SearchPlan
-from rewind.verification import Verifier
+from rewind.verification import Verifier, validate_answer
 from test_day_memory import add_frame
 from test_day_memory import workspace as workspace
 
@@ -22,6 +22,25 @@ class CandidateProvider:
             answer="A green cup is visible [E1]." if self.cited else "No useful evidence.",
             evidence_ids=["E1"] if self.cited else [],
             insufficient_evidence=self.insufficient,
+        )
+
+
+@pytest.mark.parametrize("reference", ["[E2–E3]", "[E2, E3]"])
+def test_review_source_ranges_are_expanded_and_checked_before_rendering(reference):
+    result = validate_answer(
+        {"answer": f"An object is visible {reference}.", "evidence_ids": ["E2", "E3"]},
+        {"E1", "E2", "E3"},
+    )
+    assert result["answer"] == "An object is visible [E2] [E3]."
+    with pytest.raises(ValueError):
+        validate_answer(
+            {"answer": "An object is visible [E1–E3].", "evidence_ids": ["E2", "E3"]},
+            {"E1", "E2", "E3"},
+        )
+    with pytest.raises(ValueError):
+        validate_answer(
+            {"answer": "An object is visible [E2–E99999].", "evidence_ids": ["E2"]},
+            {"E1", "E2"},
         )
 
 
@@ -74,6 +93,14 @@ async def test_cited_partial_and_adequate_answers_both_receive_review(
     assert len(runner.calls) == 1
     receipt = verifier.public(result["id"])["receipt"]
     assert receipt["claims_reviewed"] and receipt["answer_complete"] is grounded
+    assert receipt["original_image_bindings"] == [
+        {
+            "label": "E1",
+            "media_id": identifier,
+            "sha256": db.one("SELECT sha256 FROM media WHERE id=?", (identifier,))["sha256"],
+        }
+    ]
+    assert db.one("SELECT packet FROM answer_reviews WHERE answer_id=?", (result["id"],))["packet"] == "{}"
 
 
 async def test_sol_correction_does_not_promote_an_incomplete_candidate(workspace):

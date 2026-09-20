@@ -144,3 +144,73 @@ async def test_llamacpp_preserves_images_and_rejects_truncated_answers(tmp_path)
     with pytest.raises(ValueError, match="truncated"):
         await provider.structured("Observe.", "Question with evidence labels.", Observation, images=images)
     await provider.close()
+
+
+@pytest.mark.parametrize("backend", ["ollama", "llamacpp", "openai"])
+@pytest.mark.parametrize("labels", [["E6"], ["E4", "E9"]])
+async def test_images_carry_actual_source_labels_instead_of_attachment_ordinals(tmp_path, backend, labels):
+    provider = Provider(
+        Settings(
+            _env_file=None,
+            provider="openai" if backend == "openai" else "ollama",
+            local_inference_api="llamacpp" if backend == "llamacpp" else "ollama",
+            openai_api_key="test-not-a-real-key",
+        )
+    )
+    await provider.http.aclose()
+    images = []
+    for label in labels:
+        path = tmp_path / (label + ".jpg")
+        path.write_bytes(("pixels-for-" + label).encode())
+        images.append(path)
+
+    def handler(request):
+        body = json.loads(request.content)
+        if backend == "openai":
+            parts = body["input"][0]["content"]
+            for i, label in enumerate(labels):
+                assert parts[1 + 2 * i]["text"] == f"Original image source {label}."
+                assert parts[2 + 2 * i]["image_url"].endswith(
+                    base64.b64encode(images[i].read_bytes()).decode()
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "output": [
+                        {"content": [{"type": "output_text", "text": '{"summary":"Bound originals."}'}]}
+                    ]
+                },
+            )
+        image_turns = body["messages"][1 : 1 + len(labels)]
+        for turn, label, path in zip(image_turns, labels, images, strict=True):
+            caption = turn["content"][0]["text"] if backend == "llamacpp" else turn["content"]
+            assert caption.startswith(f"Original image source {label}.")
+            encoded = base64.b64encode(path.read_bytes()).decode()
+            if backend == "llamacpp":
+                assert turn["content"][1]["image_url"]["url"].endswith(encoded)
+            else:
+                assert turn["images"] == [encoded]
+        answer = '{"summary":"Bound originals."}'
+        if backend == "llamacpp":
+            return httpx.Response(
+                200, json={"choices": [{"finish_reason": "stop", "message": {"content": answer}}]}
+            )
+        return httpx.Response(200, json={"done": True, "message": {"content": answer}})
+
+    provider.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await provider.structured(
+        "Inspect originals.", json.dumps({"attached_images_in_order": labels}), Observation, images=images
+    )
+    assert result.summary == "Bound originals."
+    await provider.close()
+
+
+async def test_image_source_label_mismatch_fails_before_inference(tmp_path):
+    provider = Provider(Settings(_env_file=None))
+    image = tmp_path / "original.jpg"
+    image.write_bytes(b"original")
+    with pytest.raises(ValueError, match="labels"):
+        await provider.structured(
+            "Inspect.", json.dumps({"attached_images_in_order": ["E1", "E2"]}), Observation, images=[image]
+        )
+    await provider.close()

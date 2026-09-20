@@ -154,6 +154,22 @@ class CodexRunner:
 
 
 def validate_answer(answer, labels):
+    # Reviewers sometimes compress adjacent source references into [E2–E4].
+    # Expand before validation/rendering so the UI and spoken reply never leak
+    # internal source labels, and each expanded label must still be authorized.
+    def expand(match):
+        first, last = int(match[1]), int(match[2])
+        if not 1 <= first <= last <= len(labels):
+            raise ValueError("Reviewer selected an invalid source range")
+        return " ".join(f"[E{number}]" for number in range(first, last + 1))
+
+    prose = re.sub(r"\[E(\d+)\s*[-–—]\s*E(\d+)\]", expand, answer["answer"])
+    prose = re.sub(
+        r"\[(E\d+(?:\s*[,;]\s*E\d+)+)\]",
+        lambda match: " ".join(f"[{label}]" for label in re.findall(r"E\d+", match[1])),
+        prose,
+    )
+    answer = {**answer, "answer": prose}
     ids = set(answer["evidence_ids"])
     inline = set(re.findall(r"\[(E[0-9]+)\]", answer["answer"]))
     if not ids or not ids <= labels or not inline <= ids:
@@ -242,6 +258,16 @@ class Verifier:
             "candidate": packet.get("candidate"),
             "source_hashes": list(packet.get("image_hashes", {}).values()),
             "source_integrity_basis": "persisted media ingest SHA256",
+            "original_image_bindings": [
+                {
+                    "label": label,
+                    "media_id": packet.get("aliases", {}).get(label),
+                    "sha256": packet.get("expected_image_hashes", {}).get(path),
+                }
+                for label, path in zip(
+                    packet.get("attached_images_in_order", []), packet.get("images", []), strict=False
+                )
+            ],
         }
         coverage = packet.get("recording_coverage")
         if coverage is not None:

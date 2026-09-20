@@ -4,8 +4,10 @@ The Record button now starts both a continuous camera-and-microphone recording
 and the existing sampled inference stream. The browser requests 1280 × 720 video,
 targets 1.5 Mbps video and 64 Kbps audio, and retains the bytes produced by
 MediaRecorder. These are the original browser-encoded recordings, not raw sensor
-data. Sampled JPEGs and short ASR clips continue to drive the existing live
-analysis path. Saving a full video does not mean every detail has been analyzed.
+data. Sampled JPEGs and silence-separated speech utterances drive live analysis.
+The continuous recorder stays independent of speech detection and spoken replies.
+See [HANDS-FREE.md](HANDS-FREE.md) for automatic questions and Notch commands.
+Saving a full video does not mean every detail has been analyzed.
 
 ## Durability and playback
 
