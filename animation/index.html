@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>OpenAI helps grandmas and grandpas</title>
+  <meta name="description" content="An animation about memory, connection, and everyday support.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main aria-label="OpenAI helps grandmas and grandpas with dementia, Alzheimer’s, remembering, staying connected, daily routines, familiar faces, and everyday tasks.">
+    <div id="stage" aria-hidden="true">
+      <div id="message">
+        <img class="wordmark" src="assets/openai-wordmark.svg" alt="OpenAI" draggable="false">
+        <span class="grandparents">helps grandmas and grandpas</span>
+        <div id="ending">
+          <div id="with-line"><span class="with">with</span><div id="window"><span id="outgoing"></span><span id="incoming"></span></div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <nav class="controls" aria-label="Animation controls">
+    <button id="play" type="button" aria-label="Pause animation">Pause</button>
+    <button id="replay" type="button" aria-label="Replay animation">Replay <span aria-hidden="true">↻</span></button>
+    <a href="assets/openai-helps-grandparents.mp4" download="openai-helps-grandparents.mp4">Download MP4</a>
+  </nav>
+  <script src="motion.js"></script>
+</body>
+</html>

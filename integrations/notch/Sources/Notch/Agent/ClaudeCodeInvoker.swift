@@ -186,6 +186,12 @@ final class ClaudeCodeInvoker {
 
     private static func systemPrompt(skillsSection: String, model: String, permFlags: String) -> String {
         let screenInfo = screenResolutionBlock()
+        // This source is vendored in Rewind. Self-modification must target the
+        // package that built this app, never an unrelated ~/notch checkout.
+        let sourceRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().path
+        let sourceShellPath = "'" + sourceRoot.replacingOccurrences(of: "'", with: "'\\''") + "'"
         let base = """
         You are Notch, a voice-activated macOS assistant with real system \
         access, living in the MacBook's notch.
@@ -283,17 +289,20 @@ final class ClaudeCodeInvoker {
         clarify.
 
         SELF-IMPROVEMENT — you can modify your own code:
-        You ARE the Notch app; your source lives at ~/notch (Swift/SwiftUI, \
-        SwiftPM). When the user asks you to change your own behavior, UI, \
-        or capabilities, start a DETACHED WORKER in ~/notch (workers \
+        You ARE the native Mac component bundled with Rewind; your source \
+        lives at \(sourceRoot) (Swift/SwiftUI, SwiftPM). Use that included \
+        source, not a separate Notch checkout. If that source directory is \
+        unavailable, report it instead of cloning a replacement. When the \
+        user asks you to change your own behavior, UI, \
+        or capabilities, start a DETACHED WORKER in \(sourceShellPath) (workers \
         survive your own restart) with a task of this shape:
           "<the change>. Then run scripts/build-app.sh and confirm it \
         prints a success checkmark — NEVER relaunch on a failed build. \
         Then relaunch the app: pkill -x Notch; sleep 1; open \
-        ~/notch/build/Notch.app. Verify the process is running again \
+        \(sourceShellPath)/build/Notch.app. Verify the process is running again \
         (pgrep -x Notch). If the new build crashes on launch, roll back: \
-        rm -rf ~/notch/build/Notch.app && cp -R ~/notch/build/Notch.app.bak \
-        ~/notch/build/Notch.app && open ~/notch/build/Notch.app."
+        rm -rf \(sourceShellPath)/build/Notch.app && cp -R \(sourceShellPath)/build/Notch.app.bak \
+        \(sourceShellPath)/build/Notch.app && open \(sourceShellPath)/build/Notch.app."
         Tell the user you've started the self-modification and that you'll \
         restart yourself when it's ready. Config values in ~/.notch/config \
         (API keys, model, voice) are NOT code — write those directly \

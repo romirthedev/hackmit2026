@@ -6,6 +6,15 @@ loud, from what it actually saw. When she holds a postcard or a bill up to the
 camera, the postcard lands in her Notes and the bill lands on her calendar,
 on the big screen at home.
 
+**Phone-first personal memory, with a built-in Mac memory and control agent.** Scan a QR code, tap Record,
+and clip the phone to your chest. Ask about recorded moments and connected
+notes, emails, appointments, friends, and family in one workspace. Read the
+[user-confirmed product brief](docs/PRODUCT-VISION.md) and the
+[phone and Notch setup](docs/PHONE-NOTCH.md). The existing ESP32 camera is an
+additional capture input. The complete pinned Notch source is bundled in
+`integrations/notch` as Rewind's native Mac component; no separate Notch clone
+or installation is required. Its original provenance is retained.
+
 Vision and memory inference run on the ASUS with its 35B model. Deepgram handles
 hearing and speaking; signed-in Codex reviews personal-memory evidence before speech.
 Ordinary conversation does not require a photo or an evidence review.

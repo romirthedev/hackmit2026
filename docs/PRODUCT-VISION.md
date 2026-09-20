@@ -1,4 +1,4 @@
-# REWIND × Notch: shared physical and digital memory
+# REWIND: shared physical and digital memory
 
 User-confirmed product direction, September 19, 2026.
 
@@ -16,8 +16,11 @@ and resolves follow-ups from checked conversation history. Speech captured from
 other conversations, quotations, or a television is evidence, not permission to
 operate the Mac. Ambiguous requests should elicit a spoken clarification.
 
-The same workspace initializes her digital context through **Notch**, specifically
-`https://github.com/romirthedev/notch`. Its memory graph connects emails,
+The same workspace initializes her digital context through Rewind's bundled
+native Mac component: the complete source copied from
+`https://github.com/romirthedev/notch`, included in `integrations/notch`.
+It is part of this codebase, not a separately cloned repository or external
+Notch service. Its memory graph connects emails,
 appointments, friends, family, notes, and physical moments. The phone capture
 experience and digital context belong to one coherent personal memory.
 
@@ -32,8 +35,12 @@ is an optional additional input.
 
 ## Source and implementation requirements
 
-- Copy the complete user-owned Notch repository and preserve its provenance.
-- Reuse Notch's graph/notes and existing digital context. Build the bridge needed
+- Keep the complete user-owned Notch source in this repository and preserve its
+  pinned provenance. Reuse its actual implementation, not a reimplementation.
+  Build and package it from `integrations/notch`; no separate Notch checkout is
+  required. Document Rewind's integration changes rather than claiming every
+  file remains byte-identical to upstream.
+- Reuse the bundled graph/notes and existing digital context. Build the bridge needed
   for the browser phone client and ASUS-backed analysis.
 - Pair by QR without asking the phone user for server keys, terminal commands,
   or model configuration.

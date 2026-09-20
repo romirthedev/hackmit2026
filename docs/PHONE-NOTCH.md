@@ -5,13 +5,29 @@ The phone client is `/phone/`; the desktop workspace's System tab creates its
 one-use QR invitation. The same authenticated workspace holds recordings,
 Notch context, answers, and reminders.
 
-## Run the Mac bridge
+## Build the included Mac component
 
 `integrations/notch` contains all 92 tracked files from the user's private
 `romirthedev/notch` repository at revision
 `6c74c30c31a2ce31a852209eba86f28c8371409e`. `UPSTREAM.json` records every original
 file's hash. The original application, agent, assets, and graph remain included.
 Local additions provide a read-only context export and a bridge-only launch mode.
+These are ordinary files tracked by the Rewind repository, not a Git submodule,
+download-on-start dependency, or separate Notch checkout. The build uses the
+included Swift package and resources. Rewind includes the original graph, agent,
+and permission implementation rather than a replacement implementation.
+
+`UPSTREAM.json` is the immutable hash baseline for the original copy. Some
+original files have intentional Rewind extensions, so the current tree should
+not be described as entirely byte-identical. Inspect unchanged, modified,
+missing, and added files without changing anything:
+
+```sh
+python3 scripts/verify_notch_source.py
+```
+
+The `README.md` inside the copied source is retained verbatim as upstream
+documentation; its standalone `git clone` example is not a Rewind setup step.
 
 Build and launch on macOS 14 or newer with Swift installed:
 
@@ -28,6 +44,11 @@ printing it. Bridge-only mode binds **127.0.0.1:8738** and serves only authentic
 GET/POST context requests. It does not start desktop automation, microphones,
 calendar nudging, or model-driven memory consolidation. Launching Notch normally
 still provides the complete upstream application on its original port.
+The native component must stay running locally for macOS account access and
+computer-control permissions. It is a process built from this repository, not
+an external Notch service; the ASUS model runtime remains a separate component.
+For the full phone-to-Mac agent rather than context export alone, use the
+`--rewind-control` launch in [LIVE-PROCESSING.md](LIVE-PROCESSING.md).
 
 The second process is the **actual Notch computer agent**, bound to loopback
 port **8737** by `--rewind-control`. The launcher uses this Mac's signed-in Codex
