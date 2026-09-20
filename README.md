@@ -79,7 +79,7 @@ python scripts/open_workspace.py   # opens a one-time sign-in link and prints a 
 |---|---|
 | `/` | Home dashboard. `#care` opens the caretaker view. |
 | `/phone` | The recorder. Open it on the phone over HTTPS (camera and microphone need a secure origin). |
-| `/print` | The two pieces of demo mail. Print at 100%, cut, scan. |
+| `/print` | The two pieces of demo mail. Print at 100%, cut, scan. A ready PDF is at [docs/print/rewind-demo-mail.pdf](docs/print/rewind-demo-mail.pdf). |
 | `/workspace` | Full controls: Notch context, people, Mac commands, usage. |
 
 Without a Deepgram key the server transcribes with faster-whisper and the
