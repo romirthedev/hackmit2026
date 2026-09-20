@@ -41,6 +41,11 @@ ASUS checks for a personal letter/postcard or medical bill; only detected mail
 uses the matching fixed demo details (`source=model+template`). The postcard
 flies into Notes and the bill into Calendar. Ordinary scans stay in Moments.
 
+**Notices when she eats (experimental).** Food held up to the mouth in one
+photo and gone from the next two is recorded as a meal: what it was, when, and
+the bite photo. "Did I eat lunch?" answers from that record. See
+[docs/MEALS.md](docs/MEALS.md).
+
 **Two views of one home.** "My day" is for Grandma: big cards, a flippable
 postcard, a calendar you can tap through. "Caretaker" is for family: alerts,
 what she scanned, what she asked, device health.

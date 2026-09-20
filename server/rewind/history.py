@@ -12,7 +12,7 @@ def require_current_capture(db, captured_at):
 # Children precede their parents; optional tables depend on enabled services.
 MEMORY_TABLES = (
     "conversation_contexts", "conversation_turns", "computer_commands",
-    "demo_answers", "answer_reviews", "answers", "scan_jobs", "scan_documents",
+    "demo_answers", "answer_reviews", "answers", "scan_jobs", "scan_documents", "meals", "food_sightings",
     "person_evidence", "person_audit", "face_index", "people",
     "recording_chunks", "continuous_recordings", "context_reminders",
     "context_edges", "context_documents", "alerts", "rules", "outbox",

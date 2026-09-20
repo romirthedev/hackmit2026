@@ -187,6 +187,7 @@ class Worker:
                             "block_delta": caption.block_delta,
                         },
                     )
+            await self.track_meal(item)
             event = self.db.one("SELECT transcript FROM events WHERE id=?", (item["id"],))
             wake = (
                 re.match(r"^\s*(?:hey[, ]+)?rewind[,.!? :]+(.+)", event["transcript"], re.I | re.S)
@@ -222,6 +223,21 @@ class Worker:
                 ),
             )
             log.warning("Analysis failed for %s: %s", item["id"], type(e).__name__)
+
+    async def track_meal(self, item):
+        meals = getattr(self.memory, "meals", None)
+        if meals is None or item["kind"] != "frame":
+            return
+        event = self.db.one(
+            "SELECT summary,tags,objects,label_mode,inherited_from FROM events WHERE id=?", (item["id"],)
+        )
+        if not event:
+            return
+        try:
+            await meals.track(item, event)
+        except Exception:
+            # The frame is already saved and labelled; a failed food check must not fail the recording.
+            log.warning("Meal tracking unavailable for %s", item["id"], exc_info=True)
 
     async def evaluate_rules(self, item):
         rules = self.db.all("SELECT * FROM rules WHERE enabled=1 AND created_at<=?", (item["captured_at"],))

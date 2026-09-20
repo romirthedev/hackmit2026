@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Scanned mail: wait this long for the vision model, report a readable failure if it times out.
     scan_model_deadline_s: float = Field(90, gt=0, le=180)
     scan_demo_template: bool = True
+    # Eating detection: food at the mouth in one frame, gone from the next frames, is recorded as a meal.
+    meal_tracking: bool = True
+    meal_confirm_frames: int = Field(2, ge=1, le=10)
+    meal_gap_seconds: float = Field(120, ge=5, le=3600)
+    meal_settle_seconds: float = Field(90, ge=5, le=3600)
     # Opt-in private walkthrough fixture. Off outside the demo deployment.
     demo_mode: bool = False
     demo_response_delay_s: float = Field(0.70, ge=0, le=3)

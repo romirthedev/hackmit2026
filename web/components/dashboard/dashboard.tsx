@@ -24,6 +24,7 @@ import {
 import '@/app/dashboard.css';
 import { useRewind } from './use-rewind';
 import { AskCard } from './ask-card';
+import { MealsCard } from './meals-card';
 import { Arrivals } from './arrivals';
 import { hm } from './primitives';
 import {
@@ -217,6 +218,17 @@ export function Dashboard() {
       />,
     ],
     [['all', 'health'], <AdherenceCard key="adh" index={3} />],
+    [
+      ['all', 'health'],
+      <MealsCard
+        key="meals"
+        index={3}
+        meals={rw.meals}
+        zone={zone}
+        disabled={rw.connection !== 'live'}
+        onRemove={rw.removeMeal}
+      />,
+    ],
     [
       ['all', 'memory'],
       <LatestCard
@@ -444,8 +456,15 @@ export function Dashboard() {
               onOpen={openSource}
               arriving={arriving}
             />
-            <MedsCard index={9} />
-            <WeatherCard index={10} />
+            <MealsCard
+              index={9}
+              meals={rw.meals}
+              zone={zone}
+              disabled={rw.connection !== 'live'}
+              onRemove={rw.removeMeal}
+            />
+            <MedsCard index={10} />
+            <WeatherCard index={11} />
             <ActivityCard index={11} />
             <HelpCard index={12} />
           </div>

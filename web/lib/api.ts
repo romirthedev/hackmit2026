@@ -177,6 +177,21 @@ export type ScanDocument = {
   place?: string;
   message: string;
 };
+// Food seen at the mouth in one photo and gone from the next ones.
+export type Meal = {
+  id: string;
+  food: string;
+  status: 'open' | 'eaten';
+  started_at: number;
+  last_seen_at: number;
+  gone_at: number | null;
+  concluded_at: number | null;
+  reason: string;
+  bites: number;
+  sightings: string[];
+  image_url: string | null;
+  summary: string;
+};
 export type VoiceStatus = {
   deepgram: boolean;
   tts_model: string | null;

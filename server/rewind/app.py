@@ -30,6 +30,7 @@ from .conversation import Conversation, conversation_router
 from .db import Database, event_public
 from .demo import DemoIntegrityError
 from .history import clear_memory, require_current_capture
+from .meals import Meals, meals_router
 from .memory import Memory
 from .models import AskRequest, RuleRequest, VideoProvenance
 from .pairing import BrowserPairing
@@ -91,6 +92,7 @@ def create_app(settings=None, provider=None):
     context = NotchContext(db, s)
     verifier = Verifier(db, s) if s.codex_verify else None
     scans = Scans(db, p, s)
+    meals = Meals(db, p, s)
     memory = Memory(
         db,
         p,
@@ -99,6 +101,7 @@ def create_app(settings=None, provider=None):
         context=context,
         verifier=verifier,
         scans=scans,
+        meals=meals,
     )
     worker = Worker(db, p, memory, s)
     computer = Computer(db, s)
@@ -232,10 +235,11 @@ def create_app(settings=None, provider=None):
     app.state.people = people
     app.state.usage = usage
     app.state.conversation = conversation
-    app.state.voice, app.state.scans = voice, scans
+    app.state.voice, app.state.scans, app.state.meals = voice, scans, meals
     app.include_router(conversation_router(conversation, admin, ingestion_lock))
     app.include_router(voice_router(voice, admin, s.max_upload_bytes))
     app.include_router(scans_router(scans, admin))
+    app.include_router(meals_router(meals, admin))
     app.include_router(recording_router(db, s, admin, ingestion_lock))
     app.include_router(people_router(people, admin))
 

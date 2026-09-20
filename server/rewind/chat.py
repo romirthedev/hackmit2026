@@ -76,7 +76,17 @@ def direct_memory_question(text):
         question,
         re.I,
     )
-    return question if personal_floor or personal and (location_or_time or identity or known_source) else None
+    # "Did I eat lunch?" is answered by the meal tracker, never by general knowledge.
+    past_eating = (
+        re.search(r"\b(?:eat|ate|eaten|eating|meals?|breakfast|lunch|dinner|supper|snacks?)\b", question, re.I)
+        and re.search(r"\b(?:did|ate|eaten|had|have|was|already|today|yesterday|earlier|morning)\b", question, re.I)
+        and re.search(r"\b(?:i|my|we|our)\b", question, re.I)
+    )
+    return (
+        question
+        if personal_floor or past_eating or personal and (location_or_time or identity or known_source)
+        else None
+    )
 
 
 def small_talk(text):

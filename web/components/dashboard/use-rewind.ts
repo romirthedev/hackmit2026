@@ -8,6 +8,7 @@ import {
   type Answer,
   type ConversationState,
   type ConversationTurn,
+  type Meal,
   type Recording,
   type Rule,
   type ScanDocument,
@@ -55,6 +56,7 @@ type Snapshot = {
   reminders: Reminder[];
   people: ConfirmedPerson[];
   scans: ScanDocument[];
+  meals: Meal[];
   conversation: ConversationState;
 };
 const message = (error: unknown) =>
@@ -112,6 +114,7 @@ export function useRewind() {
           reminders,
           persons,
           scans,
+          meals,
           conversation,
         ] = await Promise.all([
           api<Status>('/status', init),
@@ -123,6 +126,7 @@ export function useRewind() {
           api<Reminder[]>('/context/reminders', init),
           api<{ people: ConfirmedPerson[] }>('/people', init),
           api<ScanDocument[]>('/scans?limit=20', init),
+          api<Meal[]>('/meals?limit=12', init),
           api<ConversationState>('/conversation/state', init),
         ]);
         if (
@@ -150,6 +154,7 @@ export function useRewind() {
           reminders,
           people: persons.people,
           scans,
+          meals,
           conversation,
         });
         setNow(timestamp);
@@ -313,6 +318,7 @@ export function useRewind() {
     reminders: snapshot?.reminders ?? [],
     people: snapshot?.people ?? [],
     scans: snapshot?.scans ?? [],
+    meals: snapshot?.meals ?? [],
     online:
       connection === 'live' &&
       !!snapshot?.status.devices.some((device) => now - device.last_seen < 30),
@@ -343,6 +349,8 @@ export function useRewind() {
       action('/scans/' + encodeURIComponent(id) + '/seen'),
     removeScan: (id: string) =>
       action('/scans/' + encodeURIComponent(id), { method: 'DELETE' }),
+    removeMeal: (id: string) =>
+      action('/meals/' + encodeURIComponent(id), { method: 'DELETE' }),
     demoScan: () => action('/scans/demo'),
     setPaused: (paused: boolean) =>
       action('/capture/pause', {
