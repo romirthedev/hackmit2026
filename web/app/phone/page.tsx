@@ -4,14 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useReducedMotion } from 'motion/react';
 import {
-  Aperture,
   ArrowLeft,
   ArrowUp,
   Camera,
   Check,
-  Cloud,
-  Mic,
-  Radio,
   ScanLine,
   Square,
   Volume2,
@@ -31,7 +27,6 @@ import { PhoneCapture, type CaptureState } from '@/lib/phone-capture';
 import { ComputerPanel } from '@/components/computer-panel';
 import { ContextPanel } from '@/components/context-panel';
 import { PeoplePanel } from '@/components/people-panel';
-import { Orb, type OrbState } from '@/components/dashboard/orb';
 import { Card, Cell, hm } from '@/components/dashboard/primitives';
 import { SendLetter, type Send } from '@/components/dashboard/letter';
 import '@/app/dashboard.css';
@@ -437,7 +432,7 @@ export default function Phone() {
               : state.voice === 'unavailable'
                 ? 'Voice unavailable · type below'
                 : 'Press Record, then speak naturally';
-  const orb: OrbState =
+  const voiceState =
     state.voice === 'hearing'
       ? 'listening'
       : thinking || asking || conversation.status === 'acting'
@@ -446,19 +441,14 @@ export default function Phone() {
           ? 'answer'
           : 'idle';
   const cameraOn = state.recording || state.previewing;
-  const hour = new Date().getHours();
-  const greet =
-    hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const zone = status?.timezone;
   if (auth === false) return <Login />;
   if (auth === null)
     return (
       <div className="rw ph">
         <main className="ph-page ph-wait">
-          <span className="rw-brand-mark ph-wait-mark">
-            <Aperture />
-          </span>
-          <p>{error || 'Connecting to your memory…'}</p>
+          <span className="ph-wordmark">rewind</span>
+          <p>{error || 'Connecting…'}</p>
         </main>
       </div>
     );
@@ -467,19 +457,15 @@ export default function Phone() {
       <div className="ph-sheet">
         <header className="ph-top">
           <a href="/" className="rw-brand" aria-label="Open workspace">
-            <span className="rw-brand-mark">
-              <Aperture />
-            </span>
-            rewind<span className="rw-brand-period">.</span>
-            <span className="rw-brand-time">{clock}</span>
+            rewind
+            <span className="ph-header-time">{clock}</span>
           </a>
           <span className="ph-memory" title="Items saved on the server">
-            <Cloud />
             <b className="tabular">{status?.received ?? 0}</b>
-            <span className="sr-only"> saved items</span>
+            <span>saved items</span>
           </span>
         </header>
-        <main className="ph-page mode-rose">
+        <main className="ph-page">
           <nav className="phone-tabs" aria-label="Phone workspace">
             <button
               type="button"
@@ -513,11 +499,11 @@ export default function Phone() {
           )}
           <section hidden={view !== 'record'}>
             <div className="greeting">
-              <h1>{greet}.</h1>
+              <h1>Recorder</h1>
               <p>
                 {state.recording
-                  ? `Recording your day${state.startedAt ? ` since ${hm(state.startedAt / 1000, zone)}` : ''}.`
-                  : 'Tap Record, clip your phone on, and leave this screen open.'}
+                  ? `Recording${state.startedAt ? ` since ${hm(state.startedAt / 1000, zone)}` : ''}. Keep this page open.`
+                  : 'Keep this page open while recording.'}
               </p>
             </div>
             {reminders
@@ -557,7 +543,7 @@ export default function Phone() {
                   </Card>
                 </Cell>
               ))}
-            <Cell label="Your view" index={1}>
+            <Cell label="Camera" index={1}>
               <Card
                 className={`card-media ${state.recording ? 'is-rec' : ''} ${cameraOn ? 'is-on' : ''} ${scanning ? 'is-scanning' : ''}`}
               >
@@ -571,10 +557,9 @@ export default function Phone() {
                   {!cameraOn && (
                     <span className="ph-camera-placeholder">
                       <Camera />
-                      <span>Your view, remembered.</span>
+                      <span>Camera preview</span>
                     </span>
                   )}
-                  <span className="sweep" aria-hidden="true" />
                 </div>
                 <div className="media-foot">
                   <span className="media-title">
@@ -584,7 +569,7 @@ export default function Phone() {
                         ? 'Saving last seconds…'
                         : state.previewing
                           ? 'Camera on'
-                          : 'Your view'}
+                          : 'Ready to record'}
                     <small>
                       {state.queued
                         ? `${state.queued} waiting to upload`
@@ -627,7 +612,11 @@ export default function Phone() {
                 disabled={state.requesting || state.finalizing}
                 onClick={toggleRecording}
               >
-                {state.recording ? <Square fill="currentColor" /> : <Radio />}
+                {state.recording ? (
+                  <Square fill="currentColor" />
+                ) : (
+                  <span className="ph-record-dot" aria-hidden="true" />
+                )}
                 {state.requesting
                   ? 'Opening camera…'
                   : state.finalizing
@@ -664,13 +653,13 @@ export default function Phone() {
                 </span>
               </div>
               <p className="phone-fine">
-                Record saves continuous video and audio while this page stays
-                open. Sampled images and speech are used for live analysis.{' '}
+                Record saves full video and audio. Answers use sampled images
+                and speech.{' '}
                 {status?.analysis_ready === false
                   ? 'Analysis is waiting for the ASUS model; saved uploads will wait.'
                   : status?.pending
                     ? `${status.pending} items are waiting for analysis.`
-                    : 'Ask about your recordings and connected sources.'}
+                    : ''}
               </p>
               {originals.some((recording) => recording.original_url) && (
                 <details className="phone-fine ph-originals">
@@ -695,10 +684,13 @@ export default function Phone() {
                 </details>
               )}
             </Cell>
-            <Cell label="Talk to Rewind" index={2}>
-              <Card className="card-dark card-ask" data-state={orb}>
+            <Cell label="Conversation" index={2}>
+              <Card className="card-ask" data-state={voiceState}>
                 <div className="row">
-                  <span className="card-title">Just talk to me.</span>
+                  <output className="ph-voice-status" aria-live="polite">
+                    <span className="ph-status-dot" aria-hidden="true" />
+                    {voiceLabel}
+                  </output>
                   <button
                     type="button"
                     className={`dim ask-sound ${sound ? 'is-on' : ''}`}
@@ -713,29 +705,16 @@ export default function Phone() {
                     {sound ? <Volume2 /> : <VolumeX />}
                   </button>
                 </div>
-                <div className="orb-stage" aria-hidden="true">
-                  <Orb state={orb} size={150} />
-                  <div className="waves">
-                    {[3, 1, 4, 0, 2, 5, 3].map((n, i) => (
-                      <i key={i} style={{ '--n': n } as React.CSSProperties} />
-                    ))}
-                  </div>
-                </div>
-                <output className="ph-voice-status" aria-live="polite">
-                  <Mic />
-                  {voiceLabel}
-                </output>
                 <div className="ask-body">
                   <p className="hint">
-                    Ask about your day or tell me what to do on your Mac. Pause
-                    when you’re done; no extra button is needed.
+                    Ask about a recording or request an action on your Mac.
                   </p>
                 </div>
                 <form className="ask-bar" autoComplete="off" onSubmit={ask}>
                   <label className={`ask-input ${question ? 'has-text' : ''}`}>
                     <input
                       aria-label="Type a question or request"
-                      placeholder="Or type a question or Mac request…"
+                      placeholder="Or type here…"
                       value={question}
                       onChange={(event) => setQuestion(event.target.value)}
                       maxLength={2000}

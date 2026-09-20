@@ -74,3 +74,23 @@ action success. Existing model benchmark results remain applicable.
 At deployment validation the ASUS `gx10-f3bc` was offline in Tailscale. The Mac
 API and saved recordings remained available, but live model answers could not
 be revalidated until that machine reconnects. The UI exposes this condition.
+
+## Visual refinement follow-up
+
+The home screen now gives recent original photos and a chronological list the
+main column, with a compact question composer, reminders, and recent questions
+alongside it. Secondary tools sit in a footer navigation. The caretaker overview
+focuses on recording activity and reminders; its other sections retain the full
+controls. The phone uses the same warm neutral palette, restrained borders, and
+clear Record control. Decorative orbs, rainbow branding, floating shadows, and
+the home screen's arrival animation have been removed.
+
+This is a frontend change; capture, authentication, model processing, retrieval,
+evidence review, and stored data retain their existing behavior. Empty and
+populated home layouts were inspected at 1440, 768, 390, and 320 pixels. The
+populated preview was read-only against existing recordings; private screenshots
+remain in ignored local storage. All nine existing browser integration scenarios
+passed against the rebuilt app, with only empty-state and offline-message
+selectors adapted to the new presentation. TypeScript, frontend lint, and the
+phone auth/capture regression also passed. Nine phone states were inspected at
+320 and 390 pixels, with no overflow or JavaScript errors.

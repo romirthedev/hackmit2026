@@ -14,7 +14,7 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Sparkles,
+  MessageCircle,
   X,
 } from 'lucide-react';
 import {
@@ -46,14 +46,10 @@ export function OverviewCard({
   return (
     <Cell label="Shared overview" wide index={index}>
       <Card className={`card-hero ${unread ? 'attention' : ''}`}>
-        <div className="hero-figure memory-figure" aria-hidden="true">
-          <div className="hero-ring" />
-          <Aperture />
-        </div>
         <div className="hero-body">
           <div className="hero-head">
             <div>
-              <h2 className="hero-title">A second look at the day.</h2>
+              <h2 className="hero-title">Recording activity</h2>
               <p className="muted">
                 {latest
                   ? `Latest sample: ${recordedWhen(latest, status.timezone)}.`
@@ -80,7 +76,7 @@ export function OverviewCard({
           </div>
           <div className="hero-actions">
             <Btn onClick={onAsk}>
-              <Sparkles /> Ask about the day
+              <MessageCircle /> Ask about the day
             </Btn>
             <a className="btn ghost" href="/workspace#context">
               <ArrowUpRight /> Connected context

@@ -1,19 +1,23 @@
 'use client';
 /* oxlint-disable next/no-img-element, next/no-html-link-for-pages, jsx-a11y/media-has-caption -- originals are authenticated media; transcripts appear beside audio */
 import { useEffect, useRef, useState } from 'react';
-import { Aperture, ArrowUpRight, LogOut, RefreshCw, X } from 'lucide-react';
+import {
+  Aperture,
+  ArrowUpRight,
+  LogOut,
+  RefreshCw,
+  Smartphone,
+  X,
+} from 'lucide-react';
 import { api, AUTH_REQUIRED_EVENT, type Recording } from '@/lib/api';
 import Login from '@/components/login';
 import '@/app/dashboard.css';
+import '@/app/journal.css';
 import { useRewind } from './use-rewind';
 import { AskCard } from './ask-card';
-import { Arrivals } from './arrivals';
+import { DayJournal, WorkspaceLinks } from './day-journal';
 import {
-  ClipCard,
   ConnectionsCard,
-  HelpCard,
-  MemoryLogCard,
-  MomentsCard,
   NoteCard,
   PeopleCard,
   TodayCard,
@@ -45,9 +49,7 @@ export function Dashboard() {
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<Recording | null>(null);
   const [sourceError, setSourceError] = useState('');
-  const [arriving, setArriving] = useState<string | null>(null);
-  const [clock, setClock] = useState('');
-  const [greeting, setGreeting] = useState('Welcome back');
+  const [date, setDate] = useState('');
   const askRef = useRef<HTMLDivElement>(null);
   const sourceEpoch = useRef(0);
   const sourceRequest = useRef<AbortController | null>(null);
@@ -55,16 +57,13 @@ export function Dashboard() {
     // oxlint-disable-next-line react/react-compiler -- Read the explicit browser view preference after hydration.
     if (window.location.hash === '#care') setMode('care');
     const tick = () => {
-      const date = new Date();
-      setClock(
-        date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-      );
-      setGreeting(
-        date.getHours() < 12
-          ? 'Good morning'
-          : date.getHours() < 18
-            ? 'Good afternoon'
-            : 'Good evening',
+      setDate(
+        new Date().toLocaleDateString([], {
+          weekday: 'long',
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+        }),
       );
     };
     tick();
@@ -157,14 +156,14 @@ export function Dashboard() {
     );
 
   return (
-    <div className="rw">
+    <div className="rw dashboard">
       <header className="topbar">
         <a className="rw-brand" href="/" aria-label="Rewind home">
-          <span className="rw-brand-mark">
-            <Aperture />
+          <span className="journal-brand-mark" aria-hidden="true">
+            <i />
+            <i />
           </span>
-          rewind<span className="rw-brand-period">.</span>
-          <span className="rw-brand-time">{clock}</span>
+          rewind
         </a>
         <div className="top-right">
           <span className={`conn ${rw.connection}`}>
@@ -179,13 +178,6 @@ export function Dashboard() {
             Workspace <ArrowUpRight />
           </a>
           <div className="seg" role="tablist" aria-label="View">
-            <span
-              className="seg-thumb"
-              style={{
-                transform: `translateX(${mode === 'wearer' ? 0 : 100}%)`,
-              }}
-              aria-hidden="true"
-            />
             <button
               type="button"
               role="tab"
@@ -243,30 +235,40 @@ export function Dashboard() {
         )}
         <div className={`greeting ${mode === 'care' ? 'care' : ''}`}>
           <div>
-            <h1>{mode === 'care' ? 'Your shared day' : greeting}</h1>
-            <p>
-              {mode === 'care'
-                ? 'A second view of this same personal workspace.'
-                : 'A place for the moments you want to remember.'}
-            </p>
+            <p className="journal-date">{date || 'Your personal workspace'}</p>
+            <h1>{mode === 'care' ? 'Shared overview' : 'Your day'}</h1>
           </div>
-          {mode === 'care' && (
-            <div className="chipset filter" role="tablist" aria-label="Section">
-              {FILTERS.map(([key, name]) => (
-                <button
-                  type="button"
-                  role="tab"
-                  key={key}
-                  aria-selected={filter === key}
-                  className={`chip ${filter === key ? 'is-active' : ''}`}
-                  onClick={() => setFilter(key)}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-          )}
+          <a className="journal-record-link" href="/phone">
+            <Smartphone /> Open recorder <ArrowUpRight />
+          </a>
         </div>
+        {status && status.analysis_ready === false && (
+          <div className="journal-service-note" aria-live="polite">
+            <span />
+            <p>
+              Analysis is offline. Your saved recordings are still available.
+            </p>
+            <a href="/workspace#usage">
+              View status <ArrowUpRight />
+            </a>
+          </div>
+        )}
+        {mode === 'care' && (
+          <div className="chipset filter" role="tablist" aria-label="Section">
+            {FILTERS.map(([key, name]) => (
+              <button
+                type="button"
+                role="tab"
+                key={key}
+                aria-selected={filter === key}
+                className={`chip ${filter === key ? 'is-active' : ''}`}
+                onClick={() => setFilter(key)}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
         {!status ? (
           <div className="dashboard-loading" aria-live="polite">
             <Aperture />
@@ -291,50 +293,35 @@ export function Dashboard() {
             )}
           </div>
         ) : mode === 'wearer' ? (
-          <div className="grid" key="wearer">
-            <ClipCard index={0} status={status} latest={rw.records[0]} />
-            <AskCard
-              index={1}
-              ask={rw.ask}
-              answers={rw.answers}
-              onOpen={openSource}
-              disabled={disabled}
-            />
-            <TodayCard
-              index={2}
-              graph={rw.graph}
-              reminders={rw.reminders}
-              onSeen={rw.reminderSeen}
-              onDocument={(id) => void openDocument(id)}
-              disabled={disabled}
-            />
-            <PeopleCard index={3} people={rw.people} />
-            <MemoryLogCard
-              index={4}
+          <div className="journal-layout" key="wearer">
+            <DayJournal
               records={rw.records}
-              zone={zone}
+              status={status}
               onOpen={openSource}
             />
-            <NoteCard
-              index={5}
-              graph={rw.graph}
-              onDocument={(id) => void openDocument(id)}
-            />
-            <MomentsCard
-              index={6}
-              records={rw.records}
-              zone={zone}
-              onOpen={openSource}
-              arriving={arriving}
-            />
-            <ConnectionsCard index={7} graph={rw.graph} />
-            <QuestionsCard
-              index={8}
-              answers={rw.answers}
-              zone={zone}
-              onOpen={openSource}
-            />
-            <HelpCard index={9} />
+            <aside className="journal-aside" aria-label="Recall and reminders">
+              <AskCard
+                index={1}
+                ask={rw.ask}
+                answers={rw.answers}
+                onOpen={openSource}
+                disabled={disabled}
+              />
+              <TodayCard
+                index={2}
+                graph={rw.graph}
+                reminders={rw.reminders}
+                onSeen={rw.reminderSeen}
+                onDocument={(id) => void openDocument(id)}
+                disabled={disabled}
+              />
+              <QuestionsCard
+                index={8}
+                answers={rw.answers}
+                zone={zone}
+                onOpen={openSource}
+              />
+            </aside>
           </div>
         ) : (
           <div className="grid" key={`care-${filter}`}>
@@ -392,10 +379,9 @@ export function Dashboard() {
                 records={rw.records}
                 zone={zone}
                 onOpen={openSource}
-                arriving={arriving}
               />
             )}
-            {show('memory') && (
+            {filter === 'memory' && (
               <QuestionsCard
                 index={5}
                 answers={rw.answers}
@@ -403,7 +389,7 @@ export function Dashboard() {
                 onOpen={openSource}
               />
             )}
-            {show('device') && (
+            {filter === 'device' && (
               <DeviceCard
                 index={6}
                 status={status}
@@ -413,15 +399,15 @@ export function Dashboard() {
                 disabled={disabled}
               />
             )}
-            {show('memory') && <PeopleCard index={7} people={rw.people} />}
-            {show('memory') && (
+            {filter === 'memory' && <PeopleCard index={7} people={rw.people} />}
+            {filter === 'memory' && (
               <NoteCard
                 index={8}
                 graph={rw.graph}
                 onDocument={(id) => void openDocument(id)}
               />
             )}
-            {show('device') && (
+            {filter === 'device' && (
               <ProcessingCard
                 index={9}
                 status={status}
@@ -429,17 +415,19 @@ export function Dashboard() {
                 disabled={disabled}
               />
             )}
-            {show('device') && <DataCard index={10} status={status} />}
-            {show('memory') && <ConnectionsCard index={11} graph={rw.graph} />}
-            <HelpCard index={12} />
+            {filter === 'device' && <DataCard index={10} status={status} />}
+            {filter === 'memory' && <ConnectionsCard index={11} graph={rw.graph} />}
           </div>
         )}
+        {status && <WorkspaceLinks peopleCount={rw.people.length} />}
+        <footer className="journal-footer">
+          <span>rewind</span>
+          <p>Personal workspace</p>
+          <a href="/workspace#usage">
+            Storage &amp; usage <ArrowUpRight />
+          </a>
+        </footer>
       </main>
-      <Arrivals
-        items={rw.arrivals}
-        onDone={rw.dismissArrival}
-        onArriving={setArriving}
-      />
       {open && (
         <dialog className="lightbox" open aria-label="Original source">
           <button

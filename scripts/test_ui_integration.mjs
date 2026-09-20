@@ -173,7 +173,10 @@ try {
       const page = await newPage("pair-" + route, route === "/phone/" ? undefined : { width: 1440, height: 1000 });
       const ticket = await pair(page, route, true);
       await page.getByRole("heading").first().waitFor();
-      if (route === "/") await page.getByText(/No recordings yet/).first().waitFor();
+      if (route === "/") {
+        await page.getByRole("heading", { name: "Start with a moment.", exact: true }).waitFor();
+        await page.getByText("0 saved samples", { exact: true }).waitFor();
+      }
       await noInventedData(page); await noOverflow(page);
       const repeated = await fetch(origin + "/api/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ticket: ticket.ticket, remember: false }) });
       assert(!repeated.ok, "Pairing invitation must work once only");
@@ -195,7 +198,10 @@ try {
       await page.setViewportSize({ width: 390, height: 844 }); await noOverflow(page);
       await page.route("**/api/**", (r) => respond(r, 503, { detail: "Isolated offline fixture" }));
       await page.reload();
-      await page.getByText(/offline|reconnect|connection|unavailable|could not|cannot connect/i).first().waitFor();
+      await page.getByRole("heading", {
+        name: route === "/" ? "Your workspace is unavailable." : "Unable to reach your workspace",
+        exact: true,
+      }).waitFor();
       await noInventedData(page); await noOverflow(page);
       await page.screenshot({ path: path.join(artifacts, `offline-${route.replaceAll("/", "") || "root"}.png`), fullPage: true });
       await page.close();

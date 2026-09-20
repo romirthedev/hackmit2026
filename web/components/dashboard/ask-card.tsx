@@ -1,9 +1,8 @@
 'use client';
 /* oxlint-disable next/no-html-link-for-pages -- open the recording page with a full navigation */
 import { useRef, useState } from 'react';
-import { ArrowUp, Mic } from 'lucide-react';
+import { ArrowUp, Mic, CornerDownRight } from 'lucide-react';
 import { Card, Cell } from './primitives';
-import { Orb } from './orb';
 import { AnswerDetail } from './answer-detail';
 import type { Answer, Recording } from '@/lib/api';
 
@@ -13,9 +12,9 @@ export function AskCard({
   onOpen,
   index,
   disabled = false,
-  label = 'Ask Rewind',
+  label = 'Recall',
   placeholder = 'What would you like to remember?',
-  title = 'Ask',
+  title = 'Ask your memory',
 }: {
   ask: (question: string) => Promise<Answer>;
   answers: Answer[];
@@ -58,74 +57,83 @@ export function AskCard({
   }
   return (
     <Cell label={label} index={index}>
-      <Card className="card-dark card-ask" data-state={state}>
+      <Card className="card-ask recall-composer" data-state={state}>
         <div className="row">
-          <span className="card-title">{title}</span>
-          <span className="dim">
-            {busy
-              ? 'Finding evidence'
-              : answer?.mode === 'checking'
-                ? 'Checking evidence'
-                : disabled
-                  ? 'Reconnect to ask'
-                  : 'Ready'}
-          </span>
+          <h2 className="card-title">{title}</h2>
         </div>
-        <a
-          className="orb-stage"
-          href="/phone"
-          aria-label="Open phone voice recording"
-        >
-          <Orb state={state} />
-        </a>
-        <div className="ask-body">
-          {answer ? (
-            <AnswerDetail answer={answer} onOpen={onOpen} />
-          ) : (
-            <p className="hint">
-              Ask about your saved day, or open your phone to record and talk.
-            </p>
-          )}
-          {error && (
-            <p role="alert" className="ask-error">
-              {error}
-            </p>
-          )}
-        </div>
+        <p className="recall-description">
+          Find a moment, a conversation, or something you left behind.
+        </p>
         <form
-          className="ask-bar"
+          className="recall-form"
           autoComplete="off"
           onSubmit={(event) => {
             event.preventDefault();
             void go();
           }}
         >
-          <a
-            className="gbtn gbtn-round"
-            href="/phone"
-            aria-label="Open phone voice recording"
-          >
-            <Mic />
-          </a>
-          <label className={`ask-input ${text ? 'has-text' : ''}`}>
-            <input
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder={placeholder}
-              aria-label="Ask about your recordings"
-              disabled={busy || disabled}
-              maxLength={2000}
-            />
+          <textarea
+            rows={3}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder={placeholder}
+            aria-label="Ask about your recordings"
+            disabled={busy || disabled}
+            maxLength={2000}
+          />
+          <div className="recall-form-footer">
+            <a href="/phone" aria-label="Open phone voice recording">
+              <Mic /> Ask by voice
+            </a>
             <button
               type="submit"
-              className="send"
+              className="recall-submit"
               aria-label="Send question"
               disabled={busy || disabled || !text.trim()}
             >
               <ArrowUp />
             </button>
-          </label>
+          </div>
         </form>
+        {!submitted && !text && (
+          <div className="recall-prompts" aria-label="Question suggestions">
+            {['Where did I leave my keys?', 'What did we talk about?'].map(
+              (prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => setText(prompt)}
+                  disabled={busy || disabled}
+                >
+                  <CornerDownRight />
+                  {prompt}
+                </button>
+              ),
+            )}
+          </div>
+        )}
+        <div className="recall-footnote" aria-live="polite">
+          <span className="recall-status-dot" />
+          <span>
+            {busy
+              ? 'Finding evidence'
+              : answer?.mode === 'checking'
+                ? 'Checking evidence'
+                : disabled
+                  ? 'Reconnect to ask'
+                  : 'Answers linked to your recordings'}
+          </span>
+        </div>
+        {(answer || error) && (
+          <div className="ask-body">
+            {answer && <AnswerDetail answer={answer} onOpen={onOpen} />}
+            {error && (
+              <p role="alert" className="ask-error">
+                {error}
+              </p>
+            )}
+          </div>
+        )}
       </Card>
     </Cell>
   );
