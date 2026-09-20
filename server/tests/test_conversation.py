@@ -301,7 +301,7 @@ async def test_dispatch_timeout_distinguishes_unsent_from_uncertain_delivery(con
     service, client = conversation
     service.p.kind = "computer"
     service.p.text = "Open TextEdit"
-    identifier = text(client, service.p.text)
+    text(client, service.p.text)
 
     async def command(body):
         if has_ledger:
