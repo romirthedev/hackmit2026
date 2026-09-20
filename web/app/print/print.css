@@ -386,44 +386,70 @@
   margin-top: 0.15in;
 }
 
-/* Bill --------------------------------------------------------------------- */
-.bill {
-  width: 7.1in;
-  margin: 0 auto;
-  background: #fff;
-  border: 1px solid #e5e5e8;
-  padding: 0.32in 0.38in 0.3in;
-  font-size: 11.5px;
+/* Patient statement: one full letter page -------------------------------- */
+.sheet.sheet-stmt {
+  padding: 0.45in 0.6in 0.4in;
+  gap: 0;
+}
+.stmt {
+  --navy: #1f3f66;
+  --teal: #2f6f8f;
+  --rule: #d9dde3;
+  --muted: #6b7280;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  line-height: 1.35;
   color: #1c1c20;
-  position: relative;
 }
-.bill::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 6px;
-  background: linear-gradient(90deg, #2f6f8f, #4aaedc);
+.stmt h2 {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--navy);
 }
-.bill-top {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.18in;
-  align-items: start;
-  padding-bottom: 0.18in;
-  border-bottom: 1px solid #e5e5e8;
+.stmt table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
 }
-.bill-logo i {
+.stmt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.3in;
+  padding-bottom: 0.16in;
+  border-bottom: 3px solid var(--navy);
+}
+.stmt-brand {
+  display: flex;
+  gap: 0.14in;
+  align-items: flex-start;
+}
+.stmt-brand > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: var(--muted);
+}
+.stmt-brand b {
+  font-size: 19px;
+  letter-spacing: -0.01em;
+  color: var(--navy);
+  margin-bottom: 2px;
+}
+.stmt-logo i {
   display: block;
-  width: 0.5in;
-  height: 0.5in;
+  width: 0.52in;
+  height: 0.52in;
   border-radius: 10px;
-  background: #2f6f8f;
+  background: var(--navy);
   position: relative;
 }
-.bill-logo i::before,
-.bill-logo i::after {
+.stmt-logo i::before,
+.stmt-logo i::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -432,157 +458,307 @@
   background: #fff;
   border-radius: 2px;
 }
-.bill-logo i::before {
+.stmt-logo i::before {
   width: 7px;
-  height: 26px;
+  height: 27px;
 }
-.bill-logo i::after {
-  width: 26px;
+.stmt-logo i::after {
+  width: 27px;
   height: 7px;
 }
-.bill-practice {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  color: #55555c;
-}
-.bill-practice b {
-  color: #1c1c20;
-  font-size: 18px;
-  letter-spacing: -0.01em;
-  margin-bottom: 2px;
-}
-.bill-statement {
+.stmt-title {
   text-align: right;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  color: #55555c;
 }
-.bill-statement b {
-  font-size: 15px;
-  letter-spacing: 0.14em;
-  color: #2f6f8f;
-  margin-bottom: 4px;
+.stmt-title > b {
+  display: block;
+  font-size: 17px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--navy);
+  margin-bottom: 6px;
 }
-.bill-statement strong {
+.stmt-title table {
+  margin-left: auto;
+}
+.stmt-title td {
+  padding: 1px 0 1px 14px;
+  color: var(--muted);
+}
+.stmt-title td:last-child {
   color: #1c1c20;
   font-weight: 600;
 }
-.bill-who {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.3in;
-  padding: 0.2in 0;
+.stmt-title-due td {
+  color: #b4361f !important;
 }
-.bill-who > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  color: #55555c;
-}
-.bill-who small {
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: #86868b;
-}
-.bill-who b {
-  font-size: 14px;
-  color: #1c1c20;
-}
-.bill-amount {
-  text-align: right;
-  align-items: flex-end;
-}
-.bill-amount b {
-  font-size: 30px;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.bill-duedate {
-  display: inline-block;
-  margin-top: 4px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: #fff1ee;
-  color: #b4361f;
-  font-size: 12px;
-}
-.bill-duedate strong {
+.stmt-title-amount td {
+  padding-top: 6px;
+  font-size: 15px;
+  color: var(--navy) !important;
   font-weight: 700;
 }
-.bill-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
+.stmt-address-row {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 0.4in;
+  padding: 0.13in 0;
+  border-bottom: 1px solid var(--rule);
 }
-.bill-table th {
-  text-align: left;
-  font-size: 9.5px;
+.stmt-addressee,
+.stmt-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stmt-addressee small,
+.stmt-contact small,
+.stmt-insurance small,
+.stmt-coupon-to small,
+.stmt-card small {
+  font-size: 8.5px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #86868b;
-  padding: 8px 6px;
-  border-bottom: 1px solid #e5e5e8;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-bottom: 2px;
 }
-.bill-table td {
-  padding: 10px 6px;
-  border-bottom: 1px solid #f0f0f2;
+.stmt-addressee b {
+  font-size: 13px;
 }
-.bill-table th:nth-child(n + 3),
-.bill-table td:nth-child(n + 3) {
-  text-align: right;
-}
-.bill-table tr.total td {
-  font-weight: 600;
-  border-bottom: 0;
-  background: #f7f9fb;
-}
-.bill-msg {
-  margin-top: 0.2in;
-  line-height: 1.55;
+.stmt-contact {
   color: #3a3a40;
 }
-.bill-detach {
-  margin: 0.3in 0 0.15in;
-  border-top: 1.5px dashed #b9b9bf;
+.stmt-summary {
+  padding: 0.12in 0 0.1in;
+  border-bottom: 1px solid var(--rule);
+}
+.stmt-summary table {
+  width: 3.6in;
+}
+.stmt-summary td {
+  padding: 2px 0;
+}
+.stmt-summary td:last-child {
+  text-align: right;
+}
+.stmt-balance td {
+  border-top: 1.5px solid var(--navy);
+  padding-top: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--navy);
+}
+.stmt-detail {
+  padding: 0.12in 0 0.1in;
+  border-bottom: 1px solid var(--rule);
+}
+.stmt-visit {
+  margin: 0 0 6px;
+  color: #3a3a40;
+}
+.stmt-lines {
+  width: 100%;
+}
+.stmt-lines th {
+  text-align: left;
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  padding: 5px 6px;
+  background: #f3f5f8;
+  border-bottom: 1px solid var(--rule);
+}
+.stmt-lines td {
+  padding: 5px 6px;
+  border-bottom: 1px solid #eceef2;
+  vertical-align: top;
+}
+.stmt-lines th:nth-child(n + 4),
+.stmt-lines td:nth-child(n + 4) {
+  text-align: right;
+  white-space: nowrap;
+}
+.stmt-lines td:nth-child(2) {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 9.5px;
+}
+.stmt-total td {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  background: #f7f9fb;
+  border-bottom: 0;
+}
+.stmt-total td:last-child {
+  color: var(--navy);
+}
+.stmt-insurance {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 0.25in;
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #f7f9fb;
+  border-radius: 4px;
+}
+.stmt-insurance div {
+  display: flex;
+  flex-direction: column;
+}
+.stmt-message {
+  padding: 0.12in 0 0;
+  color: #3a3a40;
+}
+.stmt-message > p {
+  margin: 0;
+}
+.stmt-pay {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.14in;
+  margin: 8px 0 6px;
+}
+.stmt-pay div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+.stmt-pay b {
+  color: var(--navy);
+}
+.stmt-fine {
+  font-size: 9px;
+  color: var(--muted);
+}
+.stmt-tear {
+  margin: auto 0 0.1in;
+  padding-top: 0.14in;
+  border-bottom: 1.5px dashed #9aa0a8;
   position: relative;
   text-align: center;
 }
-.bill-detach span {
+.stmt-tear span {
   position: relative;
-  top: -8px;
+  top: 7px;
   background: #fff;
   padding: 0 10px;
-  font-size: 9px;
+  font-size: 8.5px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #9a9aa0;
+  color: var(--muted);
 }
-.bill-slip {
+.stmt-tear::before,
+.stmt-tear::after {
+  content: '✂';
+  position: absolute;
+  bottom: -9px;
+  font-size: 12px;
+  color: #9aa0a8;
+  background: #fff;
+}
+.stmt-tear::before {
+  left: 0.1in;
+}
+.stmt-tear::after {
+  right: 0.1in;
+  transform: scaleX(-1);
+}
+.stmt-coupon {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 0.15in;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 0.35in;
+  padding: 0.1in 0 0.08in;
 }
-.bill-slip > div {
+.stmt-coupon-left {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 0.08in;
 }
-.bill-slip small {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #86868b;
+.stmt-coupon-brand {
+  display: flex;
+  flex-direction: column;
 }
-.bill-slip b {
-  font-size: 12.5px;
+.stmt-coupon-brand b {
+  color: var(--navy);
+  font-size: 12px;
 }
-.bill-box {
+.stmt-coupon-brand span {
+  color: var(--muted);
+}
+.stmt-coupon-to {
+  display: flex;
+  flex-direction: column;
+}
+.stmt-coupon-to b {
+  font-size: 12px;
+}
+.stmt-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.stmt-card-row {
+  display: flex;
+  gap: 6px;
+}
+.stmt-box {
+  display: inline-block;
+  min-height: 0.26in;
+  padding: 3px 6px;
   border: 1px solid #b9b9bf;
-  padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: 3px;
+  font-size: 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex: 1;
+}
+.stmt-box.wide {
+  flex: 3;
+}
+.stmt-coupon-right table {
+  width: 100%;
+}
+.stmt-coupon-right td {
+  padding: 4px 0;
+  border-bottom: 1px solid #eceef2;
+}
+.stmt-coupon-right td:last-child {
+  text-align: right;
+  font-weight: 600;
+}
+.stmt-coupon-amount td {
+  font-size: 13px;
+  color: var(--navy);
+  font-weight: 700 !important;
+}
+.stmt-coupon-enclosed td {
+  border-bottom: 0;
+}
+.stmt-box.amount {
+  display: inline-block;
+  width: 1.4in;
+  min-height: 0.3in;
+  text-align: left;
+  font-size: 12px;
+  text-transform: none;
+  color: #1c1c20;
+}
+.stmt-coupon-fine {
+  margin: 8px 0 0;
+  font-size: 8.5px;
+  color: var(--muted);
+}
+.stmt-foot {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 0.08in;
+  border-top: 1px solid var(--rule);
+  font-size: 8px;
+  color: var(--muted);
 }
 
 @media print {
@@ -600,6 +776,9 @@
   .sheet {
     box-shadow: none;
     margin: 0;
+    height: 11in;
+    min-height: 0;
+    overflow: hidden;
     page-break-after: always;
     break-after: page;
   }
