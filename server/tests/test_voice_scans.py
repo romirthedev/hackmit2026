@@ -11,7 +11,7 @@ from PIL import Image
 from rewind.app import create_app
 from rewind.config import Settings
 from rewind.scans import DEMO_DOCUMENTS, DocumentScan, ScannedDocument, merge_with_template
-from rewind.voice import Voice, spoken_text
+from rewind.voice import Voice, reviewed_spoken_text, spoken_text
 
 ADMIN = "a" * 32
 DEVICE = "d" * 32
@@ -46,12 +46,14 @@ def test_wake_word_not_required_for_button_presses():
     }
 
 
-def test_spoken_text_drops_citations_and_fine_print():
+def test_spoken_text_preview_is_short_but_reviewed_speech_keeps_qualifications():
     answer = (
         "Your glasses were last on the kitchen counter around 2:40. [3f2b1a10-1111-4222-8333-444455556666]\n\n"
         "This answer used sampled images; the full recording was not decoded."
     )
     assert spoken_text(answer) == "Your glasses were last on the kitchen counter around 2:40."
+    assert "full recording was not decoded" in reviewed_spoken_text(answer)
+    assert "3f2b1a10" not in reviewed_spoken_text(answer)
     assert spoken_text("[E1] [E2]") == "I couldn't find that in your day."
 
 
@@ -263,7 +265,10 @@ async def test_voice_with_fake_deepgram(tmp_path):
         ).json()
         assert asked["answer"]["mode"] == "no_evidence"
         assert asked["spoken"].startswith("I couldn't find that")
-        assert asked["speech_url"] == f"/api/voice/speech/{asked['answer']['id']}"
+        assert asked["speech_url"].startswith("/api/voice/say?text=")
+        assert (
+            await client.get(f"/api/voice/speech/{asked['answer']['id']}", headers=headers)
+        ).status_code == 409
         speech = await client.get(asked["speech_url"], headers=headers)
         assert speech.status_code == 200 and speech.content == b"ID3fake-mp3"
     with pytest.raises(HTTPException):
@@ -306,3 +311,106 @@ async def test_scanned_mail_is_recall_evidence(tmp_path):
     scans = app.state.scans
     assert scans.search("what did Emma write")[0]["context_kind"] == "scanned postcard"
     assert scans.search("purple elephants") == []
+
+
+@pytest.mark.parametrize(
+    "mode,claims_reviewed,allowed",
+    [
+        ("checking", False, False),
+        ("checking", True, False),
+        ("model", False, False),
+        ("legacy_unverified", False, False),
+        ("verified", False, False),
+        ("insufficient", False, False),
+        ("verified", True, True),
+        ("insufficient", True, True),
+    ],
+)
+async def test_voice_never_synthesizes_unreviewed_answers(tmp_path, mode, claims_reviewed, allowed):
+    app = create_app(settings(tmp_path, deepgram_api_key="fake-test-only"))
+    voice = app.state.voice
+    identifier = "77777777-7777-4777-8777-777777777777"
+    text = "MODEL_CLAIM.\n\nOnly a sampled image was checked; the later event is unknown."
+    receipt = {"claims_reviewed": claims_reviewed}
+    record = {
+        "id": identifier,
+        "question": "What happened?",
+        "answer": text,
+        "mode": mode,
+        "evidence": [],
+        "grounded": allowed,
+        "verification": {"status": "complete" if claims_reviewed else "pending", "receipt": receipt},
+    }
+    voice.memory.db.execute(
+        "INSERT INTO answers(id,question,answer,evidence,created_at,grounded,mode) VALUES(?,?,?,?,?,?,?)",
+        (identifier, record["question"], text, "[]", time.time(), int(allowed), mode),
+    )
+
+    class Reviewer:
+        def public(self, answer_id):
+            assert answer_id == identifier
+            return record["verification"]
+
+    voice.memory.verifier = Reviewer()
+
+    async def ask(*args):
+        return record
+
+    synthesized = []
+    audio = tmp_path / "fixture.mp3"
+    audio.write_bytes(b"ID3fixture")
+
+    async def synthesize(value):
+        synthesized.append(value)
+        return audio
+
+    voice.memory.ask = ask
+    voice.synthesize = synthesize
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            headers = {"Authorization": "Bearer " + ADMIN}
+            response = await client.post(
+                "/api/voice/ask", headers=headers, json={"question": "What happened?"}
+            )
+            assert response.status_code == 200
+            reply = response.json()
+            assert reply["answer"]["id"] == identifier and reply["answer"]["mode"] == mode
+            direct = await client.get(f"/api/voice/speech/{identifier}", headers=headers)
+            if allowed:
+                assert reply["spoken"] == text
+                assert direct.status_code == 200
+                assert synthesized == [text, text]
+                # Cached audio must not bypass a later invalidated answer state.
+                voice.memory.db.execute("UPDATE answers SET mode='checking' WHERE id=?", (identifier,))
+                assert (
+                    await client.get(f"/api/voice/speech/{identifier}", headers=headers)
+                ).status_code == 409
+                assert synthesized == [text, text]
+            else:
+                assert "MODEL_CLAIM" not in reply["spoken"]
+                assert reply["speech_url"] is None
+                assert direct.status_code == 409
+                assert synthesized == []
+            assert (await client.get(f"/api/voice/speech/{identifier}")).status_code == 401
+    finally:
+        await voice.close()
+
+
+async def test_long_reviewed_speech_is_not_silently_truncated(tmp_path):
+    app = create_app(settings(tmp_path, deepgram_api_key="fake-test-only"))
+    voice = app.state.voice
+    full = "A recorded observation. " * 70 + "The final outcome is not established."
+    assert len(full) > 1500
+    assert reviewed_spoken_text(full).endswith("The final outcome is not established.")
+    calls = []
+    await voice.http.aclose()
+    voice.http = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: calls.append(req)))
+    try:
+        with pytest.raises(HTTPException) as error:
+            await voice.synthesize(full)
+        assert error.value.status_code == 413
+        assert calls == []
+    finally:
+        await voice.close()

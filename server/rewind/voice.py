@@ -57,6 +57,8 @@ AUDIO_TYPES = {
     "audio/aac": ".aac",
     "audio/flac": ".flac",
 }
+REVIEW_PENDING = "I'm checking the evidence before reading an answer."
+REVIEW_UNAVAILABLE = "I couldn't verify an answer yet. Please check the sources before relying on it."
 
 
 class SpeakRequest(BaseModel):
@@ -70,15 +72,27 @@ class VoiceAsk(BaseModel):
 
 
 def spoken_text(answer: str) -> str:
-    """The part of an answer worth reading aloud: first paragraph, no citations."""
-    text = re.sub(r"\[?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\]?", "", answer, flags=re.I)
-    text = re.sub(r"\[E[0-9]+\]", "", text)
-    first = text.strip().split("\n\n")[0]
+    """A short display preview. Reviewed speech uses reviewed_spoken_text."""
+    first = reviewed_spoken_text(answer).split("\n\n")[0]
     first = re.sub(r"\s+", " ", first).strip()
     if len(first) > 420:
         cut = first[:420]
         first = cut[: cut.rfind(". ") + 1] if ". " in cut else cut
     return first or "I couldn't find that in your day."
+
+
+def reviewed_spoken_text(answer: str) -> str:
+    """Remove citation markers without dropping factual qualifications."""
+    text = re.sub(r"\[?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\]?", "", answer, flags=re.I)
+    text = re.sub(r"\[E[0-9]+\]", "", text)
+    return text.strip() or "I couldn't find that in your day."
+
+
+def reviewed_answer(record: dict) -> bool:
+    review = record.get("verification") or {}
+    return record.get("mode") in {"verified", "insufficient"} and bool(
+        (review.get("receipt") or {}).get("claims_reviewed")
+    )
 
 
 class Voice:
@@ -161,7 +175,11 @@ class Voice:
     async def synthesize(self, text: str) -> Path:
         if not self.enabled:
             raise HTTPException(503, "Spoken replies need REWIND_DEEPGRAM_API_KEY.")
-        text = text.strip()[:1500]
+        text = text.strip()
+        if len(text) > 1500:
+            # The client can read the full reviewed answer with its browser
+            # voice. Truncating here could omit a later uncertainty statement.
+            raise HTTPException(413, "This reply is too long for server speech; use the browser voice.")
         path = self._cache_path(text)
         if path.is_file() and path.stat().st_size > 0:
             return path
@@ -237,22 +255,37 @@ def voice_router(voice: Voice, admin, max_bytes: int):
                     speech = None
             return {"answer": None, "spoken": reply, "speech_url": speech}
         record = await voice.memory.ask(question, body.after, body.before)
-        spoken = spoken_text(record["answer"])
+        if not reviewed_answer(record) and record.get("mode") != "no_evidence":
+            return {
+                "answer": record,
+                "spoken": REVIEW_PENDING if record.get("mode") == "checking" else REVIEW_UNAVAILABLE,
+                "speech_url": None,
+            }
+        spoken = reviewed_spoken_text(record["answer"])
         speech_url = None
         if voice.enabled:
             try:
                 await voice.synthesize(spoken)
-                speech_url = f"/api/voice/speech/{record['id']}"
+                # No-evidence is deterministic server guidance, not a reviewed
+                # factual answer. Keep its audio outside the reviewed-ID route.
+                speech_url = (
+                    "/api/voice/say?text=" + quote(spoken)
+                    if record.get("mode") == "no_evidence"
+                    else f"/api/voice/speech/{record['id']}"
+                )
             except HTTPException:
                 speech_url = None
         return {"answer": record, "spoken": spoken, "speech_url": speech_url}
 
     @router.get("/speech/{answer_id}")
     async def speech(answer_id: str):
-        row = voice.memory.db.one("SELECT answer FROM answers WHERE id=?", (answer_id,))
+        row = voice.memory.db.one("SELECT id,answer,mode FROM answers WHERE id=?", (answer_id,))
         if not row:
             raise HTTPException(404, "Answer not found")
-        path = await voice.synthesize(spoken_text(row["answer"]))
+        row["verification"] = voice.memory.verifier.public(answer_id) if voice.memory.verifier else None
+        if not reviewed_answer(row):
+            raise HTTPException(409, "This answer has not completed evidence review.")
+        path = await voice.synthesize(reviewed_spoken_text(row["answer"]))
         return FileResponse(path, media_type="audio/mpeg")
 
     @router.get("/filler")
@@ -269,7 +302,7 @@ def voice_router(voice: Voice, admin, max_bytes: int):
 
     @router.post("/speak")
     async def speak(body: SpeakRequest):
-        path = await voice.synthesize(spoken_text(body.text))
+        path = await voice.synthesize(reviewed_spoken_text(body.text))
         return Response(path.read_bytes(), media_type="audio/mpeg")
 
     return router

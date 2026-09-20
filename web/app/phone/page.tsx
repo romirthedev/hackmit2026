@@ -26,7 +26,12 @@ import {
   type Status,
 } from '@/lib/api';
 import { PhoneCapture, type CaptureState } from '@/lib/phone-capture';
-import { VoiceClient, type Exchange, type VoiceState } from '@/lib/voice';
+import {
+  VoiceClient,
+  isReviewedAnswer,
+  type Exchange,
+  type VoiceState,
+} from '@/lib/voice';
 import { ComputerPanel } from '@/components/computer-panel';
 import { ContextPanel } from '@/components/context-panel';
 import { PeoplePanel } from '@/components/people-panel';
@@ -722,7 +727,10 @@ export default function Phone() {
                     </small>
                     <button
                       aria-label="Read answer aloud"
-                      disabled={!item.spoken}
+                      disabled={
+                        !item.spoken ||
+                        (!!item.answer && !isReviewedAnswer(item.answer))
+                      }
                       onClick={() => {
                         voice.current?.unlock();
                         void voice.current?.say(item.spoken);
@@ -746,11 +754,10 @@ export default function Phone() {
                       </small>
                       <button
                         aria-label="Read answer aloud"
+                        disabled={!isReviewedAnswer(answer)}
                         onClick={() => {
                           voice.current?.unlock();
-                          void voice.current?.say(
-                            clean(answer.answer).split('\n\n')[0],
-                          );
+                          void voice.current?.say(clean(answer.answer));
                         }}
                       >
                         <Volume2 size={18} />

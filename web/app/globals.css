@@ -262,6 +262,18 @@
   padding: 18px;
   gap: 24px;
 }
+.login-page.qr-connect {
+  grid-template-columns: 1fr;
+}
+.qr-connect .login-form-side {
+  width: 100%;
+}
+.qr-connect output {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+}
 .login-story {
   position: relative;
   overflow: hidden;

@@ -135,3 +135,35 @@ and narrow phone layouts were inspected without horizontal overflow. Build,
 TypeScript, and scoped frontend lint passed. The backend was not changed or
 restarted. The live API still reported analysis unavailable, independently of
 voice playback; new model answers require the ASUS connection to recover.
+
+## Default-branch update and QR sign-in (September 20)
+
+Pulled `d7d1d27` from `master`, the repository's default branch (`main` does
+not exist). QR invitations now show a connecting screen while their one-use
+link is redeemed; they never ask for a second pairing code. Expired or used
+invitations explain that a fresh QR is needed. Temporary connection failures
+can retry the retained invitation, and connection attempts have a timeout.
+
+Six focused browser scenarios passed against a fresh disabled API: automatic
+redemption and persistent cookie, delayed redemption without a code form,
+used/expired/invalid invitations, redemption from an already signed-in browser,
+and retry after a connection failure. Run `scripts/run_qr_pairing_test.py` with
+`--client-dir` and `--node` as needed. No production ticket is used in fixtures.
+
+The upstream voice path needed its existing evidence-review requirement restored:
+server audio routes reject unreviewed answers, the browser waits for a matching
+reviewed result, and spoken answers retain uncertainty paragraphs. All 283 backend
+tests and seven focused VoiceClient checks passed. TypeScript, lint, and the
+production static build passed. The live configuration disables automatic demo
+mail templates so real scans cannot silently become example documents.
+
+Live model analysis remains unavailable while the ASUS connection is offline.
+The newly added remote mail parser also needs `DocumentScan` in the ASUS
+processing schema allowlist; that remote deployment was not performed here.
+
+The final public HTTPS check redeemed a separate disposable invitation in a
+fresh browser, reached Record without entering any code, removed the ticket from
+the URL, and remained signed in after reload. All four public pages and 21 linked
+assets returned 200; protected status, voice, and scan APIs returned 401 without
+a session. The API restarted while capture was idle and preserved all 311 saved
+samples. A different fresh invitation was then generated for the user's QR.

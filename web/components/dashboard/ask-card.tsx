@@ -11,12 +11,6 @@ import {
   type VoiceState,
 } from '@/lib/voice';
 
-const firstParagraph = (text: string) =>
-  text
-    .replace(/\[[0-9a-f-]{36}\]/gi, '')
-    .trim()
-    .split('\n\n')[0];
-
 export function AskCard({
   ask,
   answers,
@@ -76,12 +70,13 @@ export function AskCard({
     pending.current = true;
     setBusy(true);
     setError('');
-    if (voice && sound) void voice.filler();
     try {
-      const result = await ask(question);
-      setSubmitted(result);
+      if (voice) {
+        const result = await voice.ask(question);
+        setSubmitted(result.answer);
+        if (result.error) setError(result.error);
+      } else setSubmitted(await ask(question));
       setText('');
-      if (voice && sound) void voice.say(firstParagraph(result.answer));
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));
     } finally {

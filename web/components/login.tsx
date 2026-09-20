@@ -33,6 +33,13 @@ export default function Login() {
   const [connecting, setConnecting] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [remember, setRemember] = useState(true);
+  const [qrConnection] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.location.hash.startsWith('#connect='),
+  );
+  const [qrExpired, setQrExpired] = useState(false);
+  const qrTicket = useRef('');
   const linkStarted = useRef(false);
   const pending = useRef(false);
   const connect = useCallback(async (path: string, body: object) => {
@@ -40,13 +47,17 @@ export default function Login() {
     pending.current = true;
     setError('');
     setConnecting(true);
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), 15000);
     try {
       const r = await fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: abort.signal,
       });
       if (!r.ok) {
+        if ('ticket' in body && r.status === 401) setQrExpired(true);
         let detail = 'Unable to connect. Please try again.';
         try {
           const payload = (await r.json()) as { detail?: unknown };
@@ -57,10 +68,16 @@ export default function Login() {
       window.location.reload();
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : 'Unable to connect. Please try again.',
+        e instanceof Error && e.name === 'AbortError'
+          ? 'The connection timed out. Check your connection and try again.'
+          : e instanceof Error
+            ? e.message
+            : 'Unable to connect. Please try again.',
       );
       pending.current = false;
       setConnecting(false);
+    } finally {
+      clearTimeout(timeout);
     }
   }, []);
   useEffect(() => {
@@ -69,6 +86,7 @@ export default function Login() {
     if (!hash.startsWith('#connect=')) return;
     linkStarted.current = true;
     const ticket = hash.slice('#connect='.length);
+    qrTicket.current = ticket;
     // The invitation stays out of server logs, referrers, and subsequent browser history.
     window.history.replaceState(
       null,
@@ -78,6 +96,59 @@ export default function Login() {
     // oxlint-disable-next-line react/react-compiler -- Redeem the explicit sign-in link once.
     void connect('/api/pair', { ticket, remember: true });
   }, [connect]);
+  if (qrConnection)
+    return (
+      <main className="login-page qr-connect">
+        <div className="login-form-side">
+          <Card className="login-card pairing-login">
+            <Brand />
+            <h2 id="login-title">
+              {error
+                ? 'This QR code couldn’t connect.'
+                : 'Connecting your phone…'}
+            </h2>
+            {error ? (
+              <>
+                <p id="login-error" className="login-error" role="alert">
+                  {error}
+                </p>
+                <p>
+                  {qrExpired
+                    ? 'Create a new QR code on your computer and scan it again. No access code is needed.'
+                    : 'Check that your phone is online, then try again.'}
+                </p>
+                {!qrExpired && (
+                  <CatalogButton
+                    type="button"
+                    className="login-submit"
+                    disabled={connecting}
+                    onClick={() =>
+                      void connect('/api/pair', {
+                        ticket: qrTicket.current,
+                        remember: true,
+                      })
+                    }
+                  >
+                    Try connecting again
+                  </CatalogButton>
+                )}
+              </>
+            ) : (
+              <>
+                <output>
+                  <LoaderCircle size={20} className="spin" aria-hidden="true" />{' '}
+                  Opening your workspace securely.
+                </output>
+                <p>
+                  Your QR code signs you in automatically. No access code is
+                  needed.
+                </p>
+              </>
+            )}
+          </Card>
+        </div>
+      </main>
+    );
   return (
     <main className="login-page">
       <section className="login-story" aria-label="REWIND personal memory">

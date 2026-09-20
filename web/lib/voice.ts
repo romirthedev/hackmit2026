@@ -27,6 +27,29 @@ export type Exchange = {
 };
 type Listener = (state: VoiceState, exchange: Exchange | null) => void;
 
+export function isReviewedAnswer(answer: Answer | null) {
+  return (
+    !!answer &&
+    ['verified', 'insufficient'].includes(answer.mode) &&
+    answer.verification?.receipt?.claims_reviewed === true
+  );
+}
+
+function waitForReviewPoll(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const aborted = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Request stopped', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', aborted);
+      resolve();
+    }, 1250);
+    if (signal.aborted) aborted();
+    else signal.addEventListener('abort', aborted, { once: true });
+  });
+}
+
 // 50 ms of silence as a WAV blob. Playing it inside a tap unlocks audio
 // output on iOS, so later answers can start without another gesture.
 function silentWav(): Blob {
@@ -75,6 +98,13 @@ export class VoiceClient {
   private fillerFetch: Promise<void> | null = null;
   private generation = 0;
   private disposed = false;
+  private authExpired = false;
+  private askRequest: AbortController | null = null;
+  private authenticationRequired = () => {
+    this.authExpired = true;
+    this.stop();
+    this.set('idle', null);
+  };
   // When muted, answers still arrive as text; nothing is played.
   muted = false;
   setMuted(value: boolean) {
@@ -85,6 +115,7 @@ export class VoiceClient {
 
   constructor() {
     this.player.preload = 'auto';
+    window.addEventListener(AUTH_REQUIRED_EVENT, this.authenticationRequired);
     void api<VoiceStatus>('/voice/status')
       .then((status) => {
         this.status = status;
@@ -142,8 +173,9 @@ export class VoiceClient {
   }
 
   private async play(blob: Blob, generation: number): Promise<boolean> {
-    if (this.disposed || this.muted || generation !== this.generation)
-      return true;
+    if (this.disposed || this.authExpired || generation !== this.generation)
+      return false;
+    if (this.muted) return true;
     // Starting a new clip settles whatever was playing before it.
     this.activeFinish?.(false);
     const url = URL.createObjectURL(blob);
@@ -174,6 +206,8 @@ export class VoiceClient {
         typeof window === 'undefined' ||
         !window.speechSynthesis ||
         typeof SpeechSynthesisUtterance === 'undefined' ||
+        this.disposed ||
+        this.authExpired ||
         generation !== this.generation
       )
         return resolve(false);
@@ -196,6 +230,8 @@ export class VoiceClient {
   // Read text aloud: Deepgram if the server has it, otherwise the browser voice.
   async say(text: string): Promise<boolean> {
     const generation = ++this.generation;
+    this.askRequest?.abort();
+    if (this.disposed || this.authExpired) return false;
     const clean = text.replace(/\[[0-9a-f-]{36}\]/gi, '').trim();
     if (!clean) return false;
     this.set('speaking');
@@ -222,6 +258,7 @@ export class VoiceClient {
     if (!this.fillers.length) await this.prefetchFillers();
     if (!this.fillers.length) return false;
     const generation = ++this.generation;
+    this.askRequest?.abort();
     const ok = await this.play(
       this.fillers[Math.floor(Math.random() * this.fillers.length)],
       generation,
@@ -231,6 +268,7 @@ export class VoiceClient {
 
   stop() {
     this.generation++;
+    this.askRequest?.abort();
     this.activeFinish?.(false);
     try {
       this.player.pause();
@@ -273,6 +311,11 @@ export class VoiceClient {
   // Say a filler line, ask, then speak the answer.
   async ask(question: string, heard = question): Promise<Exchange> {
     const generation = ++this.generation;
+    this.askRequest?.abort();
+    const request = new AbortController();
+    this.askRequest = request;
+    const current = () =>
+      !this.disposed && !this.authExpired && generation === this.generation;
     const exchange: Exchange = {
       id: crypto.randomUUID(),
       heard,
@@ -281,6 +324,13 @@ export class VoiceClient {
       answer: null,
       at: Date.now() / 1000,
     };
+    const stopped = () => ({
+      ...exchange,
+      answer: null,
+      spoken: '',
+      error: 'This request was stopped.',
+    });
+    if (!current()) return stopped();
     this.set('thinking', exchange);
     const filler = this.fillers.length
       ? this.play(
@@ -288,40 +338,109 @@ export class VoiceClient {
           generation,
         )
       : Promise.resolve(false);
-    let reply: VoiceReply;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
-      reply = await api<VoiceReply>('/voice/ask', {
+      const reply = await api<VoiceReply>('/voice/ask', {
         method: 'POST',
         body: JSON.stringify({ question }),
+        signal: request.signal,
       });
-    } catch (problem) {
-      const error =
-        problem instanceof Error ? problem.message : String(problem);
-      const failed = { ...exchange, error, spoken: "Sorry, I couldn't check." };
-      if (generation === this.generation) this.set('idle', failed);
-      return failed;
-    }
-    exchange.spoken = reply.spoken;
-    exchange.answer = reply.answer;
-    if (generation !== this.generation) return exchange;
-    await filler;
-    if (generation !== this.generation) return exchange;
-    this.set('speaking', exchange);
-    let ok = false;
-    if (reply.speech_url) {
-      try {
-        ok = await this.play(
-          await fetchAudio(reply.speech_url.replace(/^\/api/, '')),
-          generation,
-        );
-      } catch {
-        ok = false;
+      if (!current() || request.signal.aborted) return stopped();
+      exchange.answer = reply.answer;
+      if (exchange.answer?.mode === 'checking') {
+        exchange.spoken = 'Checking the original evidence…';
+        this.set('thinking', { ...exchange });
+        timeout = setTimeout(() => {
+          timedOut = true;
+          request.abort();
+        }, 120000);
+        const id = exchange.answer.id;
+        while (exchange.answer.mode === 'checking') {
+          const answers = await api<Answer[]>('/answers', {
+            signal: request.signal,
+          });
+          if (!current() || request.signal.aborted) return stopped();
+          const answer = answers.find((item) => item.id === id);
+          if (answer) exchange.answer = answer;
+          if (exchange.answer.mode === 'checking')
+            await waitForReviewPoll(request.signal);
+        }
+        clearTimeout(timeout);
       }
+      if (!current() || request.signal.aborted) return stopped();
+      let speechUrl = reply.speech_url;
+      if (exchange.answer) {
+        if (isReviewedAnswer(exchange.answer)) {
+          // Speak the reviewed answer in full, including its uncertainty.
+          exchange.spoken = exchange.answer.answer
+            .replace(/\[[0-9a-f-]{36}\]/gi, '')
+            .trim();
+          speechUrl =
+            this.status?.deepgram === false
+              ? null
+              : `/api/voice/speech/${encodeURIComponent(exchange.answer.id)}`;
+        } else {
+          exchange.spoken =
+            exchange.answer.mode === 'no_evidence'
+              ? "I couldn't find recorded evidence to answer that."
+              : "I couldn't verify that answer. Please try again.";
+          exchange.error = 'The answer has not passed evidence review.';
+          speechUrl = null;
+        }
+      } else exchange.spoken = reply.spoken;
+      // A stalled filler must not indefinitely hold up a checked answer.
+      await Promise.race([
+        filler,
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ]);
+      if (!current() || request.signal.aborted) return stopped();
+      this.activeFinish?.(false);
+      this.player.pause();
+      this.set('speaking', { ...exchange });
+      let ok = false;
+      if (speechUrl) {
+        try {
+          ok = await this.play(
+            await fetchAudio(speechUrl.replace(/^\/api/, ''), {
+              signal: request.signal,
+            }),
+            generation,
+          );
+        } catch {
+          ok = false;
+        }
+      }
+      if (!current() || request.signal.aborted) return stopped();
+      if (!ok) ok = await this.browserSpeak(exchange.spoken, generation);
+      if (!current() || request.signal.aborted) return stopped();
+      if (!ok)
+        exchange.error =
+          'The checked response is ready, but voice playback is unavailable.';
+      this.set('idle', { ...exchange });
+      void this.prefetchFillers();
+      return exchange;
+    } catch (problem) {
+      if (!current()) return stopped();
+      const error = timedOut
+        ? 'Evidence review is taking longer than expected. Check your answer history or try again.'
+        : problem instanceof Error
+          ? problem.message
+          : String(problem);
+      const failed = {
+        ...exchange,
+        error,
+        spoken: timedOut
+          ? "The evidence check is still pending. I can't give a checked answer yet."
+          : "Sorry, I couldn't check that answer.",
+      };
+      this.set('idle', failed);
+      return failed;
+    } finally {
+      clearTimeout(timeout);
+      request.abort();
+      if (this.askRequest === request) this.askRequest = null;
     }
-    if (!ok) await this.browserSpeak(reply.spoken, generation);
-    if (generation === this.generation) this.set('idle', exchange);
-    void this.prefetchFillers();
-    return exchange;
   }
 
   // Hear a clip and, if it was meant for Rewind, answer it.
@@ -334,6 +453,10 @@ export class VoiceClient {
   dispose() {
     this.disposed = true;
     this.stop();
+    window.removeEventListener(
+      AUTH_REQUIRED_EVENT,
+      this.authenticationRequired,
+    );
     this.listeners.clear();
   }
 }
