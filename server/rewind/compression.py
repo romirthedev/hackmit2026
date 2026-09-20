@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 
 import httpx
@@ -66,7 +67,18 @@ class TextCompressor:
         self.s, self.provider = settings, provider
         self.kind = getattr(settings, "compressor", "none")
 
-    def audit(self, original, result, purpose, elapsed_ms, attempted=False):
+    def audit(
+        self,
+        original,
+        result,
+        purpose,
+        elapsed_ms,
+        attempted=False,
+        *,
+        batch_id=None,
+        batch_size=None,
+        field_index=None,
+    ):
         saved = (
             result.input_tokens - result.output_tokens
             if result.input_tokens is not None and result.output_tokens is not None
@@ -86,6 +98,16 @@ class TextCompressor:
                 "completion_tokens": result.output_tokens,
                 "total_ms": elapsed_ms,
                 "metadata": {
+                    **(
+                        {
+                            "batch_id": batch_id,
+                            "timing_scope": "batch_request_wall",
+                            "batch_size": batch_size,
+                            "field_index": field_index,
+                        }
+                        if batch_id is not None
+                        else {}
+                    ),
                     "purpose": purpose,
                     "error": result.error,
                     "request_attempted": attempted,
@@ -112,6 +134,22 @@ class TextCompressor:
                 },
             },
         )
+
+    def audit_batch(self, texts, results, purpose, elapsed_ms):
+        # One request may compress many fields. Preserve each tokenizer record
+        # without multiplying the request's wall time by its field count.
+        batch_id = str(uuid.uuid4())
+        for index, (text, result) in enumerate(zip(texts, results, strict=True)):
+            self.audit(
+                text,
+                result,
+                purpose,
+                elapsed_ms if index == 0 else None,
+                True,
+                batch_id=batch_id,
+                batch_size=len(texts),
+                field_index=index,
+            )
 
     @staticmethod
     def validate(original, output, input_tokens, output_tokens):
@@ -269,8 +307,8 @@ class TextCompressor:
                 batch_results = [
                     CompressedText(text, "fallback", error="llmlingua_remote_unavailable") for text in batch
                 ]
-            for text, result in zip(batch, batch_results, strict=True):
-                self.audit(text, result, purpose, (time.monotonic() - started) * 1000, True)
+            self.audit_batch(batch, batch_results, purpose, (time.monotonic() - started) * 1000)
+            for result in batch_results:
                 # A server-side timeout can leave its shielded CPU job running.
                 # Do not dispatch more work against that still-busy worker.
                 if result.error in {"llmlingua_timeout", "llmlingua_cpu_busy"}:
@@ -306,6 +344,5 @@ class TextCompressor:
             results = [CompressedText(text, "fallback", error="llmlingua_not_installed") for text in texts]
         except Exception:
             results = [CompressedText(text, "fallback", error="llmlingua_unavailable") for text in texts]
-        for text, result in zip(texts, results, strict=True):
-            self.audit(text, result, purpose, (time.monotonic() - started) * 1000, True)
+        self.audit_batch(texts, results, purpose, (time.monotonic() - started) * 1000)
         return results

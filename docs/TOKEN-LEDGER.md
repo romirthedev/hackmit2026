@@ -35,6 +35,14 @@ baseline and treatment runs establish measured token savings. A failed request
 still counts tokens when the runtime reports them. A telemetry failure does not
 discard an otherwise successful model answer or saved recording.
 
+The private ASUS service preserves measured usage in an error response when a
+model answer is truncated or invalid. Only telemetry crosses this error path;
+neither partial model text nor exception contents are returned. After the failed
+dense-caption trial, a separate regression probe on its retained original
+correctly recorded **316 prompt and 128 completion tokens** for a rejected answer.
+The original trial's five unmetered failures remain unknown; this probe does not
+retroactively replace them.
+
 `inference_seconds` sums possibly parallel request durations. It is neither GPU
 occupancy nor benchmark elapsed time. The illustrative cloud equivalent applies
 configurable [$0.40/M input, $0.10/M cached input, $1.60/M output reference rates](https://developers.openai.com/api/docs/models/gpt-4.1-mini)

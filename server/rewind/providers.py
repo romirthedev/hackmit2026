@@ -377,6 +377,13 @@ class Provider:
         )
         # Do not include URLs, credentials or recording contents in public errors.
         if response.status_code != 200:
+            if action == "structured" and payload.get("include_usage"):
+                try:
+                    usage = response.json().get("usage")
+                    if isinstance(usage, dict):
+                        self._runtime_usage.set(usage)
+                except (ValueError, AttributeError):
+                    pass
             raise RuntimeError(f"ASUS processing unavailable ({response.status_code}); recording retained")
         return response.json()
 

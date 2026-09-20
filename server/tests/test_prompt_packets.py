@@ -518,6 +518,15 @@ async def test_remote_llmlingua_batches_long_segment_lists_sequentially_and_in_o
         deadlines = [body["timeout_s"] for body in requests]
         assert all(left > right for left, right in zip(deadlines, deadlines[1:]))
         assert len(p.events) == count and all(e["metadata"]["request_attempted"] for e in p.events)
+        batches = {}
+        for event in p.events:
+            batches.setdefault(event["metadata"]["batch_id"], []).append(event)
+        assert len(batches) == len(requests)
+        for events in batches.values():
+            assert events[0]["total_ms"] is not None
+            assert all(event["total_ms"] is None for event in events[1:])
+            assert [event["metadata"]["field_index"] for event in events] == list(range(len(events)))
+            assert all(event["metadata"]["batch_size"] == len(events) for event in events)
     finally:
         await p.http.aclose()
 
@@ -605,6 +614,67 @@ async def test_remote_llmlingua_server_timeout_does_not_queue_more_cpu_work():
         assert len(requests) == 1 and [r.text for r in results] == texts
         assert all(r.error == "llmlingua_timeout" for r in results)
         assert not p.events[-1]["metadata"]["request_attempted"]
+    finally:
+        await p.http.aclose()
+
+
+@pytest.mark.parametrize("remote", [False, True])
+@pytest.mark.parametrize("failure", [False, True])
+async def test_llmlingua_batch_wall_time_counted_once_with_per_field_tokens_preserved(
+    monkeypatch, remote, failure
+):
+    import rewind.compression as compression
+
+    # Replace only this module's clock, not asyncio's event-loop clock.
+    ticks = iter(range(20))
+    monkeypatch.setattr(compression, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    monkeypatch.setattr(compression, "_LINGUA_JOB", None)
+    texts = ["First green cup.", "Second red cup.", "Third blue cup."]
+
+    def local_batch(model, received, rate):
+        assert received == texts
+        if failure:
+            raise ImportError("Private fixture detail must not be audited")
+        return [
+            {"compressed_prompt": text, "origin_tokens": 4 + index, "compressed_tokens": 4 + index}
+            for index, text in enumerate(received)
+        ]
+
+    async def remote_batch(route, body):
+        assert body["texts"] == texts
+        if failure:
+            raise TimeoutError("Private fixture detail must not be audited")
+        return {
+            "results": [
+                {"text": text, "status": "success", "input_tokens": 4 + index, "output_tokens": 4 + index}
+                for index, text in enumerate(body["texts"])
+            ]
+        }
+
+    def forbidden_local(*args):
+        raise AssertionError("Configured remote compression cannot run a local model")
+
+    monkeypatch.setattr(compression, "_lingua_batch", forbidden_local if remote else local_batch)
+    p = provider()
+    p.remote = remote_batch
+    try:
+        results = await TextCompressor(
+            settings(compressor="llmlingua", processing_url="http://asus.test" if remote else ""), p
+        ).many(texts, "recall")
+        assert [r.text for r in results] == texts
+        assert all(r.status == ("fallback" if failure else "success") for r in results)
+        assert len(p.events) == 3
+        assert [e["total_ms"] for e in p.events] == [1000, None, None]
+        assert sum(e["total_ms"] for e in p.events if e["total_ms"] is not None) == 1000
+        metadata = [event["metadata"] for event in p.events]
+        assert len({m["batch_id"] for m in metadata}) == 1
+        assert str(uuid.UUID(metadata[0]["batch_id"])) == metadata[0]["batch_id"]
+        assert all(m["timing_scope"] == "batch_request_wall" and m["batch_size"] == 3 for m in metadata)
+        assert [m["field_index"] for m in metadata] == [0, 1, 2]
+        assert all(m["request_attempted"] for m in metadata)
+        assert [e["prompt_tokens"] for e in p.events] == ([None] * 3 if failure else [4, 5, 6])
+        assert [e["completion_tokens"] for e in p.events] == ([None] * 3 if failure else [4, 5, 6])
+        assert "Private fixture" not in json.dumps(p.events)
     finally:
         await p.http.aclose()
 

@@ -70,6 +70,12 @@ unchanged text with an audited failure, never a Mac inference fallback.
 Long packets use sequential requests of at most 32 texts and 80,000 characters,
 sharing one packet deadline. Oversized individual texts and unattempted texts
 after that deadline remain unchanged and receive individual fallback records.
+Each attempted LLMLingua batch has a shared audit UUID, `batch_size`, zero-based
+`field_index`, and `timing_scope=batch_request_wall`. Only its first field records
+the batch's elapsed `total_ms`; other fields use null, while retaining their own
+token counts and status. This is batch request wall time, not per-field CPU time.
+Earlier R10 audit rows repeat batch time per field and remain unchanged; they do
+not establish isolated compressor CPU cost or a valid sum of compressor latency.
 Only one CPU batch can run at a time; a timed-out batch may finish in the
 background, while subsequent requests retain original text instead of adding work.
 The [official LLMLingua repository](https://github.com/microsoft/LLMLingua) documents

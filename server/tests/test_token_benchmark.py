@@ -70,6 +70,26 @@ def test_failed_compressor_cannot_be_reported_as_applied_savings():
     assert benchmark.compressor_execution([lingua], "bear2")["state"] == "not_executed_or_all_fallback"
 
 
+def test_resumed_failure_preserves_previous_artifacts(tmp_path):
+    previous = {"variant": "R5", "clip": "daylife", "exit_code": 1, "artifacts": "first-run"}
+    current = {"variant": "R10-llmlingua", "clip": "outdoor", "exit_code": 2, "artifacts": "later-run"}
+    benchmark.append_run_error(tmp_path, previous)
+    benchmark.append_run_error(tmp_path, current)
+    assert json.loads((tmp_path / "run-errors.json").read_text()) == [previous, current]
+
+
+def test_failed_or_unmetered_run_cannot_claim_token_savings():
+    baseline = {"scope": "frames_only", "observe_tokens": 100, "failures": 0}
+    failed = {"scope": "frames_only", "observe_tokens": 30, "failures": 1}
+    assert benchmark.token_comparison(failed, baseline) == (30, None)
+    assert benchmark.token_comparison({**failed, "observe_tokens": None}, baseline) == (None, None)
+    complete = {**failed, "failures": 0}
+    assert benchmark.token_comparison(complete, baseline) == (30, 70)
+    assert benchmark.token_comparison(complete, {**baseline, "failures": 1}) == (30, None)
+    unmetered = {"scope": "full_pipeline", "usage": {"total_tokens": 30, "unmetered_calls": 1}}
+    assert benchmark.token_comparison(unmetered, {"usage": {"total_tokens": 100}}) == (None, None)
+
+
 def test_frozen_manifest_excludes_invalidated_tongs_and_separates_synthetic():
     manifest = json.loads((ROOT / "docs/evaluations/token-savings-frozen.json").read_text())
     real = [clip for clip in manifest["clips"] if clip["cohort"] == "short_real_video"]

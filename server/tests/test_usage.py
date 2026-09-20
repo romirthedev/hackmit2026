@@ -210,6 +210,58 @@ async def test_invalid_output_still_records_actual_consumed_tokens(tmp_path):
     await provider.close()
 
 
+async def test_remote_rejected_output_preserves_consumed_tokens_without_leaking_content(tmp_path):
+    from rewind.processing import create_processing_app
+
+    leaf_settings = Settings(_env_file=None, local_inference_api="llamacpp", processing_token="t" * 32)
+    leaf = Provider(leaf_settings)
+    await leaf.http.aclose()
+    leaf.http = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"finish_reason": "length", "message": {"content": "private model fragment"}}
+                    ],
+                    "usage": {"prompt_tokens": 316, "completion_tokens": 128},
+                },
+            )
+        )
+    )
+    app = create_processing_app(leaf_settings, leaf)
+    client = Provider(
+        Settings(
+            _env_file=None,
+            data_dir=tmp_path,
+            usage_ledger=True,
+            processing_url="http://asus",
+            processing_token=leaf_settings.processing_token,
+        )
+    )
+    await client.http.aclose()
+    client.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app))
+    with pytest.raises(RuntimeError, match="502"):
+        await client.structured("test", "private source content", Observation, media_id="original-frame")
+    row = client.usage.db.one("SELECT * FROM usage")
+    assert row["status"] == "error" and row["prompt_tokens"] == 316 and row["completion_tokens"] == 128
+    assert row["media_id"] == "original-frame"
+    assert "private" not in json.dumps(row)
+    response = await client.http.post(
+        "http://asus/structured",
+        headers={"Authorization": "Bearer " + leaf_settings.processing_token},
+        json={
+            "system": "test",
+            "content": "private source content",
+            "schema_name": "Observation",
+            "include_usage": True,
+        },
+    )
+    assert response.status_code == 502 and "private" not in response.text
+    await client.close()
+    await leaf.close()
+
+
 @pytest.mark.parametrize("side", [448, 640])
 async def test_labeler_copy_changes_only_inference_resolution_and_keeps_original_identity(tmp_path, side):
     import hashlib

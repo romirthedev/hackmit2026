@@ -4,6 +4,19 @@ The flags are off by default. Originals, ingest hashes, and per-frame OpenCLIP
 retrieval remain available when a caption is reused. A reused caption is retrieval
 metadata, not an independent observation of the new frame.
 
+Research context (primary sources checked 2026-09-19):
+[TimeChat-Online](https://arxiv.org/abs/2504.17343) uses Differential Token Drop
+inside a streaming video model;
+[LongVU](https://arxiv.org/abs/2410.17434) combines redundant-frame selection with
+query-guided and temporal visual-feature compression. Their treatment of temporal
+redundancy motivates this experiment, but this implementation uses OpenCLIP
+similarity and local pixel differences to skip caption calls. It does not
+implement either paper's visual-token pruning or inherit their reported savings
+percentages. [LLMLingua-2](https://arxiv.org/abs/2403.12968) instead learns which
+text tokens to retain. Its actual CPU caption/transcript-compression trial is
+measured separately as R10; it leaves source media and reviewer evidence intact.
+Only this repository's paired measurements establish its savings and errors.
+
 ## Caption gate (Plan B)
 
 `REWIND_CHANGE_GATE=true` enables the gate. Defaults are cosine greater than

@@ -140,6 +140,36 @@ def valid_grades(run, manifest_hash, answer_hash):
     return {item["id"]: item for item in grading.get("questions", []) if isinstance(item.get("pass"), bool)}
 
 
+def append_run_error(output, error):
+    """Keep failures from earlier invocations when independently resuming a matrix."""
+    path = output / "run-errors.json"
+    errors = read(path, [])
+    errors.append(error)
+    path.write_text(json.dumps(errors, indent=2) + "\n")
+
+
+def token_comparison(row, baseline):
+    """Compare identical stages; incomplete or unmetered runs cannot claim savings."""
+    baseline = baseline or {}
+    if row["scope"].startswith("recall"):
+        tokens, comparison = row["recall_tokens"], baseline.get("recall_tokens")
+    elif row["scope"] == "frames_only":
+        tokens, comparison = row["observe_tokens"], baseline.get("observe_tokens")
+    else:
+        usage, baseline_usage = row["usage"], baseline.get("usage", {})
+        tokens = None if usage.get("unmetered_calls", 0) else usage.get("total_tokens")
+        comparison = None if baseline_usage.get("unmetered_calls", 0) else baseline_usage.get("total_tokens")
+    savings = (
+        comparison - tokens
+        if tokens is not None
+        and comparison is not None
+        and not row.get("failures")
+        and not baseline.get("failures")
+        else None
+    )
+    return tokens, savings
+
+
 def report(manifest, manifest_hash, output):
     rows = []
     all_grades = {}
@@ -230,17 +260,28 @@ def report(manifest, manifest_hash, output):
                     "observe_model_calls": observe.get("model_calls"),
                     "observe_avoided_calls": observe.get("avoided_calls"),
                     "observe_prefill_ms_mean": statistics.mean(prompt_times) if prompt_times else None,
+                    "observe_prefill_ms_sum": sum(prompt_times) if prompt_times else None,
                     "observe_cached_tokens": observe.get("cache_hit_tokens"),
                     "observe_cache_unmetered_calls": observe.get("cache_unmetered_calls"),
                     "cloud_equivalent": usage.get("cloud_equivalent"),
                     "pricing": usage.get("pricing"),
                     "latency_seconds": {"p50": percentile(latency, 0.5), "p95": percentile(latency, 0.95)},
+                    "workers": environment.get("workers"),
+                    "paced_frame_replay": environment.get("paced_frame_replay", False),
+                    "ingest_seconds": None if environment.get("reuse_ingest") else ingest.get("seconds"),
+                    "capture_to_result_seconds": ingest.get("capture_to_result_seconds"),
+                    "upload_seconds": ingest.get("upload_seconds"),
+                    "post_upload_drain_seconds": ingest.get("post_upload_drain_seconds"),
+                    "pending_at_first_post_upload_poll": ingest.get("pending_at_first_post_upload_poll"),
                     "frames_per_minute": None
                     if environment.get("reuse_ingest")
                     else ingest.get("frames_per_minute"),
                     "upload_to_event_p95": None
                     if environment.get("reuse_ingest")
                     else percentile(ingest.get("upload_to_event_seconds", []), 0.95),
+                    "upload_to_event_p50": None
+                    if environment.get("reuse_ingest")
+                    else percentile(ingest.get("upload_to_event_seconds", []), 0.5),
                     "structural_citations": {
                         "resolve": sum(
                             bool(q.get("checks", {}).get("inline_citations_resolve")) for q in questions
@@ -280,7 +321,7 @@ def report(manifest, manifest_hash, output):
                             isinstance(item.get("all_material_claims_supported"), bool)
                             for item in grades.values()
                         ),
-                        "rubric": "Exploratory after baseline; all material claims, including extra prose, must be supported. Separate from frozen-criterion pass.",
+                        "rubric": "Exploratory after baseline; all factual claims, including unsolicited details, must be supported. Separate from frozen-criterion pass.",
                     },
                 }
             )
@@ -349,6 +390,7 @@ def report(manifest, manifest_hash, output):
         "limitations": manifest["limitations"],
         "not_executed": not_executed,
         "run_conditions": conditions,
+        "run_errors": read(output / "run-errors.json", []),
     }
     (output / "report.json").write_text(json.dumps(result, indent=2) + "\n")
     lines = [
@@ -358,7 +400,7 @@ def report(manifest, manifest_hash, output):
         "",
         "Runtime conditions: "
         + (
-            "Production phone access overlapped the evaluation window; latency may include live workload contention. All calls are retained. See report.json run_conditions for timing and qualification."
+            "Runtime changes and possible external workload are logged. All calls are retained; see report.json run_conditions for actual overlap audits and qualifications."
             if conditions
             else "No external-workload condition has been recorded; absence of a log is not a hardware-isolation guarantee."
         ),
@@ -377,23 +419,7 @@ def report(manifest, manifest_hash, output):
         baseline = next(
             (item for item in rows if item["variant"] == "R0" and item["clip"] == row["clip"]), None
         )
-        tokens = (
-            row["recall_tokens"] if row["scope"].startswith("recall") else row["usage"].get("total_tokens")
-        )
-        comparison = (
-            baseline["recall_tokens"]
-            if baseline and row["scope"].startswith("recall")
-            else (baseline or {}).get("usage", {}).get("total_tokens")
-        )
-        if row["scope"] == "frames_only":
-            tokens = row["observe_tokens"]
-            comparison = (baseline or {}).get("observe_tokens")
-        elif not row["scope"].startswith("recall"):
-            if row["usage"].get("unmetered_calls", 0):
-                tokens = None
-            if (baseline or {}).get("usage", {}).get("unmetered_calls", 0):
-                comparison = None
-        saving = comparison - tokens if comparison is not None and tokens is not None else None
+        tokens, saving = token_comparison(row, baseline)
         accuracy = row["accuracy"]
         label = (
             f"{accuracy['passed']}/{accuracy['graded']} ({accuracy['grade_label']})"
@@ -411,6 +437,7 @@ def report(manifest, manifest_hash, output):
     lines += [
         "",
         "Frame-only rows compare the observe stage with R0 observe, not the whole pipeline. Recall-only rows compare recall+plan+verify with R0's same stages; previously paid ingestion is not counted as a saving.",
+        "Full-pipeline means ingestion plus raw Qwen recall in the default matrix; it does not include production Codex verification. Capture-to-result is unknown for imported synthetic timestamps; upload-to-event is a distinct measured delay.",
         "Whole-answer faithfulness is an additional exploratory rubric introduced after baseline inspection. It does not replace the frozen score, and unknown reviews are not failures or passes.",
         "",
         "| Configuration / clip | Observe calls / avoided | Frames/min | Upload-to-event p95 | Cached tokens | Mean prefill ms | Citation relevance | Correct abstention |",
@@ -479,6 +506,7 @@ def main():
     clips = [clip for clip in manifest["clips"] if not args.clips or clip["id"] in args.clips]
     if not clips:
         parser.error("No matching clips")
+    run_errors = []
     for variant in args.run or []:
         if variant in ("R3", "R4") and not (
             os.environ.get("REWIND_TTC_API_KEY") or dotenv_values(ROOT / ".env").get("REWIND_TTC_API_KEY")
@@ -546,9 +574,29 @@ def main():
                 command += ["--processing-env", str(args.processing_env)]
             if variant in ("R2", "R3", "R4", "R10-llmlingua"):
                 command += ["--reuse-ingest", str(baseline)]
-            subprocess.run(command, cwd=ROOT, check=True)
+            try:
+                subprocess.run(command, cwd=ROOT, check=True)
+            except subprocess.CalledProcessError as error:
+                run_errors.append(
+                    {
+                        "variant": variant,
+                        "clip": clip["id"],
+                        "exit_code": error.returncode,
+                        "artifacts": str(run),
+                    }
+                )
+                append_run_error(output, run_errors[-1])
+                report(manifest, manifest_hash, output)
+                if variant == "R0":
+                    raise
+                if variant == "R5":
+                    # Preserve this predeclared cap; do not silently tune after a failed dense run.
+                    break
+                continue
             report(manifest, manifest_hash, output)
     report(manifest, manifest_hash, output)
+    if run_errors:
+        raise SystemExit("Some variants failed; remaining independent runs completed. See run-errors.json.")
 
 
 if __name__ == "__main__":

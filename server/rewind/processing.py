@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .config import Settings
@@ -182,17 +183,27 @@ def create_processing_app(settings=None, provider=None):
                 decode(encoded, path, 2 * 1024 * 1024)
                 paths.append(path)
             async with gate.enter(body.recall):
-                result = await p.structured(
-                    body.system,
-                    body.content,
-                    schema,
-                    images=paths,
-                    vision=body.vision,
-                    recall=body.recall,
-                    max_tokens=body.max_tokens,
-                    image_labels=body.image_labels,
-                    cache_prompt=body.cache_prompt,
-                )
+                try:
+                    result = await p.structured(
+                        body.system,
+                        body.content,
+                        schema,
+                        images=paths,
+                        vision=body.vision,
+                        recall=body.recall,
+                        max_tokens=body.max_tokens,
+                        image_labels=body.image_labels,
+                        cache_prompt=body.cache_prompt,
+                    )
+                except Exception:
+                    if not body.include_usage:
+                        raise
+                    # A rejected/truncated answer still consumed runtime tokens.
+                    # Preserve only telemetry, never model output or exception text.
+                    return JSONResponse(
+                        status_code=502,
+                        content={"error": "model_request_failed", "usage": p.last_usage.get() or {}},
+                    )
             if body.include_usage:
                 return {"result": result.model_dump(), "usage": p.last_usage.get() or {}}
             return result.model_dump()

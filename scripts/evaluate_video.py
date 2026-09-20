@@ -237,7 +237,12 @@ def main():
                 "skip_recall": args.skip_recall,
                 "reuse_ingest": str(args.reuse_ingest) if args.reuse_ingest else None,
                 "remote_processing": bool(env["REWIND_PROCESSING_URL"]),
-                "measurement_note": "Offline bulk import, not sustained live capture; inference_seconds is summed call latency, not measured GPU utilization.",
+                "measurement_note": (
+                    "Paced offline frame replay, not live camera capture; "
+                    if args.pace
+                    else "Offline bulk import, not sustained live capture; "
+                )
+                + "inference_seconds is summed call latency, not measured GPU utilization.",
                 "packages": {
                     name: importlib.metadata.version(name) for name in ["av", "numpy", "faster-whisper"]
                 },
@@ -301,10 +306,14 @@ def main():
                         env=env,
                         check=True,
                     )
+                upload_finished = time.monotonic()
+                pending_after_upload = None
                 while True:
                     response = client.get("/api/status")
                     response.raise_for_status()
                     status = response.json()
+                    if pending_after_upload is None:
+                        pending_after_upload = status["pending"]
                     if not status["pending"] and (args.text_only or not status["visual_index"]["pending"]):
                         break
                     if time.monotonic() - started > args.timeout:
@@ -339,6 +348,15 @@ def main():
                     json.dumps(
                         {
                             "seconds": time.monotonic() - started,
+                            "upload_seconds": None if args.reuse_ingest else upload_finished - started,
+                            "post_upload_drain_seconds": None
+                            if args.reuse_ingest
+                            else time.monotonic() - upload_finished,
+                            "pending_at_first_post_upload_poll": None
+                            if args.reuse_ingest
+                            else pending_after_upload,
+                            "peak_pending_during_upload": None,
+                            "queue_sampling_note": "Queue status first polled after upload finishes; peak backlog during upload was not sampled.",
                             "status": status,
                             "jobs": jobs,
                             "frames_per_minute": sum(j["count"] for j in jobs if j["kind"] == "frame")
