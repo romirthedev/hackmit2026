@@ -62,9 +62,16 @@ window.probeApi=api;createRoot(document.getElementById('root')).render(<Phone/>)
           loader: "tsx",
           resolveDir: web,
         }));
-        build.onResolve({ filter: /^@\// }, (args) => ({
-          path: path.join(web, args.path.slice(2) + ".ts"),
-        }));
+        build.onResolve({ filter: /^@\// }, async (args) => {
+          const base = path.join(web, args.path.slice(2));
+          for (const extension of ["", ".ts", ".tsx", ".js", ".jsx", ".css", "/index.ts", "/index.tsx"]) {
+            const candidate = base + extension;
+            try {
+              if ((await fs.stat(candidate)).isFile()) return { path: candidate };
+            } catch {}
+          }
+          return { errors: [{ text: `Missing workspace import: ${args.path}` }] };
+        });
       },
     },
   ],

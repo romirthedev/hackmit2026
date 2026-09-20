@@ -38,6 +38,8 @@ stream. Current measured response times and device limitations are documented th
 | AI processing | One durable job per frame/audio clip; local Ollama vision and reasoning; faster-whisper transcription; optional OpenAI provider |
 | Recall | Full-text, optional text and OpenCLIP pixel retrieval, time filters, temporal anchors, original evidence, validated citations, evidence-only fallback |
 | Dashboard | Timeline replay, searchable recordings, original audio/image viewer, typed and spoken questions, answer playback, monitoring rules, alerts, device and storage health, deletion and metadata export |
+| Home dashboard (`/`) | Light card grid with personal and caretaker views backed by the current recording, answer, rule, alert, people, and Notch context APIs. Draft answers update after evidence review. Signed-out and disconnected states are explicit; no synthetic memories are substituted. Full controls remain at `/workspace`, including Mac commands, people, context, pairing, and measured usage. |
+| Phone (`/phone`) | The new light Record / Scan / Ask design retains continuous original video, durable retry queues, natural voice interaction, checked spoken answers, and Mac control. Scan captures a real camera frame and queues it durably; queued and server-saved states remain distinct. Sign-in expiry stops camera/microphone and polling while preserving local originals for reconnection. |
 | 3D | Separate, pinned LingBot-Map integration for a bounded static scan; point-cloud viewer and approximate observation markers |
 | Deployment | Native startup, Dockerfile/Compose, systemd template, optional Caddy HTTPS, provisioning, doctor, benchmark, video importer, continuous desktop microphone recorder |
 | Optional Elastic | Durable retrying event-index mirror. Core search and storage remain local SQLite; Elastic is not required and is not the current retrieval path. |
@@ -624,6 +626,19 @@ pio run -d firmware
 ```
 
 Backend tests cover real HTTP routes and database/file storage with injected deterministic inference: auth boundaries, cookies/CSRF, idempotency, conflicts, persistence, failed jobs, stale leases, per-frame processing, malformed uploads, disk limits, citations, temporal filters, audio questions, wake phrases, alert cooldowns, deletion, sequence gaps, and reconstruction export. Both firmware variants are compilation targets. Hardware radio/power/audio quality, ASUS model accuracy and GPU latency, Docker startup, and 20-hour endurance still require the actual setup.
+
+After building the UI, run `python scripts/run_ui_integration.py` with Node,
+Playwright (resolvable directly or through `NODE_PATH`), and Chrome installed.
+Use `--client-dir /path/to/staged/client` to test a staged build and
+`--node /path/to/node` if Node is outside `PATH`. `REWIND_TEST_CHROME` overrides
+the browser executable. The runner starts a fresh loopback API with inference,
+Notch, and processing workers disabled. It removes its temporary database on
+exit and keeps synthetic-media screenshots and results under
+`data/ui-integration/`. It never loads the production environment or recordings.
+Coverage includes real pairing, continuous originals, hands-free audio ingress,
+offline scan retry, answer-review transitions, citations, and auth expiry.
+AI review-state fixtures test UI behavior; they do not measure model accuracy.
+See the [UI integration report](docs/evaluations/UI-INTEGRATION-2026-09-19.md).
 
 A [real local video evaluation](docs/evaluations/YOUTUBE-VIDEO-2026-09-19.md) used Qwen2.5-VL 3B on an Apple M5 with 16 GiB RAM. All 19 sampled frames and the full audio track processed in approximately 5 minutes 48 seconds, but recall was unreliable: source-format errors, incorrect speech recognition, and unsupported details remained. This setup cannot sustain 1 fps analysis. Valid citations establish a link to a recording, **not that the answer is factually correct**. The report includes the unchanged baseline, follow-up run, exact scope, timings, and reproduction commands. `scripts/evaluate_recall.py` saves actual responses and checks source links without pretending to grade factual accuracy.
 

@@ -1,379 +1,806 @@
-.phone-shell {
-  max-width: 560px;
+/* Phone client. Builds on dashboard.css (.rw). The phone is for scanning,
+   recording and asking; the dashboard lives on the computer. */
+.rw.ph {
+  --fs: 1.06;
   min-height: 100dvh;
-  margin: auto;
-  padding: 22px 24px 36px;
-  color: #f3edf7;
-  font-family: Arial, sans-serif;
-  background:
-    radial-gradient(ellipse at 90% 0%, #281e34, transparent 40%), #100d15;
+  overflow-x: hidden;
 }
-.phone-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.rw.ph .ph-sheet {
+  transform-origin: 50% 0;
+}
+.rw.ph .ph-page {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 8px 20px 56px;
+}
+.rw.ph .greeting {
+  margin: 6px 0 30px;
+}
+.rw.ph .greeting h1 {
+  font-size: calc(21px * var(--fs));
+}
+.rw.ph .greeting p {
+  font-size: calc(13.5px * var(--fs));
+}
+.rw.ph .cell + .cell {
+  margin-top: 36px;
+}
+.rw.ph .cell {
+  animation-duration: 0.7s;
+}
+.rw.ph .rw-banner {
   margin-bottom: 24px;
 }
-.phone-header > a,
-.phone-header > button {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
+.rw.ph .rw-banner button {
   display: grid;
   place-items: center;
-  background: #201928;
-  border: 1px solid #372c42;
-  color: #bca8cc;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
 }
-.phone-wordmark {
-  font-size: 18px;
-  letter-spacing: -0.8px;
-}
-.phone-wordmark span {
-  color: #9a83af;
-  font-size: 13px;
-}
-.phone-header > button.sound-on {
-  background: #d2b5e8;
-  color: #32203f;
-}
-.phone-tabs {
+
+/* Header ---------------------------------------------------------------- */
+.rw.ph .ph-top {
+  max-width: 520px;
+  margin: 0 auto;
   display: flex;
-  background: #1c1524;
-  padding: 5px;
+  justify-content: space-between;
+  align-items: center;
+  padding: calc(18px + env(safe-area-inset-top)) 20px 18px;
+}
+.rw.ph .ph-memory {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px 0 9px;
+  border-radius: 999px;
+  background: #f2f2f4;
+  color: #6e6e73;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition:
+    background 0.4s,
+    color 0.4s;
+}
+.rw.ph .ph-memory .lucide {
+  width: 14px;
+  height: 14px;
+}
+.rw.ph .ph-memory.is-open {
+  background: var(--ink);
+  color: #fff;
+}
+
+/* Waiting ---------------------------------------------------------------- */
+.rw.ph .ph-wait {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  color: var(--muted);
+  text-align: center;
+}
+.rw.ph .ph-wait-mark {
+  width: 44px;
+  height: 44px;
   border-radius: 14px;
-  gap: 5px;
-  margin-bottom: 30px;
 }
-.phone-tabs button {
-  flex: 1;
-  border: none;
-  background: transparent;
-  color: #9e8fae;
-  font-size: 12px;
-  padding: 11px;
-  border-radius: 10px;
-  cursor: pointer;
+.rw.ph .ph-wait-mark .lucide {
+  width: 22px;
+  height: 22px;
 }
-.phone-tabs .selected {
-  background: #33243e;
-  color: #eddafc;
-  box-shadow: 0 1px 8px #0003;
+
+/* Up next ----------------------------------------------------------------- */
+.rw.ph .card-next .big-time {
+  margin: 0;
 }
-.phone-eyebrow {
-  font-size: 9px;
-  letter-spacing: 2px;
-  color: #b296c5;
+.rw.ph .next-text {
+  margin-top: 10px;
+  font-size: calc(14.5px * var(--fs));
+  color: var(--ink-2);
+  text-wrap: pretty;
 }
-.phone-intro h1 {
-  font-size: 33px;
-  font-weight: 400;
-  line-height: 1.18;
-  letter-spacing: -1.25px;
-  margin: 14px 0;
+
+/* Camera card: full-bleed media, title and glass controls over it ---------- */
+.rw.ph .card-media {
+  padding: 0;
+  color: #fff;
+  background: #0f1218;
 }
-.phone-intro h1 em {
-  font-family: Georgia, serif;
-  font-weight: 400;
-  color: #d9b8ee;
-}
-.phone-intro > p {
-  font-size: 13px;
-  line-height: 1.7;
-  color: #a99ab4;
-  margin-bottom: 24px;
-  max-width: 340px;
-}
-.phone-camera {
-  height: 235px;
-  border: 1px solid #43314e;
-  border-radius: 24px;
-  overflow: hidden;
+.rw.ph .cam {
   position: relative;
-  background: radial-gradient(ellipse at 35% 25%, #322139, #17111e 75%);
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 30% 10%, #2a3140 0%, #0f1218 70%);
 }
-.phone-camera video {
-  height: 100%;
-  width: 100%;
-  object-fit: cover;
-  display: block;
-}
-.phone-camera-empty {
+.rw.ph .cam video {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 15px;
-  color: #806c91;
-  font-size: 12px;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity 0.6s;
 }
-.phone-camera-status {
+.rw.ph .is-on .cam video {
+  opacity: 1;
+}
+.rw.ph .cam::after {
+  content: '';
   position: absolute;
-  bottom: 16px;
-  left: 18px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border-radius: 20px;
-  background: #100b17bf;
-  padding: 8px 10px;
-  font-size: 10px;
-  color: #c7b8d3;
-  backdrop-filter: blur(10px);
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 45%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+  pointer-events: none;
 }
-.phone-camera-status i {
+.rw.ph .media-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 16px 16px 20px;
+}
+.rw.ph .media-title {
+  font-weight: 600;
+  font-size: calc(16px * var(--fs));
+  letter-spacing: -0.01em;
+}
+.rw.ph .media-title small {
+  display: block;
+  font-weight: 400;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 2px;
+}
+.rw.ph .is-rec .media-title small::before {
+  content: '';
+  display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #7d7189;
+  background: #ff5f57;
+  margin-right: 6px;
+  vertical-align: 1px;
+  animation: blink 1.6s ease-in-out infinite;
 }
-.is-recording .phone-camera-status i {
-  background: #ef8195;
-  box-shadow: 0 0 8px #ff6e8c;
-}
-.phone-record-button {
-  width: 100%;
+.rw.ph .media-ctl {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 13px;
-  background: #dbbceb;
-  color: #322039;
-  border: 1px solid #eccffe;
-  border-radius: 17px;
-  margin-top: 18px;
-  padding: 19px;
-  font-size: 20px;
-  font-weight: 500;
-  box-shadow: 0 6px 30px #a873c22b;
-  cursor: pointer;
-}
-.phone-record-button.active {
-  background: #3a2235;
-  color: #efb4ce;
-  border-color: #75405a;
-}
-.phone-record-button:disabled {
-  opacity: 0.55;
-}
-.phone-capture-details {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  color: #b29ec0;
-  font-size: 10px;
-  margin: 12px 0 10px;
-}
-.phone-fine {
-  color: #85758f;
-  font-size: 10px;
-  line-height: 1.6;
-}
-.phone-error {
-  background: #351c28;
-  border: 1px solid #6d3444;
-  border-radius: 12px;
-  padding: 13px;
-  color: #ffc4cf;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.phone-ask {
-  margin-top: 32px;
-  border-top: 1px solid #322438;
-  padding-top: 24px;
-}
-.phone-ask h2 {
-  font-size: 19px;
-  font-weight: 400;
-  letter-spacing: -0.4px;
-  margin: 0 0 15px;
-}
-.phone-voice {
-  width: 100%;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: center;
-  padding: 15px;
-  border: 1px solid #665074;
-  border-radius: 15px;
-  background: #24182e;
-  color: #dbc1ef;
-  cursor: default;
-}
-.phone-voice.listening {
-  background: #512641;
-  border-color: #a35782;
-}
-.phone-voice:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.phone-ask form {
-  display: flex;
-  margin: 13px 0;
   gap: 8px;
-  padding: 8px;
-  background: #1d1526;
-  border: 1px solid #493351;
-  border-radius: 15px;
 }
-.phone-ask input {
-  min-width: 0;
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: #ecdaf6;
-  outline: none;
-  padding: 8px;
-  font-size: 12px;
+.rw.ph .media-ctl .gbtn {
+  height: 38px;
+  width: 38px;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.12);
 }
-.phone-ask form button {
-  background: #d9bae9;
-  border: none;
-  border-radius: 10px;
-  padding: 9px;
-  color: #33203e;
+.rw.ph .media-ctl .gbtn .lucide {
+  width: 15px;
+  height: 15px;
 }
-.phone-ask form button:disabled {
+.rw.ph .media-ctl .gbtn:disabled {
   opacity: 0.4;
 }
-.phone-answer {
-  background: #1a1322;
-  border: 1px solid #3e2c48;
-  border-radius: 18px;
-  padding: 20px;
-  margin-top: 16px;
+.rw.ph .rec-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
 }
-.phone-answer h3 {
-  font-size: 13px;
-  font-weight: 500;
-  color: #d8bfe8;
-  margin-bottom: 10px;
+.rw.ph .media-ctl .gbtn.is-rec {
+  background: #fff;
+  color: #0f1218;
+  border-color: transparent;
 }
-.phone-answer > p {
-  font-size: 14px;
-  line-height: 1.7;
-  color: #ece2f0;
+.rw.ph .media-ctl .gbtn.is-rec .lucide {
+  fill: currentColor;
+  width: 12px;
+  height: 12px;
 }
-.phone-answer > div {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 14px;
-}
-.phone-answer small {
-  color: #9781a8;
-  font-size: 10px;
-}
-.phone-answer button,
-.phone-reminder button {
-  border: none;
-  background: transparent;
-  color: #c9afd9;
-  cursor: pointer;
-  padding: 8px;
-}
-.phone-answer details {
-  font-size: 11px;
-  color: #bfa6d0;
+.rw.ph .scan-btn {
+  width: 100%;
+  height: 48px;
   margin-top: 12px;
+  justify-content: center;
+  gap: 9px;
+  background: var(--ink);
+  color: #fff;
+  font-size: calc(14.5px * var(--fs));
+  font-weight: 600;
 }
-.phone-answer details p {
-  white-space: pre-wrap;
-  max-height: 220px;
-  overflow: auto;
-  line-height: 1.6;
+.rw.ph .scan-btn:hover {
+  background: #2a2a2e;
 }
-.phone-answer details img {
-  max-width: 100%;
-  margin-top: 10px;
-  border-radius: 12px;
+.rw.ph .scan-btn:disabled {
+  color: rgba(255, 255, 255, 0.7);
 }
-.phone-answer details audio {
-  max-width: 100%;
+.rw.ph .scan-btn .lucide {
+  width: 16px;
+  height: 16px;
 }
-.phone-reminder {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: #263027;
-  border: 1px solid #45614b;
-  padding: 15px;
-  border-radius: 18px;
-  margin-bottom: 18px;
-  color: #c1dec2;
+
+/* Scan sweep -------------------------------------------------------------- */
+.rw.ph .sweep {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.05) 44%,
+        rgba(255, 255, 255, 0.75) 50%,
+        rgba(255, 255, 255, 0.05) 56%,
+        rgba(255, 255, 255, 0) 100%
+      )
+      0 -100% / 100% 60% no-repeat,
+    radial-gradient(
+        circle at 1px 1px,
+        rgba(255, 255, 255, 0.35) 1px,
+        transparent 1.5px
+      )
+      0 0 / 18px 18px;
 }
-.phone-reminder > div {
-  flex: 1;
+.rw.ph .is-scanning .sweep {
+  animation: sweep 0.95s cubic-bezier(0.45, 0, 0.2, 1) both;
 }
-.phone-reminder strong {
-  font-size: 11px;
-  letter-spacing: 0.3px;
-}
-.phone-reminder p {
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 4px 0 0;
-}
-.phone-footer {
-  font-size: 10px;
-  letter-spacing: 0.3px;
-  color: #725f80;
-  text-align: center;
-  margin-top: 35px;
-}
-.phone-shell button:focus-visible,
-.phone-shell a:focus-visible {
-  outline: 2px solid #e4c1ff;
-  outline-offset: 3px;
-}
-.phone-shell [hidden] {
-  display: none !important;
-}
-@media (min-width: 700px) {
-  .phone-shell {
-    margin: 35px auto;
-    border: 1px solid #3e2e48;
-    border-radius: 32px;
-    box-shadow: 0 24px 120px #0006;
+@keyframes sweep {
+  0% {
+    opacity: 0;
+    background-position:
+      0 -60%,
+      0 0;
   }
-}
-@media (max-width: 360px) {
-  .phone-shell {
-    padding: 18px;
+  15% {
+    opacity: 1;
   }
-  .phone-intro h1 {
-    font-size: 29px;
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    background-position:
+      0 160%,
+      0 0;
   }
 }
 
-.phone-computer {
-  padding-top: 24px;
+/* Ask card --------------------------------------------------------------- */
+.rw.ph .card-ask .card-title {
+  font-size: calc(17px * var(--fs));
 }
-.phone-permission {
-  border: 1px solid #c89a55;
+.rw.ph .ask-tools {
+  gap: 12px;
+}
+.rw.ph .ask-sound {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.5);
+}
+.rw.ph .ask-sound .lucide {
+  width: 15px;
+  height: 15px;
+}
+.rw.ph .ask-sound.is-on {
+  color: #5eead4;
+}
+.rw.ph .orb-stage:disabled {
+  cursor: default;
+}
+.rw.ph .ask-body {
+  min-height: 50px;
+}
+.rw.ph .ask-stack {
+  justify-content: center;
+  margin-top: 12px;
+}
+.rw.ph .ask-stack img {
+  border-color: #1c2536;
+}
+.rw.ph .ask-input {
+  height: 44px;
+}
+.rw.ph .ask-input input {
+  font-size: calc(14px * var(--fs));
+}
+.rw.ph .gbtn {
+  height: 44px;
+}
+.rw.ph .gbtn-round {
+  width: 44px;
+}
+.rw.ph .send {
+  width: 34px;
+  height: 34px;
+}
+.rw.ph .send:disabled {
+  opacity: 0.35;
+  transform: scale(0.9);
+}
+.rw.ph .last-answer {
+  margin: 12px 0 0 4px;
+}
+
+/* Hand-off ---------------------------------------------------------------- */
+.rw.ph .flight {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+.rw.ph .flight-tile {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  background: #fff;
+  box-shadow:
+    0 0 0 3px #fff,
+    0 24px 48px -18px rgba(0, 0, 0, 0.45);
+  will-change: transform, width, height;
+}
+.rw.ph .flight-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rw.ph .sweep {
+    display: none;
+  }
+}
+
+/* Camera off: keep the card light so the page is not three dark blocks. */
+.rw.ph .card-media:not(.is-on) {
+  color: var(--ink);
+  background: #fff;
+}
+.rw.ph .card-media:not(.is-on) .cam {
+  background: radial-gradient(120% 90% at 30% 10%, #f7f7f9 0%, #e9e9ee 70%);
+}
+.rw.ph .card-media:not(.is-on) .cam::after {
+  background: none;
+}
+.rw.ph .card-media:not(.is-on) .media-title small {
+  color: var(--muted);
+}
+.rw.ph .card-media:not(.is-on) .media-ctl .gbtn {
+  background: #fff;
+  color: var(--ink);
+  border-color: transparent;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 4px 12px -4px rgba(0, 0, 0, 0.18);
+}
+.rw.ph .card-media:not(.is-on) .sweep {
+  background:
+    linear-gradient(
+        180deg,
+        rgba(74, 174, 220, 0) 0%,
+        rgba(74, 174, 220, 0.04) 44%,
+        rgba(74, 174, 220, 0.55) 50%,
+        rgba(74, 174, 220, 0.04) 56%,
+        rgba(74, 174, 220, 0) 100%
+      )
+      0 -100% / 100% 60% no-repeat,
+    radial-gradient(
+        circle at 1px 1px,
+        rgba(0, 0, 0, 0.16) 1px,
+        transparent 1.5px
+      )
+      0 0 / 18px 18px;
+}
+.rw.ph .scan-btn {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.rw.ph .scan-btn:hover {
+  background: #fff;
+  box-shadow: var(--shadow-hover);
+}
+.rw.ph .scan-btn:disabled {
+  color: var(--muted);
+}
+
+/* Live controls and evidence share the light scanner design. */
+.rw.ph [hidden] {
+  display: none !important;
+}
+.rw.ph .phone-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 0 0 26px;
+  border-radius: 16px;
+  background: #eeeef1;
+}
+.rw.ph .phone-tabs button {
+  flex: 1;
+  min-height: 44px;
+  padding: 9px 5px;
+  border-radius: 12px;
+  font-size: 12px;
+  color: #55555e;
+}
+.rw.ph .phone-tabs .selected {
+  background: #fff;
+  color: #17171d;
+  box-shadow: 0 1px 6px #0001;
+}
+.rw.ph .ph-camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  color: #777781;
+  padding-bottom: 25px;
+  font-size: 13px;
+}
+.rw.ph .ph-camera-placeholder .lucide {
+  width: 30px;
+  height: 30px;
+}
+.rw.ph .phone-record-button {
+  width: 100%;
+  height: 54px;
+  margin-top: 14px;
+  justify-content: center;
+  gap: 10px;
+  background: #17171d;
+  color: #fff;
+  font-size: 17px;
+  border-radius: 18px;
+}
+.rw.ph .phone-record-button:hover {
+  background: #303039;
+}
+.rw.ph .phone-record-button.active {
+  background: #9f3432;
+}
+.rw.ph .phone-record-button:disabled {
+  background: #e2e2e6;
+  color: #5d5d66;
+}
+.rw.ph .phone-record-button .lucide {
+  width: 21px;
+  height: 21px;
+}
+.rw.ph .phone-capture-details {
+  margin-top: 12px;
+  color: #565661;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.rw.ph .phone-fine {
+  color: #62626c;
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 10px 0;
+}
+.rw.ph .phone-fine a {
+  color: #23638c;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.rw.ph .ph-originals summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.rw.ph .ph-voice-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #e7f5ff;
+  font-size: 13px;
+  text-align: center;
+  line-height: 1.5;
+}
+.rw.ph .card-ask .hint {
+  margin: 14px 0;
+}
+.rw.ph .ask-bar .ask-input {
+  width: 100%;
+}
+.rw.ph .ask-input input {
+  min-width: 0;
+  font-size: 16px;
+}
+.rw.ph .phone-answer {
+  background: #fff;
+  border: 1px solid #e5e5e9;
+  border-radius: 20px;
+  padding: 20px;
+  margin-top: 16px;
+  overflow-wrap: anywhere;
+}
+.rw.ph .phone-answer h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #41414a;
+  margin: 0 0 10px;
+}
+.rw.ph .phone-answer > p {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #24242c;
+  margin: 10px 0;
+}
+.rw.ph .phone-answer > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+.rw.ph .phone-answer small {
+  color: #65656f;
+  font-size: 11px;
+}
+.rw.ph .phone-answer button {
+  min-height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  color: #23638c;
+  padding: 10px;
+  border-radius: 12px;
+}
+.rw.ph .phone-answer button:disabled {
+  color: #a3a3ad;
+  cursor: default;
+}
+.rw.ph .phone-answer > strong {
+  display: block;
+  color: #79581d;
+  font-size: 13px;
+  margin: 12px 0;
+}
+.rw.ph .phone-answer details {
+  font-size: 12px;
+  color: #50505c;
+  margin-top: 12px;
+}
+.rw.ph .phone-answer summary {
+  cursor: pointer;
+  line-height: 1.5;
+  padding: 5px 0;
+}
+.rw.ph .phone-answer details p {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+  line-height: 1.7;
+  margin: 10px 0;
+}
+.rw.ph .phone-answer details img {
+  max-width: 100%;
+  border-radius: 12px;
+  margin-top: 10px;
+}
+.rw.ph .phone-answer details audio {
+  max-width: 100%;
+}
+.rw.ph .phone-footer {
+  margin-top: 36px;
+  text-align: center;
+  font-size: 12px;
+  color: #73737b;
+}
+.rw.ph .phone-footer a {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+}
+.rw.ph .phone-computer {
+  padding-top: 18px;
+}
+.rw.ph .phone-intro h1 {
+  font-size: 28px;
+  line-height: 1.25;
+  margin: 14px 0;
+}
+.rw.ph .phone-intro h1 em {
+  color: #46697c;
+  font-family: Georgia, serif;
+  font-weight: 400;
+}
+.rw.ph .phone-intro p {
+  color: #62626d;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.rw.ph .phone-computer form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #d7d7df;
+  border-radius: 16px;
+  background: #fff;
+}
+.rw.ph .phone-computer input {
+  min-width: 0;
+  width: 100%;
+  padding: 12px 6px;
+  color: #23232b;
+  outline: none;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+}
+.rw.ph .phone-computer form button {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 12px;
+  background: #e8edf3;
+  color: #244b65;
+}
+.rw.ph .phone-error {
+  color: #8a2a24;
+  background: #fff1f0;
+  border: 1px solid #efceca;
+  padding: 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.rw.ph .phone-permission {
+  border: 1px solid #ccb279;
   border-radius: 14px;
   padding: 16px;
   margin-top: 16px;
+  background: #fff9ed;
+  color: #504321;
 }
-.phone-permission pre {
+.rw.ph .phone-permission pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 12px;
   max-height: 240px;
   overflow: auto;
 }
-.phone-permission button {
-  padding: 12px 18px;
-  margin-right: 8px;
+.rw.ph .phone-permission button {
+  min-height: 44px;
+  padding: 12px 16px;
+  margin: 8px 8px 0 0;
+  border: 1px solid #ad975e;
+  border-radius: 12px;
+  color: #554721;
 }
-.phone-answer > strong {
+.rw.ph .context-panel,
+.rw.ph .people-panel {
+  color: #24242c;
+  background: #fff;
+  border-color: #e1e1e7;
+  box-shadow: var(--shadow);
+}
+.rw.ph .context-panel p,
+.rw.ph .people-panel p,
+.rw.ph .people-panel label {
+  color: #60606b;
+}
+.rw.ph .context-source,
+.rw.ph .context-document {
+  background: #f6f7fa;
+  color: #31313b;
+  border: 1px solid #dfe1e8;
+}
+.rw.ph .context-source strong,
+.rw.ph .context-empty h3 {
+  color: #31313b;
+}
+.rw.ph .context-source small,
+.rw.ph .context-help,
+.rw.ph .context-eyebrow,
+.rw.ph .context-legend,
+.rw.ph .context-disconnect,
+.rw.ph .context-graph-heading > span {
+  color: #626277;
+}
+.rw.ph .context-source {
+  display: flex;
+  padding: 15px;
+}
+.rw.ph .context-connect {
+  min-height: 48px;
+  border-radius: 14px;
+  background: #dde5f2;
+  color: #293f66;
+  padding: 12px;
+}
+.rw.ph .context-symbol {
+  background: #eeeaf8;
+  color: #645086;
+  border-color: #ddd4ed;
+}
+.rw.ph .context-graph {
+  background: #f7f5fb;
+  border-color: #ded8e8;
+}
+.rw.ph .context-graph text {
+  fill: #534761;
+}
+.rw.ph .context-empty {
+  border-color: #cec6d9;
+}
+.rw.ph .context-error,
+.rw.ph .people-panel .people-error {
+  color: #a2352d;
+}
+.rw.ph .people-panel button {
+  color: #314e38;
+  background: #eff5ee;
+  border: 1px solid #b1c3aa;
+  padding: 10px 12px;
+}
+.rw.ph .people-panel input,
+.rw.ph .people-panel select {
+  color: #252b24;
+  background: #fff;
+  border-color: #b9c4b5;
+}
+.rw.ph .people-panel label {
+  display: grid;
+  gap: 7px;
+}
+.rw.ph .people-panel .people-notice {
+  color: #3d6632;
+}
+.rw.ph .people-panel .people-possible {
+  color: #6a5a20;
+  background: #fff8df;
+}
+.rw.ph .people-panel .people-forget {
+  color: #963b31;
+}
+.rw.ph .people-panel .people-footnote {
+  color: #626e5c;
+}
+.rw.ph button:focus-visible,
+.rw.ph a:focus-visible,
+.rw.ph input:focus-visible,
+.rw.ph summary:focus-visible {
+  outline: 3px solid #4691bf;
+  outline-offset: 3px;
+}
+@media (max-width: 360px) {
+  .rw.ph .ph-page {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .rw.ph .phone-tabs button {
+    font-size: 11px;
+  }
+}
+
+.rw.ph .card-ask .hint {
+  color: #b9c5d4;
+}
+.rw.ph .ph-scan-notice {
   display: block;
-  color: #957038;
-  font-size: 13px;
-  margin: 12px 0;
 }

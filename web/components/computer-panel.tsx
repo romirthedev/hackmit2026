@@ -31,21 +31,30 @@ export function ComputerPanel({ visible }: { visible: boolean }) {
   useEffect(() => {
     if (!visible) return;
     let alive = true;
+    let loading = false;
+    const controller = new AbortController();
     const poll = async () => {
+      if (loading || !alive) return;
+      loading = true;
       try {
-        const next = await api<Snapshot>('/computer/state');
+        const next = await api<Snapshot>('/computer/state', {
+          signal: controller.signal,
+        });
         if (alive) {
           setState(next);
           setConnectionError('');
         }
       } catch (problem) {
         if (alive) setConnectionError(String(problem));
+      } finally {
+        loading = false;
       }
     };
     void poll();
     const timer = setInterval(() => void poll(), 1500);
     return () => {
       alive = false;
+      controller.abort();
       clearInterval(timer);
     };
   }, [visible]);
@@ -93,15 +102,17 @@ export function ComputerPanel({ visible }: { visible: boolean }) {
           <em>your computer.</em>
         </h1>
         <p>
-          Tell Notch what to do on your Mac. Type here, or use your phone
-          keyboard’s microphone to dictate.
+          Tell Notch what to do on your Mac. Type here, or speak naturally while
+          recording on your phone.
         </p>
       </div>
       <p className="phone-fine">
         {connectionError ||
           (state?.connected
             ? 'Connected to Notch on your Mac'
-            : 'Connecting to Notch…')}
+            : state
+              ? 'Notch is not connected to this workspace.'
+              : 'Connecting to Notch…')}
       </p>
       {state?.connected &&
         (!state.accessibility_granted || !state.screen_recording_granted) && (
@@ -121,7 +132,9 @@ export function ComputerPanel({ visible }: { visible: boolean }) {
         />
         <button
           aria-label="Send to Notch"
-          disabled={sending || !text.trim() || !!connectionError}
+          disabled={
+            sending || !text.trim() || !!connectionError || !state?.connected
+          }
         >
           <ArrowUp size={22} />
         </button>
@@ -135,14 +148,17 @@ export function ComputerPanel({ visible }: { visible: boolean }) {
         <article className="phone-answer" aria-live="polite">
           <div>
             <strong>{state.state}</strong>
-          {state.request_id && !['idle', 'responding', 'error'].includes(state.state) && (
-              <button
-                aria-label="Cancel Notch command"
-                onClick={() => void action('cancel', { id: state.request_id })}
-              >
-                <Square size={18} /> Stop
-              </button>
-            )}
+            {state.request_id &&
+              !['idle', 'responding', 'error'].includes(state.state) && (
+                <button
+                  aria-label="Cancel Notch command"
+                  onClick={() =>
+                    void action('cancel', { id: state.request_id })
+                  }
+                >
+                  <Square size={18} /> Stop
+                </button>
+              )}
           </div>
           <h3>{state.transcript}</h3>
           {state.steps?.map((step, i) => (

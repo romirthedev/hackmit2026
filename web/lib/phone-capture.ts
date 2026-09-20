@@ -1,5 +1,6 @@
 // Original chunks are persisted before upload. Retries keep the same sequence and bytes.
 import { VoiceActivityCapture, type VoiceActivity } from './voice-activity';
+import { AUTH_REQUIRED_EVENT } from './api';
 
 export type CaptureState = {
   recording: boolean;
@@ -14,7 +15,9 @@ export type CaptureState = {
   originalBytes: number;
   voice: VoiceActivity;
   speaking: boolean;
+  previewing: boolean;
 };
+export type Snapshot = { url: string; width: number; height: number };
 type Chunk = {
   id: string;
   boot: string;
@@ -44,6 +47,7 @@ const MAX_QUEUE_BYTES = 150 * 1024 * 1024;
 const STOP_QUEUE_BYTES = 120 * 1024 * 1024;
 const ORIGINAL_FRAGMENT_BYTES = 4 * 1024 * 1024;
 const activeOriginals = new Set<string>();
+const pageHidden = () => document.visibilityState === 'hidden';
 let dbPromise: Promise<IDBDatabase> | undefined;
 function database() {
   if (!dbPromise)
@@ -146,8 +150,14 @@ export class PhoneCapture {
     originalBytes: 0,
     voice: 'off',
     speaking: false,
+    previewing: false,
   };
   private stream: MediaStream | null = null;
+  private previewStream: MediaStream | null = null;
+  private previewBoot = '';
+  private previewSequence = 0;
+  private mediaGeneration = 0;
+  private mediaOpening = false;
   private wake: WakeLockSentinel | null = null;
   private audio: MediaRecorder | null = null;
   private original: MediaRecorder | null = null;
@@ -204,11 +214,14 @@ export class PhoneCapture {
     if (!this.disposed) this.changed(this.state);
   }
   private visibility = () => {
-    if (document.visibilityState === 'hidden' && this.state.recording) {
+    if (
+      pageHidden() &&
+      (this.state.recording || this.state.previewing || this.mediaOpening)
+    ) {
       this.stop('hidden');
       this.update({
         error:
-          'Recording paused because this page was hidden. Open the page and tap Record to continue.',
+          'Camera paused because this page was hidden. Open the page and tap Record or Scan to continue.',
       });
     }
   };
@@ -219,8 +232,17 @@ export class PhoneCapture {
     }
   };
   async start() {
-    if (this.state.recording || this.state.requesting || this.state.finalizing)
+    if (
+      this.disposed ||
+      this.state.recording ||
+      this.mediaOpening ||
+      this.state.finalizing
+    )
       return;
+    this.stopPreview();
+    const generation = ++this.mediaGeneration;
+    const current = () => !this.disposed && generation === this.mediaGeneration;
+    this.mediaOpening = true;
     this.update({ requesting: true, error: '' });
     try {
       try {
@@ -253,8 +275,14 @@ export class PhoneCapture {
         this.update({ voice: 'unavailable' });
       }
       await this.ready;
+      if (!current()) return;
       await database();
+      if (!current()) return;
       await this.acquireCaptureLease();
+      if (!current()) {
+        this.releaseStream();
+        return;
+      }
       // Another tab may have owned capture when this controller was created,
       // then disappeared. Reconcile its durable session only after acquiring
       // exclusive ownership; constructor-only recovery would miss this case.
@@ -265,6 +293,7 @@ export class PhoneCapture {
         });
         void this.upload();
       }
+      if (!current()) return;
       if (typeof MediaRecorder === 'undefined')
         throw new Error(
           'This browser cannot save full video recordings. Try current Safari or Chrome.',
@@ -273,7 +302,9 @@ export class PhoneCapture {
         throw new Error(
           'Open the secure HTTPS phone link to use the camera and microphone.',
         );
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      if (pageHidden())
+        throw new Error('Keep this page open to begin recording.');
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 1280 },
@@ -281,15 +312,17 @@ export class PhoneCapture {
         },
         audio: { echoCancellation: true, noiseSuppression: true },
       });
-      if (this.disposed) {
-        this.stream.getTracks().forEach((t) => t.stop());
+      if (!current()) {
+        stream.getTracks().forEach((t) => t.stop());
         this.releaseStream();
         return;
       }
-      if (document.visibilityState === 'hidden')
+      this.stream = stream;
+      if (pageHidden())
         throw new Error('Keep this page open to begin recording.');
       this.video.srcObject = this.stream;
       await this.video.play();
+      if (!current()) return;
       this.boot = crypto.randomUUID();
       this.seq = { frame: 0, audio: 0 };
       this.stream.getTracks().forEach((track) =>
@@ -304,6 +337,7 @@ export class PhoneCapture {
       );
       this.update({ recording: true, startedAt: Date.now(), originalBytes: 0 });
       await this.beginOriginal();
+      if (!current() || !this.state.recording) return;
       const voice = this.voice;
       if (voice && this.stream) {
         try {
@@ -311,6 +345,7 @@ export class PhoneCapture {
           // camera or restarting. The new microphone analyzer must inherit it.
           voice.suppress(this.speaking);
           await voice.start(this.stream);
+          if (!current() || !this.state.recording) return;
         } catch {
           voice.stop();
           this.voice = null;
@@ -343,16 +378,20 @@ export class PhoneCapture {
       this.beginAudio();
       void this.frame();
     } catch (error) {
+      if (!current()) return;
       this.stop('interrupted');
       this.update({
         error:
           error instanceof Error ? error.message : 'Unable to start recording.',
       });
     } finally {
+      this.mediaOpening = false;
       this.update({ requesting: false });
     }
   }
   stop(reason: EndReason = 'stopped') {
+    ++this.mediaGeneration;
+    this.closePreview();
     this.endReason = reason;
     this.update({ recording: false, question: false });
     this.voice?.stop();
@@ -377,6 +416,129 @@ export class PhoneCapture {
     this.video.srcObject = null;
     this.releaseCaptureLease?.();
     this.releaseCaptureLease = null;
+  }
+  private closePreview() {
+    const stream = this.previewStream;
+    stream?.getTracks().forEach((track) => track.stop());
+    this.previewStream = null;
+    if (stream && this.video.srcObject === stream) this.video.srcObject = null;
+    this.update({ previewing: false });
+  }
+  stopPreview() {
+    if (this.state.recording || this.state.finalizing) return;
+    ++this.mediaGeneration;
+    this.closePreview();
+  }
+  async preview(): Promise<boolean> {
+    if (this.state.recording || this.state.previewing) return true;
+    if (this.disposed || this.mediaOpening || this.state.finalizing)
+      return false;
+    const generation = ++this.mediaGeneration;
+    const current = () => !this.disposed && generation === this.mediaGeneration;
+    this.mediaOpening = true;
+    this.update({ requesting: true, error: '' });
+    let opened: MediaStream | null = null;
+    try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
+        throw new Error('Open the secure HTTPS phone link to use the camera.');
+      if (pageHidden())
+        throw new Error('Keep this page open to use the camera.');
+      opened = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      if (!current() || pageHidden()) return false;
+      this.previewStream = opened;
+      this.video.srcObject = opened;
+      await this.video.play();
+      if (!current() || pageHidden()) return false;
+      this.previewBoot = crypto.randomUUID();
+      this.previewSequence = 0;
+      opened.getTracks().forEach((track) =>
+        track.addEventListener('ended', () => {
+          if (this.previewStream === opened) {
+            this.stopPreview();
+            this.update({ error: 'Camera stopped. Open it again to scan.' });
+          }
+        }),
+      );
+      this.update({ previewing: true });
+      return true;
+    } catch (error) {
+      if (current())
+        this.update({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Unable to open the camera.',
+        });
+      return false;
+    } finally {
+      if (!current() || !this.state.previewing) {
+        opened?.getTracks().forEach((track) => track.stop());
+        if (this.previewStream === opened) this.closePreview();
+      }
+      this.mediaOpening = false;
+      this.update({ requesting: false });
+    }
+  }
+  async snap(): Promise<Snapshot | null> {
+    if (this.disposed || !(this.state.recording || this.state.previewing))
+      return null;
+    const generation = this.mediaGeneration;
+    try {
+      if (
+        this.video.readyState < 2 ||
+        !this.video.videoWidth ||
+        !this.video.videoHeight
+      )
+        throw new Error('The camera is still opening. Try Scan again.');
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(
+        1,
+        960 / Math.max(this.video.videoWidth, this.video.videoHeight),
+      );
+      canvas.width = Math.round(this.video.videoWidth * scale);
+      canvas.height = Math.round(this.video.videoHeight * scale);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Camera canvas unavailable.');
+      context.drawImage(this.video, 0, 0, canvas.width, canvas.height);
+      const at = Date.now() / 1000;
+      const identity = this.state.recording
+        ? { boot: this.boot, seq: this.seq.frame++ }
+        : { boot: this.previewBoot, seq: this.previewSequence++ };
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, 'image/jpeg', 0.82),
+      );
+      if (
+        !blob ||
+        this.disposed ||
+        generation !== this.mediaGeneration ||
+        pageHidden()
+      )
+        return null;
+      const saved = await this.enqueue('frame', blob, at, 'memory', identity);
+      if (!saved || this.disposed || generation !== this.mediaGeneration)
+        return null;
+      return {
+        url: URL.createObjectURL(blob),
+        width: canvas.width,
+        height: canvas.height,
+      };
+    } catch (error) {
+      if (!this.disposed && generation === this.mediaGeneration)
+        this.update({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'A camera frame could not be captured.',
+        });
+      return null;
+    }
   }
   private async acquireCaptureLease() {
     if (!navigator.locks) return;
@@ -457,7 +619,7 @@ export class PhoneCapture {
         offset += ORIGINAL_FRAGMENT_BYTES
       ) {
         const sequence = session.chunks++;
-        this.enqueue(
+        void this.enqueue(
           'video',
           event.data.slice(
             offset,
@@ -569,7 +731,7 @@ export class PhoneCapture {
     };
     rec.onstop = () => {
       if (parts.length)
-        this.enqueue(
+        void this.enqueue(
           'audio',
           new Blob(parts, { type: mime.split(';')[0] }),
           at,
@@ -610,7 +772,7 @@ export class PhoneCapture {
       const blob = await new Promise<Blob | null>((resolve) =>
         canvas.toBlob(resolve, 'image/jpeg', 0.82),
       );
-      if (blob) this.enqueue('frame', blob, at, 'memory', identity);
+      if (blob) void this.enqueue('frame', blob, at, 'memory', identity);
     } catch {
       this.update({ error: 'A camera frame could not be captured.' });
     }
@@ -624,7 +786,8 @@ export class PhoneCapture {
     intent: Chunk['intent'],
     identity: { boot: string; seq: number },
     session?: RecordingSession,
-  ) {
+  ): Promise<boolean> {
+    let saved = false;
     const item: Chunk = {
       id: crypto.randomUUID(),
       ...identity,
@@ -645,6 +808,7 @@ export class PhoneCapture {
             'Phone storage queue is full. Reconnect to upload saved recordings, then tap Record.',
           );
         await write(item, session);
+        saved = true;
         this.update({
           queued: pending.length + 1,
           originalBytes:
@@ -669,6 +833,7 @@ export class PhoneCapture {
           error: `A recording fragment could not be saved. Recording stopped to prevent further loss. ${String(error)}`,
         });
       });
+    return this.persist.then(() => saved);
   }
   async upload() {
     if (this.pumping || this.disposed) return;
@@ -709,6 +874,8 @@ export class PhoneCapture {
               body: item.blob,
               signal: AbortSignal.timeout(20000),
             });
+            if (response.status === 401)
+              window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
             if (!response.ok)
               throw new Error(
                 response.status === 401

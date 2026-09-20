@@ -96,6 +96,53 @@ def jpeg(color="red"):
     return buf.getvalue()
 
 
+def test_static_entry_routes_share_backend_without_bypassing_auth(tmp_path, monkeypatch):
+    public = tmp_path / "web/dist/client"
+    public.mkdir(parents=True)
+    for page in ("index", "phone", "workspace"):
+        (public / f"{page}.html").write_text(f"<html>{page} integration fixture</html>")
+    monkeypatch.chdir(tmp_path)
+    settings = Settings(
+        _env_file=None,
+        data_dir=tmp_path / "workspace-data",
+        admin_token=ADMIN,
+        device_token=DEVICE,
+        workers=0,
+        embeddings=False,
+        min_free_gb=0,
+    )
+    with TestClient(create_app(settings, FakeProvider())) as client:
+        for route, expected in (
+            ("/", "index"),
+            ("/phone", "phone"),
+            ("/phone/", "phone"),
+            ("/workspace", "workspace"),
+            ("/workspace/", "workspace"),
+        ):
+            response = client.get(route)
+            assert response.status_code == 200
+            assert response.text == f"<html>{expected} integration fixture</html>"
+        assert client.get("/api/status").status_code == 401
+        assert client.get("/api/status", headers={"Authorization": "Bearer " + ADMIN}).status_code == 200
+
+
+def test_disabled_analysis_is_not_reported_ready(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        data_dir=tmp_path,
+        admin_token=ADMIN,
+        device_token=DEVICE,
+        provider="disabled",
+        workers=0,
+        embeddings=False,
+        min_free_gb=0,
+    )
+    with TestClient(create_app(settings, FakeProvider())) as client:
+        status = client.get("/api/status", headers={"Authorization": "Bearer " + ADMIN}).json()
+        assert status["provider"] == "disabled"
+        assert status["analysis_ready"] is False
+
+
 def wav():
     b = io.BytesIO()
     with wave.open(b, "wb") as w:

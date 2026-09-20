@@ -1,0 +1,80 @@
+/* Shared Mac controls also work in the full workspace, outside the phone shell. */
+.workspace .phone-computer {
+  max-width: 760px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--card);
+}
+.workspace .phone-computer .phone-intro h1 {
+  margin: 12px 0;
+  font-size: 28px;
+}
+.workspace .phone-computer .phone-intro p,
+.workspace .phone-computer .phone-fine {
+  color: var(--muted-foreground);
+}
+.workspace .phone-computer form {
+  display: flex;
+  gap: 10px;
+  margin: 24px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--background);
+}
+.workspace .phone-computer input {
+  min-width: 0;
+  flex: 1;
+  padding: 10px;
+  color: var(--foreground);
+  background: transparent;
+  font-size: 16px;
+}
+.workspace .phone-computer button {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.workspace .phone-computer button:disabled {
+  opacity: 0.45;
+}
+.workspace .capture-actions > a {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.workspace .phone-computer .phone-answer {
+  padding: 18px 0;
+  border-top: 1px solid var(--border);
+}
+.workspace .phone-computer .phone-answer p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.workspace .phone-computer .phone-answer > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.workspace .phone-computer .phone-permission {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+.workspace .phone-computer .phone-permission pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+.workspace .phone-computer .phone-permission button {
+  margin: 10px 10px 0 0;
+}
+.workspace .phone-computer .phone-error {
+  color: var(--destructive);
+}
+.workspace .phone-computer .phone-fine {
+  margin: 12px 0;
+}

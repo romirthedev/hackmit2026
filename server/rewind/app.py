@@ -281,7 +281,7 @@ def create_app(settings=None, provider=None):
         totals["stored_bytes"] = retained_bytes(db)
         totals["provider"] = s.provider
         totals["processing_host"] = "ASUS via Tailscale" if s.processing_url else "server"
-        totals["analysis_ready"] = await p.ready() if s.processing_url else True
+        totals["analysis_ready"] = s.provider != "disabled" and (await p.ready() if s.processing_url else True)
         totals["verification_enabled"] = s.codex_verify
         totals["model"] = s.openai_model if s.provider == "openai" else s.vision_model
         totals["recall_model"] = (
@@ -682,6 +682,11 @@ def create_app(settings=None, provider=None):
         @app.get("/phone/", include_in_schema=False)
         async def phone_page():
             return FileResponse(public / "phone.html", media_type="text/html")
+
+        @app.get("/workspace", include_in_schema=False)
+        @app.get("/workspace/", include_in_schema=False)
+        async def workspace_page():
+            return FileResponse(public / "workspace.html", media_type="text/html")
 
         app.mount("/", StaticFiles(directory=public, html=True), name="dashboard")
     return app
